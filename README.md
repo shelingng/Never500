@@ -11,3 +11,4 @@ Sport Booking System
 ## For more infomation...
 Feel free to contact us!
 60123456789 (Chan)
+chan@gmail.com (Chan)
