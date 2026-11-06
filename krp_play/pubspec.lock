@@ -72,7 +72,7 @@ packages:
       sha256: e51d50bca3217c9a9fa2b41a30e4a38971133f5f9ec7a3d57bae095007f1d28e
       url: "https://pub.dev"
     source: hosted
-    version: "1.1.2"
+    version: "1.1.3"
   code_assets:
     dependency: transitive
     description:
@@ -292,17 +292,10 @@ packages:
     dependency: transitive
     description:
       name: meta
-<<<<<<< HEAD:krp_play/pubspec.lock
-      sha256: c82594181e3312f3d0695fc95aaaf7758d75b8d4ae2bbecf223b9fd5109a059d
-      url: "https://pub.dev"
-    source: hosted
-    version: "1.18.3"
-=======
       sha256: "307249ce4ff29d58a18e97f6345f539382eb9c9c29ecda628900f31de0443dd9"
       url: "https://pub.dev"
     source: hosted
     version: "1.19.0"
-<<<<<<< HEAD:never500/pubspec.lock
   mime:
     dependency: transitive
     description:
@@ -335,9 +328,6 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.11.0"
-=======
->>>>>>> origin/main:never500/pubspec.lock
->>>>>>> 328c6ae906e419ba1fa678a680f7d8523520fc45:krp_play/pubspec.lock
   path:
     dependency: transitive
     description:
@@ -502,8 +492,7 @@ packages:
       sha256: "277654b3034d17ac6f9f1cb5595db011b1d5d41e8806866db28e0abaa101c490"
       url: "https://pub.dev"
     source: hosted
-<<<<<<< HEAD:never500/pubspec.lock
-    version: "1.12.1"
+    version: "1.12.2"
   storage_client:
     dependency: transitive
     description:
@@ -512,9 +501,6 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.8.1"
-=======
-    version: "1.12.2"
->>>>>>> 328c6ae906e419ba1fa678a680f7d8523520fc45:krp_play/pubspec.lock
   stream_channel:
     dependency: transitive
     description:
@@ -647,17 +633,10 @@ packages:
     dependency: transitive
     description:
       name: vector_math
-<<<<<<< HEAD:krp_play/pubspec.lock
-      sha256: "1d774bbdf6b72a0b12122fc1560c9c2d2a67db5a4a4cc2bd8a5c990ab20e3188"
-      url: "https://pub.dev"
-    source: hosted
-    version: "2.4.0"
-=======
       sha256: fa49e1674cb84acb900141714e6c6e1f9ae099827c24d141430ff6819db4e1bc
       url: "https://pub.dev"
     source: hosted
     version: "2.4.4"
->>>>>>> origin/main:never500/pubspec.lock
   vm_service:
     dependency: transitive
     description:
@@ -715,10 +694,5 @@ packages:
     source: hosted
     version: "2.1.1"
 sdks:
-<<<<<<< HEAD:never500/pubspec.lock
-  dart: ">=3.13.0 <4.0.0"
-  flutter: ">=3.47.0"
-=======
   dart: ">=3.13.7 <4.0.0"
-  flutter: ">=3.18.0-18.0.pre.54"
->>>>>>> 328c6ae906e419ba1fa678a680f7d8523520fc45:krp_play/pubspec.lock
+  flutter: ">=3.47.0"

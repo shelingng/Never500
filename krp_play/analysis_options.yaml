@@ -18,15 +18,7 @@ analyzer:
     - linux/**
 include: package:flutter_lints/flutter.yaml
 
-analyzer:
-  exclude:
-    - build/**
-    - android/**
-    - ios/**
-    - web/**
-    - windows/**
-    - macos/**
-    - linux/**
+
 
 linter:
   # The lint rules applied to this project can be customized in the
