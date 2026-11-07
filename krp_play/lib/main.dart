@@ -1,8 +1,18 @@
 import 'screens/facilities_screen.dart';
 
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
-void main() {
+const _supabaseUrl = 'https://ckhpsnuiypxetkmigqua.supabase.co';
+const _supabasePublishableKey =
+    'sb_publishable_jByO0pC0UVwMS5Jr1v5jhQ_VaCx8NV5';
+
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await Supabase.initialize(
+    url: _supabaseUrl,
+    publishableKey: _supabasePublishableKey,
+  );
   runApp(const KrpPlayApp());
 }
 
