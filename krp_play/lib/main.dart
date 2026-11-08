@@ -1,27 +1,10 @@
-import 'screens/facilities_screen.dart';
-
 import 'package:flutter/material.dart';
+
+import 'models/student_account.dart';
+import 'screens/home_screen.dart';
 
 void main() {
   runApp(const KrpPlayApp());
-}
-
-class StudentAccount {
-  final String fullName;
-  final String email;
-  final String contact;
-  final String matric;
-  final String category;
-  final String password;
-
-  StudentAccount({
-    required this.fullName,
-    required this.email,
-    required this.contact,
-    required this.matric,
-    required this.category,
-    required this.password,
-  });
 }
 
 class KrpPlayApp extends StatefulWidget {
@@ -63,6 +46,13 @@ class _KrpPlayAppState extends State<KrpPlayApp> {
         useMaterial3: true,
         colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF173F32)),
         scaffoldBackgroundColor: const Color(0xFFF4F6F4),
+        cardTheme: CardThemeData(
+          color: Colors.white,
+          elevation: 0,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+          ),
+        ),
       ),
       home: currentAccount == null
           ? AuthScreen(accounts: accounts, onRegister: register, onLogin: login)
@@ -399,62 +389,6 @@ class _AuthScreenState extends State<AuthScreen> {
           }
           return null;
         },
-      ),
-    );
-  }
-}
-
-class HomeScreen extends StatelessWidget {
-  final StudentAccount account;
-  final VoidCallback onLogout;
-
-  const HomeScreen({super.key, required this.account, required this.onLogout});
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text(
-          'KRP PLAY',
-          style: TextStyle(fontWeight: FontWeight.bold),
-        ),
-        actions: [
-          IconButton(
-            onPressed: onLogout,
-            icon: const Icon(Icons.logout),
-            tooltip: 'Log out',
-          ),
-        ],
-      ),
-      body: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Welcome, ${account.fullName}!',
-              style: const TextStyle(fontSize: 25, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 8),
-            Text('Category: ${account.category}'),
-            const SizedBox(height: 24),
-            FilledButton.icon(
-              onPressed: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => FacilitiesScreen(
-                      category: account.category,
-                      email: account.email,
-                    ),
-                  ),
-                );
-              },
-              icon: const Icon(Icons.sports_tennis),
-              label: const Text('Book a Facility'),
-            ),
-          ],
-        ),
       ),
     );
   }
