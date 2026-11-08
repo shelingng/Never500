@@ -1,22 +1,47 @@
 import 'package:flutter/material.dart';
 
-import 'payment_screen.dart';
 import '../models/booking.dart';
 
 class PaymentScreen extends StatefulWidget {
   final Booking booking;
+  final VoidCallback? onPaymentComplete;
 
-  const PaymentScreen({super.key, required this.booking});
+  const PaymentScreen({
+    super.key,
+    required this.booking,
+    this.onPaymentComplete,
+  });
 
   @override
   State<PaymentScreen> createState() => _PaymentScreenState();
 }
 
 class _PaymentScreenState extends State<PaymentScreen> {
-  String selectedPaymentMethod = 'Online Banking';
+  String selectedPaymentMethod = 'FPX';
+  String? selectedBank;
   bool isProcessing = false;
 
   final Color primaryColor = const Color(0xFF173F32);
+
+  static const banks = [
+    'Maybank (Maybank2u / Maybank2e)',
+    'CIMB Bank (CIMB Clicks / CIMB BizChannel)',
+    'Public Bank',
+    'RHB Bank (RHB Reflex)',
+    'Hong Leong Bank (Hong Leong Connect)',
+    'Bank Islam',
+    'Bank Rakyat (Bank Kerjasama Rakyat Malaysia)',
+    'Bank Muamalat',
+    'Bank Simpanan Nasional (BSN)',
+    'Affin Bank',
+    'Alliance Bank',
+    'AmBank (AmOnline)',
+    'UOB (United Overseas Bank)',
+    'OCBC Bank',
+    'HSBC Bank',
+    'Agrobank',
+    'Bank of China',
+  ];
 
   void confirmPayment() {
     setState(() {
@@ -67,9 +92,9 @@ class _PaymentScreenState extends State<PaymentScreen> {
                       backgroundColor: primaryColor,
                     ),
                     onPressed: () {
-                      Navigator.of(context)
-                        ..pop()
-                        ..pop();
+                      Navigator.of(context).pop();
+                      Navigator.of(this.context).popUntil((route) => route.isFirst);
+                      widget.onPaymentComplete?.call();
                     },
                     child: const Text('Done'),
                   ),
@@ -88,8 +113,6 @@ class _PaymentScreenState extends State<PaymentScreen> {
 
     final date =
         '${booking.date.day}/${booking.date.month}/${booking.date.year}';
-
-    final isGym = booking.facilityName == 'KRP Gym';
 
     return Scaffold(
       appBar: AppBar(
@@ -140,10 +163,6 @@ class _PaymentScreenState extends State<PaymentScreen> {
 
                   _detailRow('Duration', '${booking.timeSlots.length} hour(s)'),
 
-                  if (isGym)
-                    _detailRow('Participants', '${booking.participants}'),
-
-                  _detailRow('Status', booking.status),
                 ],
               ),
             ),
@@ -175,9 +194,6 @@ class _PaymentScreenState extends State<PaymentScreen> {
                     'Number of sessions',
                     '${booking.timeSlots.length}',
                   ),
-
-                  if (isGym)
-                    _detailRow('Participants', '${booking.participants}'),
 
                   const Divider(height: 25),
 
@@ -218,22 +234,38 @@ class _PaymentScreenState extends State<PaymentScreen> {
           const SizedBox(height: 12),
 
           _paymentOption(
-            title: 'Online Banking',
+            title: 'FPX',
             subtitle: 'Pay through online banking',
             icon: Icons.account_balance,
           ),
 
           _paymentOption(
-            title: 'Debit / Credit Card',
-            subtitle: 'Pay using your bank card',
-            icon: Icons.credit_card,
-          ),
-
-          _paymentOption(
-            title: 'E-Wallet',
-            subtitle: 'Pay using an e-wallet',
+            title: "Touch 'n Go",
+            subtitle: "Pay using Touch 'n Go eWallet",
             icon: Icons.account_balance_wallet,
           ),
+
+          if (selectedPaymentMethod == 'FPX') ...[
+            const SizedBox(height: 8),
+            DropdownButtonFormField<String>(
+              initialValue: selectedBank,
+              isExpanded: true,
+              decoration: const InputDecoration(
+                labelText: 'Select your bank',
+                border: OutlineInputBorder(),
+              ),
+              items: banks
+                  .map(
+                    (bank) => DropdownMenuItem(value: bank, child: Text(bank)),
+                  )
+                  .toList(),
+              onChanged: (bank) {
+                setState(() {
+                  selectedBank = bank;
+                });
+              },
+            ),
+          ],
 
           const SizedBox(height: 25),
 
@@ -243,7 +275,11 @@ class _PaymentScreenState extends State<PaymentScreen> {
             child: FilledButton(
               style: FilledButton.styleFrom(backgroundColor: primaryColor),
 
-              onPressed: isProcessing ? null : confirmPayment,
+              onPressed:
+                  isProcessing ||
+                      (selectedPaymentMethod == 'FPX' && selectedBank == null)
+                  ? null
+                  : confirmPayment,
 
               child: isProcessing
                   ? const CircularProgressIndicator(color: Colors.white)

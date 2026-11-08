@@ -5,7 +5,6 @@ class Booking {
   final DateTime date;
   final List<String> timeSlots;
   final int pricePerSession;
-  final int participants;
   final int totalPrice;
   final String status;
 
@@ -16,7 +15,6 @@ class Booking {
     required this.date,
     required this.timeSlots,
     required this.pricePerSession,
-    required this.participants,
     required this.totalPrice,
     this.status = 'Pending',
   });
