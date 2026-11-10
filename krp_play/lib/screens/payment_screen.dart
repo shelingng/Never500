@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import 'payment_screen.dart';
 import '../models/booking.dart';
 
 class PaymentScreen extends StatefulWidget {
