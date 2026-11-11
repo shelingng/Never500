@@ -1,92 +1,84 @@
 import 'package:flutter/material.dart';
 import '../models/booking.dart';
 import '../services/booking_service.dart';
-import 'booking_confirm_screen.dart';
 
 class FacilitiesScreen extends StatefulWidget {
   final String category;
   final String email;
+  final String studentName;
 
   const FacilitiesScreen({
     super.key,
     required this.category,
     required this.email,
+    this.studentName = 'Yu Xiang',
   });
 
   @override
   State<FacilitiesScreen> createState() => _FacilitiesScreenState();
 }
 
-enum CourtStatus { available, booked, locked }
-
-class FacilitiesScreenStateModel {
-  final String name;
-  final CourtStatus status;
-  final String note;
-
-  const FacilitiesScreenStateModel({
-    required this.name,
-    required this.status,
-    required this.note,
-  });
-}
-
 class _FacilitiesScreenState extends State<FacilitiesScreen> {
+  // Navigation step in prototype:
+  // 1: Choose your sport
+  // 2: Choose your court (select date, time, hours + show court layout)
+  // 3: Review your booking (confirm page showing details)
+  // 4: Payment & booking status
+  int currentStep = 1;
+
   final Color primaryGreen = const Color(0xFF103B2B);
-  final Color accentLime = const Color(0xFFD2F865);
-  final Color subtleBorder = const Color(0xFFE9EFEA);
+  final Color subtleBorder = const Color(0xFFE2E8E4);
 
   String selectedSport = 'Badminton';
-  final List<String> sports = ['Badminton', 'Ping Pong', 'Snooker', 'Dart', 'Gym'];
+  String selectedCourt = 'Court 01';
 
-  int selectedDateIndex = 0;
-  String selectedTime = '7:00';
-  String selectedPeriod = 'PM';
-  int selectedDurationHours = 2; // Default 2 hours matching wireframe
+  DateTime selectedDate = DateTime(2026, 11, 14);
+  String selectedStartTime = '9:00 PM';
+  int selectedDurationHours = 1;
 
-  String? selectedCourtName = 'Court 1'; // Selected court
+  bool paymentCompleted = false;
+  String generatedBookingRef = 'DEMO-KRP-001';
 
-  final List<String> availableHours = [
-    '5:00',
-    '5:30',
-    '6:00',
-    '6:30',
-    '7:00',
-    '7:30',
-    '8:00',
-    '8:30',
-    '9:00',
-    '9:30',
-    '10:00',
+  final List<String> availableStartTimes = [
+    '5:00 PM',
+    '5:30 PM',
+    '6:00 PM',
+    '6:30 PM',
+    '7:00 PM',
+    '7:30 PM',
+    '8:00 PM',
+    '8:30 PM',
+    '9:00 PM',
+    '9:30 PM',
+    '10:00 PM',
   ];
 
-  DateTime get selectedDate =>
-      DateTime.now().add(Duration(days: selectedDateIndex));
+  static const List<String> monthNames = [
+    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+  ];
 
-  String get startTimeFormatted => '$selectedTime $selectedPeriod';
+  String get formattedDate =>
+      '${selectedDate.day} ${monthNames[selectedDate.month - 1]} ${selectedDate.year}';
 
-  List<String> get generatedTimeSlots {
-    final slots = <String>[];
+  String get calculatedEndTime {
     try {
-      final startMin = BookingService.minutesFor(startTimeFormatted);
-      for (int i = 0; i < selectedDurationHours; i++) {
-        final currentMin = startMin + (i * 60);
-        final hour24 = (currentMin ~/ 60) % 24;
-        final minute = currentMin % 60;
-        final period = hour24 >= 12 ? 'PM' : 'AM';
-        final hour12 = hour24 == 0
-            ? 12
-            : (hour24 > 12 ? hour24 - 12 : hour24);
-        final minStr = minute < 10 ? '0$minute' : '$minute';
-        slots.add('$hour12:$minStr $period');
-      }
+      final startMin = BookingService.minutesFor(selectedStartTime);
+      final endMin = startMin + (selectedDurationHours * 60);
+      final hour24 = (endMin ~/ 60) % 24;
+      final minute = endMin % 60;
+      final period = hour24 >= 12 ? 'PM' : 'AM';
+      final hour12 = hour24 == 0 ? 12 : (hour24 > 12 ? hour24 - 12 : hour24);
+      final minStr = minute < 10 ? '0$minute' : '$minute';
+      return '$hour12:$minStr $period';
     } catch (_) {
-      slots.add(startTimeFormatted);
+      return '10:00 PM';
     }
-    return slots;
   }
 
-  int get pricePerHour {
+  String get timeRangeString => '$selectedStartTime–$calculatedEndTime';
+
+  int get ratePerHour {
     if (widget.category == 'KRP Student') {
       switch (selectedSport) {
         case 'Badminton':
@@ -97,8 +89,6 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
           return 10;
         case 'Dart':
           return 3;
-        case 'Gym':
-          return 2;
         default:
           return 6;
       }
@@ -112,538 +102,171 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
           return 12;
         case 'Dart':
           return 5;
-        case 'Gym':
-          return 4;
         default:
           return 8;
       }
     }
   }
 
-  int get totalPrice => pricePerHour * selectedDurationHours;
-
-  List<FacilitiesScreenStateModel> get currentCourts {
-    final targetDate = selectedDate;
-    final slots = generatedTimeSlots;
-
-    if (selectedSport == 'Badminton') {
-      return [
-        _evaluateCourt('Court 1', 'Badminton Court 01', targetDate, slots),
-        _evaluateCourt('Court 2', 'Badminton Court 02', targetDate, slots),
-        const FacilitiesScreenStateModel(
-          name: 'Court 3',
-          status: CourtStatus.locked,
-          note: 'Locked for specific event',
-        ),
-      ];
-    } else if (selectedSport == 'Ping Pong') {
-      return [
-        _evaluateCourt('Table 1', 'Ping Pong Table 01', targetDate, slots),
-        _evaluateCourt('Table 2', 'Ping Pong Table 02', targetDate, slots),
-        const FacilitiesScreenStateModel(
-          name: 'Table 3',
-          status: CourtStatus.locked,
-          note: 'Locked for specific event',
-        ),
-      ];
-    } else if (selectedSport == 'Snooker') {
-      return [
-        _evaluateCourt('Table 1', 'Snooker Table', targetDate, slots),
-      ];
-    } else if (selectedSport == 'Dart') {
-      return [
-        _evaluateCourt('Board 1', 'Dart Board', targetDate, slots),
-      ];
-    } else {
-      return [
-        _evaluateCourt('Gym Session', 'KRP Gym', targetDate, slots),
-      ];
-    }
-  }
-
-  FacilitiesScreenStateModel _evaluateCourt(
-    String displayName,
-    String facilityFullName,
-    DateTime date,
-    List<String> slots,
-  ) {
-    if (BookingService.instance.isFacilityLocked(facilityFullName)) {
-      return FacilitiesScreenStateModel(
-        name: displayName,
-        status: CourtStatus.locked,
-        note: BookingService.instance.getLockReason(facilityFullName),
-      );
-    }
-
-    final isAvailable = BookingService.instance.areAllSlotsAvailable(
-      facilityName: facilityFullName,
-      date: date,
-      timeSlots: slots,
-    );
-
-    if (isAvailable) {
-      return FacilitiesScreenStateModel(
-        name: displayName,
-        status: CourtStatus.available,
-        note: 'can be book',
-      );
-    } else {
-      return FacilitiesScreenStateModel(
-        name: displayName,
-        status: CourtStatus.booked,
-        note: 'booked by other player',
-      );
-    }
-  }
-
-  String get facilityFullNameForSelection {
-    if (selectedSport == 'Badminton') {
-      if (selectedCourtName == 'Court 2') return 'Badminton Court 02';
-      return 'Badminton Court 01';
-    } else if (selectedSport == 'Ping Pong') {
-      if (selectedCourtName == 'Table 2') return 'Ping Pong Table 02';
-      return 'Ping Pong Table 01';
-    } else if (selectedSport == 'Snooker') {
-      return 'Snooker Table';
-    } else if (selectedSport == 'Dart') {
-      return 'Dart Board';
-    } else {
-      return 'KRP Gym';
-    }
-  }
+  int get totalAmount => ratePerHour * selectedDurationHours;
 
   @override
   Widget build(BuildContext context) {
-    final courts = currentCourts;
-
-    // Reset selection if current selected court is not available
-    final selectedCourtModel = courts.firstWhere(
-      (c) => c.name == selectedCourtName,
-      orElse: () => courts.first,
-    );
-
-    final canProceed = selectedCourtModel.status == CourtStatus.available;
-
     return Scaffold(
       backgroundColor: const Color(0xFFF7F9F7),
       appBar: AppBar(
-        backgroundColor: Colors.white,
-        foregroundColor: primaryGreen,
+        backgroundColor: primaryGreen,
+        foregroundColor: Colors.white,
         elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new, size: 20),
-          onPressed: () => Navigator.of(context).pop(),
+          icon: const Icon(Icons.arrow_back_ios_new, size: 18),
+          onPressed: () {
+            if (currentStep > 1 && !paymentCompleted) {
+              setState(() => currentStep -= 1);
+            } else {
+              Navigator.of(context).pop();
+            }
+          },
         ),
-        title: const Text(
-          'Book Facility',
-          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+        title: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            const Text(
+              'KRP PLAY',
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 16,
+                letterSpacing: 0.5,
+              ),
+            ),
+            Text(
+              'Student view',
+              style: TextStyle(
+                fontSize: 12,
+                color: Colors.white.withValues(alpha: 0.8),
+                fontWeight: FontWeight.normal,
+              ),
+            ),
+          ],
         ),
       ),
-      body: Stack(
-        children: [
-          ListView(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 120),
-            children: [
-              // BOX 1: USER & SPORT SELECTION
-              Container(
-                padding: const EdgeInsets.all(18),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: subtleBorder),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(
-                          'Welcome, ${widget.email.split('@').first}',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                            color: primaryGreen,
-                          ),
-                        ),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 10, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFE8F6C8),
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: Text(
-                            widget.category,
-                            style: TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.bold,
-                              color: primaryGreen,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 14),
-                    const Text(
-                      'Choose your sport',
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      child: Row(
-                        children: sports.map((sport) {
-                          final isSelected = selectedSport == sport;
-                          return Padding(
-                            padding: const EdgeInsets.only(right: 8),
-                            child: ChoiceChip(
-                              label: Text(sport),
-                              selected: isSelected,
-                              selectedColor: primaryGreen,
-                              backgroundColor: Colors.white,
-                              labelStyle: TextStyle(
-                                color: isSelected ? Colors.white : primaryGreen,
-                                fontWeight: FontWeight.bold,
-                              ),
-                              side: BorderSide(
-                                color: isSelected ? primaryGreen : const Color(0xFFD2DCD4),
-                              ),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(20),
-                              ),
-                              onSelected: (_) {
-                                setState(() {
-                                  selectedSport = sport;
-                                  selectedCourtName = sport == 'Badminton' ? 'Court 1' : 'Table 1';
-                                });
-                              },
-                            ),
-                          );
-                        }).toList(),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-
-              const SizedBox(height: 18),
-
-              // BOX 2: SPORT COURT LAYOUT
-              Container(
-                padding: const EdgeInsets.all(18),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: subtleBorder),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Layout title matching wireframe
-                    Text(
-                      '$selectedSport Court Layout',
-                      style: TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
-                        color: primaryGreen,
-                      ),
-                    ),
-                    const SizedBox(height: 14),
-
-                    // Date Selector
-                    const Text(
-                      'Select Date',
-                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
-                    ),
-                    const SizedBox(height: 8),
-                    SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      child: Row(
-                        children: List.generate(7, (index) {
-                          final date = DateTime.now().add(Duration(days: index));
-                          final isSelected = selectedDateIndex == index;
-                          final dayLabel = index == 0
-                              ? 'Today'
-                              : ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][date.weekday - 1];
-
-                          return Padding(
-                            padding: const EdgeInsets.only(right: 8),
-                            child: InkWell(
-                              onTap: () {
-                                setState(() {
-                                  selectedDateIndex = index;
-                                });
-                              },
-                              borderRadius: BorderRadius.circular(12),
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 14, vertical: 8),
-                                decoration: BoxDecoration(
-                                  color: isSelected ? primaryGreen : const Color(0xFFF7F9F7),
-                                  borderRadius: BorderRadius.circular(12),
-                                  border: Border.all(
-                                    color: isSelected ? primaryGreen : subtleBorder,
-                                  ),
-                                ),
-                                child: Column(
-                                  children: [
-                                    Text(
-                                      dayLabel,
-                                      style: TextStyle(
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.bold,
-                                        color: isSelected ? Colors.white : Colors.grey.shade600,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 2),
-                                    Text(
-                                      '${date.day}/${date.month}',
-                                      style: TextStyle(
-                                        fontSize: 13,
-                                        fontWeight: FontWeight.bold,
-                                        color: isSelected ? Colors.white : primaryGreen,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          );
-                        }),
-                      ),
-                    ),
-
-                    const SizedBox(height: 16),
-
-                    // Time Selection Controls with dropdowns (wireframe: [ 7.00 v ] [ a.m. v ] [ 2 v ] hours)
-                    Row(
-                      children: [
-                        const Text(
-                          'Select time : ',
-                          style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
-                        ),
-                        Text(
-                          '(:00 or :30 only)',
-                          style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      crossAxisAlignment: WrapCrossAlignment.center,
-                      children: [
-                        // Hour dropdown [ 7:00 v ]
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10),
-                          decoration: BoxDecoration(
-                            border: Border.all(color: subtleBorder),
-                            borderRadius: BorderRadius.circular(10),
-                            color: const Color(0xFFF9FAF9),
-                          ),
-                          child: DropdownButton<String>(
-                            value: selectedTime,
-                            underline: const SizedBox(),
-                            items: availableHours.map((h) {
-                              return DropdownMenuItem(value: h, child: Text(h));
-                            }).toList(),
-                            onChanged: (val) {
-                              if (val != null) {
-                                setState(() => selectedTime = val);
-                              }
-                            },
-                          ),
-                        ),
-
-                        // Period dropdown [ PM v ]
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10),
-                          decoration: BoxDecoration(
-                            border: Border.all(color: subtleBorder),
-                            borderRadius: BorderRadius.circular(10),
-                            color: const Color(0xFFF9FAF9),
-                          ),
-                          child: DropdownButton<String>(
-                            value: selectedPeriod,
-                            underline: const SizedBox(),
-                            items: const [
-                              DropdownMenuItem(value: 'PM', child: Text('p.m.')),
-                              DropdownMenuItem(value: 'AM', child: Text('a.m.')),
-                            ],
-                            onChanged: (val) {
-                              if (val != null) {
-                                setState(() => selectedPeriod = val);
-                              }
-                            },
-                          ),
-                        ),
-
-                        // Duration dropdown [ 2 v ] hours
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10),
-                          decoration: BoxDecoration(
-                            border: Border.all(color: subtleBorder),
-                            borderRadius: BorderRadius.circular(10),
-                            color: const Color(0xFFF9FAF9),
-                          ),
-                          child: DropdownButton<int>(
-                            value: selectedDurationHours,
-                            underline: const SizedBox(),
-                            items: const [
-                              DropdownMenuItem(value: 1, child: Text('1 hr')),
-                              DropdownMenuItem(value: 2, child: Text('2 hrs')),
-                            ],
-                            onChanged: (val) {
-                              if (val != null) {
-                                setState(() => selectedDurationHours = val);
-                              }
-                            },
-                          ),
-                        ),
-                      ],
-                    ),
-
-                    const SizedBox(height: 20),
-
-                    // STATUS LEGEND
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceAround,
-                      children: [
-                        _legendItem('Can be book', const Color(0xFF2E7D32)),
-                        _legendItem('Booked', const Color(0xFFD32F2F)),
-                        _legendItem('Locked (Event)', const Color(0xFF757575)),
-                      ],
-                    ),
-
-                    const Divider(height: 28),
-
-                    // VISUAL COURTS LAYOUT (Matching wireframe!)
-                    SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: courts.map((court) {
-                          final isSelected = selectedCourtName == court.name &&
-                              court.status == CourtStatus.available;
-
-                          return Padding(
-                            padding: const EdgeInsets.only(right: 14),
-                            child: _buildCourtVisualCard(court, isSelected),
-                          );
-                        }).toList(),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
+      body: Center(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 520),
+            child: _buildCurrentStepCard(),
           ),
+        ),
+      ),
+    );
+  }
 
-          // STICKY BOTTOM BAR ("Proceed to Confirm")
-          Positioned(
-            left: 0,
-            right: 0,
-            bottom: 0,
-            child: Container(
-              padding: const EdgeInsets.all(18),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.08),
-                    blurRadius: 10,
-                    offset: const Offset(0, -4),
+  Widget _buildCurrentStepCard() {
+    switch (currentStep) {
+      case 1:
+        return _buildStep1ChooseSport();
+      case 2:
+        return _buildStep2ChooseCourt();
+      case 3:
+        return _buildStep3ReviewBooking();
+      case 4:
+        return _buildStep4PaymentAndStatus();
+      default:
+        return _buildStep1ChooseSport();
+    }
+  }
+
+  // ==========================================
+  // PANEL 01: 01 Choose your sport
+  // ==========================================
+  Widget _buildStep1ChooseSport() {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: subtleBorder),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.03),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Step Header
+          _buildPanelHeader('01 Choose your sport'),
+
+          Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Welcome, ${widget.studentName}',
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: Color(0xFF1B2420),
                   ),
-                ],
-              ),
-              child: SafeArea(
-                child: Row(
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  '${widget.category} · Prices shown for your category',
+                  style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
+                ),
+                const SizedBox(height: 24),
+
+                // 2x2 Grid of Sport Cards matching mockup
+                Row(
                   children: [
                     Expanded(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            '$selectedSport · $selectedCourtName',
-                            style: const TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 15,
-                            ),
-                          ),
-                          Text(
-                            '$startTimeFormatted · $selectedDurationHours hr(s) · RM $totalPrice.00',
-                            style: TextStyle(
-                              color: primaryGreen,
-                              fontWeight: FontWeight.w600,
-                              fontSize: 13,
-                            ),
-                          ),
-                        ],
+                      child: _sportCard(
+                        title: 'Badminton',
+                        subtitle: 'From RM6 / court / hour',
+                        sport: 'Badminton',
                       ),
                     ),
-                    ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: canProceed ? primaryGreen : Colors.grey,
-                        foregroundColor: Colors.white,
-                        elevation: 0,
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 20, vertical: 14),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                      ),
-                      onPressed: canProceed
-                          ? () {
-                              final booking = Booking(
-                                id: DateTime.now().microsecondsSinceEpoch.toString(),
-                                userEmail: widget.email,
-                                facilityName: facilityFullNameForSelection,
-                                date: selectedDate,
-                                timeSlots: generatedTimeSlots,
-                                pricePerSession: pricePerHour,
-                                participants: 1,
-                                totalPrice: totalPrice,
-                                status: 'Pending',
-                              );
-
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (context) => BookingConfirmScreen(
-                                    booking: booking,
-                                    studentName: widget.email.split('@').first,
-                                    category: widget.category,
-                                  ),
-                                ),
-                              ).then((_) {
-                                // Refresh court availability state after returning
-                                setState(() {});
-                              });
-                            }
-                          : null,
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Text(
-                            'Confirm',
-                            style: TextStyle(fontWeight: FontWeight.bold),
-                          ),
-                          const SizedBox(width: 6),
-                          Icon(Icons.arrow_forward_rounded,
-                              size: 16, color: accentLime),
-                        ],
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: _sportCard(
+                        title: 'Ping Pong',
+                        subtitle: 'From RM4 / table / hour',
+                        sport: 'Ping Pong',
                       ),
                     ),
                   ],
                 ),
-              ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _sportCard(
+                        title: 'Snooker',
+                        subtitle: 'From RM10 / table / hour',
+                        sport: 'Snooker',
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: _sportCard(
+                        title: 'Dart',
+                        subtitle: 'From RM3 / board / hour',
+                        sport: 'Dart',
+                      ),
+                    ),
+                  ],
+                ),
+
+                const SizedBox(height: 28),
+                Text(
+                  'Availability is subject to KRP Management arrangements.',
+                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                ),
+              ],
             ),
           ),
         ],
@@ -651,185 +274,47 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
     );
   }
 
-  Widget _legendItem(String label, Color color) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: 12,
-          height: 12,
-          decoration: BoxDecoration(
-            color: color,
-            borderRadius: BorderRadius.circular(3),
-          ),
-        ),
-        const SizedBox(width: 6),
-        Text(
-          label,
-          style: TextStyle(
-            fontSize: 11,
-            color: Colors.grey.shade700,
-            fontWeight: FontWeight.w500,
-          ),
-        ),
-      ],
-    );
-  }
-
-  // COURT VISUAL CARD
-  Widget _buildCourtVisualCard(FacilitiesScreenStateModel court, bool isSelected) {
-    Color cardBorder;
-    Color courtSurfaceColor;
-    Color statusColor;
-    IconData statusIcon;
-
-    switch (court.status) {
-      case CourtStatus.available:
-        cardBorder = isSelected ? primaryGreen : const Color(0xFF2E7D32);
-        courtSurfaceColor = const Color(0xFF1B5E44);
-        statusColor = const Color(0xFF2E7D32);
-        statusIcon = isSelected ? Icons.check_circle : Icons.radio_button_unchecked;
-        break;
-      case CourtStatus.booked:
-        cardBorder = const Color(0xFFD32F2F);
-        courtSurfaceColor = const Color(0xFFC62828);
-        statusColor = const Color(0xFFD32F2F);
-        statusIcon = Icons.cancel_outlined;
-        break;
-      case CourtStatus.locked:
-        cardBorder = const Color(0xFF757575);
-        courtSurfaceColor = const Color(0xFF616161);
-        statusColor = const Color(0xFF757575);
-        statusIcon = Icons.lock_outline;
-        break;
-    }
-
+  Widget _sportCard({
+    required String title,
+    required String subtitle,
+    required String sport,
+  }) {
     return InkWell(
-      onTap: court.status == CourtStatus.available
-          ? () {
-              setState(() {
-                selectedCourtName = court.name;
-              });
-            }
-          : () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text('${court.name} is ${court.note}. Please pick another court.'),
-                  duration: const Duration(seconds: 2),
-                ),
-              );
-            },
-      borderRadius: BorderRadius.circular(16),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 250),
-        width: 170,
-        padding: const EdgeInsets.all(12),
+      onTap: () {
+        setState(() {
+          selectedSport = sport;
+          currentStep = 2; // Move to next page
+        });
+      },
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 16),
         decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(
-            color: isSelected ? primaryGreen : cardBorder.withValues(alpha: 0.4),
-            width: isSelected ? 2.5 : 1.2,
-          ),
-          boxShadow: isSelected
-              ? [
-                  BoxShadow(
-                    color: primaryGreen.withValues(alpha: 0.2),
-                    blurRadius: 10,
-                    offset: const Offset(0, 4),
-                  ),
-                ]
-              : [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.02),
-                    blurRadius: 6,
-                    offset: const Offset(0, 2),
-                  ),
-                ],
+          color: const Color(0xFFF8FAF8),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: const Color(0xFFE5EDE7)),
         ),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Radio / Selection row
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  court.name,
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 16,
-                    color: statusColor,
-                  ),
-                ),
-                Icon(statusIcon, color: statusColor, size: 20),
-              ],
-            ),
-
-            const SizedBox(height: 10),
-
-            // Visual Court Graphic (Drawn dynamically!)
-            Container(
-              height: 140,
-              width: 140,
-              decoration: BoxDecoration(
-                color: courtSurfaceColor,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.white, width: 1.5),
-              ),
-              child: Stack(
-                alignment: Alignment.center,
-                children: [
-                  CustomPaint(
-                    size: const Size(140, 140),
-                    painter: _getCourtPainter(selectedSport),
-                  ),
-                  if (court.status == CourtStatus.locked)
-                    Container(
-                      padding: const EdgeInsets.all(6),
-                      decoration: BoxDecoration(
-                        color: Colors.black.withValues(alpha: 0.5),
-                        shape: BoxShape.circle,
-                      ),
-                      child: const Icon(Icons.lock, color: Colors.white, size: 24),
-                    ),
-                  if (court.status == CourtStatus.booked)
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: Colors.black.withValues(alpha: 0.6),
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: const Text(
-                        'BOOKED',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 10,
-                          fontWeight: FontWeight.bold,
-                          letterSpacing: 1,
-                        ),
-                      ),
-                    ),
-                ],
+            Text(
+              title,
+              style: const TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 16,
+                color: Color(0xFF103B2B),
               ),
             ),
-
+            const SizedBox(height: 4),
+            Text(
+              subtitle,
+              style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+            ),
             const SizedBox(height: 10),
-
-            // Wireframe caption with arrow hint
-            Container(
-              height: 38,
-              alignment: Alignment.center,
-              child: Text(
-                court.note,
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.bold,
-                  color: statusColor,
-                  height: 1.2,
-                ),
-              ),
+            Align(
+              alignment: Alignment.centerRight,
+              child: Icon(Icons.arrow_forward_rounded,
+                  size: 16, color: primaryGreen),
             ),
           ],
         ),
@@ -837,121 +322,810 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
     );
   }
 
-  CustomPainter _getCourtPainter(String sport) {
-    switch (sport) {
-      case 'Badminton':
-        return _BadmintonCourtGridPainter();
-      case 'Ping Pong':
-        return _TableTennisTablePainter();
-      case 'Snooker':
-        return _SnookerTablePainter();
-      default:
-        return _BadmintonCourtGridPainter();
+  // ==========================================
+  // PANEL 02: 02 Choose your court
+  // (Steps 2 & 3 in user request)
+  // ==========================================
+  Widget _buildStep2ChooseCourt() {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: subtleBorder),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.03),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Step Header
+          _buildPanelHeader('02 Choose your court'),
+
+          Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Breadcrumb & Change Sport
+                Row(
+                  children: [
+                    Text(
+                      '$selectedSport / ',
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFF1B2420),
+                      ),
+                    ),
+                    InkWell(
+                      onTap: () {
+                        setState(() => currentStep = 1);
+                      },
+                      child: Text(
+                        'Change sport',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                          color: primaryGreen,
+                          decoration: TextDecoration.underline,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+
+                // Controls Row: Date, Start, Duration
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: [
+                      // Date Selector
+                      _pillButton(
+                        label: 'Date: $formattedDate',
+                        onTap: _showDatePickerDialog,
+                      ),
+                      const SizedBox(width: 8),
+
+                      // Start Time Selector
+                      _pillButton(
+                        label: 'Start: $selectedStartTime',
+                        onTap: _showStartTimeSelectorDialog,
+                      ),
+                      const SizedBox(width: 8),
+
+                      // Duration Selector
+                      _pillButton(
+                        label: 'Duration: $selectedDurationHours hour${selectedDurationHours > 1 ? 's' : ''}',
+                        onTap: () {
+                          setState(() {
+                            selectedDurationHours = selectedDurationHours == 1 ? 2 : 1;
+                          });
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+
+                const SizedBox(height: 12),
+                Text(
+                  '$timeRangeString · RM$ratePerHour.00 per court',
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                    color: Color(0xFF103B2B),
+                  ),
+                ),
+
+                const SizedBox(height: 20),
+
+                // 3 Courts Display: Green (Available), Red (Booked), Grey (Locked)
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    // Court 01 (Available)
+                    Expanded(
+                      child: _courtCard(
+                        courtName: 'Court 01',
+                        statusLabel: 'Available',
+                        statusColor: const Color(0xFF2E7D32),
+                        surfaceTint: const Color(0xFFF3FAF5),
+                        isSelectable: true,
+                        isSelected: selectedCourt == 'Court 01',
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+
+                    // Court 02 (Booked)
+                    Expanded(
+                      child: _courtCard(
+                        courtName: 'Court 02',
+                        statusLabel: 'Booked',
+                        statusColor: const Color(0xFFD32F2F),
+                        surfaceTint: const Color(0xFFFDF2F2),
+                        isSelectable: false,
+                        isSelected: false,
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+
+                    // Court 03* (Management lock)
+                    Expanded(
+                      child: _courtCard(
+                        courtName: 'Court 03*',
+                        statusLabel: 'Management lock',
+                        statusColor: const Color(0xFF757575),
+                        surfaceTint: const Color(0xFFF5F5F5),
+                        isSelectable: false,
+                        isSelected: false,
+                      ),
+                    ),
+                  ],
+                ),
+
+                const SizedBox(height: 16),
+
+                // Selected feedback line
+                Text(
+                  'Selected: $selectedCourt · Available',
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF1B2420),
+                  ),
+                ),
+
+                const SizedBox(height: 20),
+
+                // Primary Button: Review booking · RM6.00
+                SizedBox(
+                  width: double.infinity,
+                  height: 48,
+                  child: ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: primaryGreen,
+                      foregroundColor: Colors.white,
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                    ),
+                    onPressed: () {
+                      setState(() => currentStep = 3);
+                    },
+                    child: Text(
+                      'Review booking · RM$totalAmount.00',
+                      style: const TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ),
+
+                const SizedBox(height: 12),
+                Text(
+                  '*Court count is illustrative; load actual facilities from database.',
+                  style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _pillButton({required String label, required VoidCallback onTap}) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: const Color(0xFFF8FAF8),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: const Color(0xFFDCE4DF)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              label,
+              style: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFF2C3E34),
+              ),
+            ),
+            const SizedBox(width: 4),
+            const Icon(Icons.arrow_drop_down, size: 16, color: Colors.grey),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _courtCard({
+    required String courtName,
+    required String statusLabel,
+    required Color statusColor,
+    required Color surfaceTint,
+    required bool isSelectable,
+    required bool isSelected,
+  }) {
+    return InkWell(
+      onTap: isSelectable
+          ? () {
+              setState(() => selectedCourt = courtName);
+            }
+          : () {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('$courtName is $statusLabel. Please select Court 01.'),
+                  duration: const Duration(seconds: 2),
+                ),
+              );
+            },
+      borderRadius: BorderRadius.circular(10),
+      child: Container(
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: isSelected ? primaryGreen : (isSelected ? primaryGreen : const Color(0xFFE2E8E4)),
+            width: isSelected ? 2.5 : 1.0,
+          ),
+          boxShadow: isSelected
+              ? [
+                  BoxShadow(
+                    color: primaryGreen.withValues(alpha: 0.15),
+                    blurRadius: 8,
+                    offset: const Offset(0, 3),
+                  ),
+                ]
+              : null,
+        ),
+        child: Column(
+          children: [
+            // Visual Court Graphic Container
+            Container(
+              height: 110,
+              width: double.infinity,
+              decoration: BoxDecoration(
+                color: surfaceTint,
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(color: statusColor.withValues(alpha: 0.5)),
+              ),
+              child: CustomPaint(
+                painter: _PrototypeCourtPainter(lineColor: statusColor),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              courtName,
+              style: const TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 13,
+                color: Color(0xFF1B2420),
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              statusLabel,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
+                color: statusColor,
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ==========================================
+  // PANEL 03: 03 Review your booking
+  // (Step 4 in user request)
+  // ==========================================
+  Widget _buildStep3ReviewBooking() {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: subtleBorder),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.03),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Step Header
+          _buildPanelHeader('03 Review your booking'),
+
+          Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _reviewDetailRow('Sport / Facility', '$selectedSport / $selectedCourt'),
+                _divider(),
+                _reviewDetailRow('Date', formattedDate),
+                _divider(),
+                _reviewDetailRow('Start → End', '$selectedStartTime → $calculatedEndTime'),
+                _divider(),
+                _reviewDetailRow('Duration', '$selectedDurationHours hour${selectedDurationHours > 1 ? 's' : ''}'),
+                _divider(),
+                _reviewDetailRow('Student category', widget.category),
+                _divider(),
+                _reviewDetailRow('Rate', 'RM$ratePerHour.00 / court / hour'),
+
+                const SizedBox(height: 20),
+
+                // Total Amount Highlight Box
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFEBF5E9),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text(
+                        'Total amount',
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: Color(0xFF103B2B),
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      Text(
+                        'RM$totalAmount.00',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: primaryGreen,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
+                const SizedBox(height: 16),
+                Text(
+                  'Availability will be checked again before payment.',
+                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                ),
+                const SizedBox(height: 24),
+
+                // Primary Action Button: Proceed to payment
+                SizedBox(
+                  width: double.infinity,
+                  height: 48,
+                  child: ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: primaryGreen,
+                      foregroundColor: Colors.white,
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                    ),
+                    onPressed: () {
+                      setState(() => currentStep = 4);
+                    },
+                    child: const Text(
+                      'Proceed to payment',
+                      style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                ),
+
+                const SizedBox(height: 12),
+
+                // Secondary Action: Edit selection
+                Center(
+                  child: TextButton(
+                    onPressed: () {
+                      setState(() => currentStep = 2);
+                    },
+                    child: Text(
+                      'Edit selection',
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: Colors.grey.shade700,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _reviewDetailRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label, style: TextStyle(color: Colors.grey.shade600, fontSize: 13)),
+          Text(
+            value,
+            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _divider() => Divider(height: 1, thickness: 1, color: const Color(0xFFEFF3F0));
+
+  // ==========================================
+  // PANEL 04: 04 Payment & booking status
+  // (Step 5 in user request)
+  // ==========================================
+  Widget _buildStep4PaymentAndStatus() {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: subtleBorder),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.03),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Step Header
+          _buildPanelHeader('04 Payment & booking status'),
+
+          Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Sandbox Payment Alert Box
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFEF7E8),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: const Color(0xFFF3E7C9)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Sandbox payment',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF7A5400),
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        'Demo only. No actual charge.',
+                        style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
+                      ),
+                    ],
+                  ),
+                ),
+
+                const SizedBox(height: 20),
+
+                // Amount Due Row
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text(
+                      'Amount due',
+                      style: TextStyle(fontSize: 14, color: Colors.grey),
+                    ),
+                    Text(
+                      'RM$totalAmount.00',
+                      style: const TextStyle(
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF1B2420),
+                      ),
+                    ),
+                  ],
+                ),
+
+                const SizedBox(height: 20),
+
+                // Continue to Billplz sandbox button
+                if (!paymentCompleted)
+                  SizedBox(
+                    width: double.infinity,
+                    height: 48,
+                    child: ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: primaryGreen,
+                        foregroundColor: Colors.white,
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                      ),
+                      onPressed: _processSandboxPayment,
+                      child: const Text(
+                        'Continue to Billplz sandbox',
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ),
+
+                // Booking Confirmed Success Card
+                if (paymentCompleted) ...[
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFEBF5E9),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: const Color(0xFFC7E5C3)),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Row(
+                          children: [
+                            Icon(Icons.check, size: 20, color: Color(0xFF2E7D32)),
+                            SizedBox(width: 8),
+                            Text(
+                              'Booking confirmed',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                                color: Color(0xFF2E7D32),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 10),
+                        Text(
+                          '$generatedBookingRef · $selectedCourt',
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 14,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          '$formattedDate · $timeRangeString',
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: Colors.grey.shade700,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Booking: Confirmed Payment: Paid',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: primaryGreen,
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        InkWell(
+                          onTap: () {
+                            Navigator.of(context).pop(); // Back to facility info screen
+                          },
+                          child: Text(
+                            'View booking details →',
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.bold,
+                              color: primaryGreen,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+
+                const SizedBox(height: 16),
+                Text(
+                  'Success appears only after verified payment confirmation.',
+                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _processSandboxPayment() {
+    setState(() {
+      paymentCompleted = true;
+    });
+
+    // Add confirmed booking into BookingService database
+    BookingService.instance.addBooking(
+      Booking(
+        id: generatedBookingRef,
+        userEmail: widget.email,
+        facilityName: 'Badminton Court 01',
+        date: selectedDate,
+        timeSlots: [selectedStartTime],
+        pricePerSession: ratePerHour,
+        participants: 1,
+        totalPrice: totalAmount,
+        status: 'Confirmed',
+      ),
+    );
+  }
+
+  Widget _buildPanelHeader(String title) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+      decoration: BoxDecoration(
+        color: primaryGreen,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(15)),
+      ),
+      child: Text(
+        title,
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 18,
+          fontWeight: FontWeight.bold,
+          letterSpacing: 0.3,
+        ),
+      ),
+    );
+  }
+
+  void _showDatePickerDialog() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: selectedDate,
+      firstDate: DateTime.now(),
+      lastDate: DateTime.now().add(const Duration(days: 30)),
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: ColorScheme.light(
+              primary: primaryGreen,
+              onPrimary: Colors.white,
+              onSurface: const Color(0xFF1B2420),
+            ),
+          ),
+          child: child!,
+        );
+      },
+    );
+
+    if (picked != null) {
+      setState(() => selectedDate = picked);
     }
   }
+
+  void _showStartTimeSelectorDialog() {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) {
+        return Container(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Select start time (:00 or :30)',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+              ),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: availableStartTimes.map((time) {
+                  final isSelected = selectedStartTime == time;
+                  return ChoiceChip(
+                    label: Text(time),
+                    selected: isSelected,
+                    selectedColor: primaryGreen,
+                    labelStyle: TextStyle(
+                      color: isSelected ? Colors.white : Colors.black87,
+                      fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                    ),
+                    onSelected: (_) {
+                      setState(() => selectedStartTime = time);
+                      Navigator.pop(context);
+                    },
+                  );
+                }).toList(),
+              ),
+              const SizedBox(height: 16),
+            ],
+          ),
+        );
+      },
+    );
+  }
 }
 
-// 1. Badminton Court Painter
-class _BadmintonCourtGridPainter extends CustomPainter {
+// Custom Painter for Regulation Badminton Court in Prototype Cards
+class _PrototypeCourtPainter extends CustomPainter {
+  final Color lineColor;
+
+  _PrototypeCourtPainter({required this.lineColor});
+
   @override
   void paint(Canvas canvas, Size size) {
-    final linePaint = Paint()
-      ..color = Colors.white
+    final paint = Paint()
+      ..color = lineColor
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1.2;
 
-    final netPaint = Paint()
-      ..color = const Color(0xFFD2F865)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 2.0;
-
-    // Court Outer Boundary
     final rect = Rect.fromLTWH(8, 8, size.width - 16, size.height - 16);
-    canvas.drawRect(rect, linePaint);
+    canvas.drawRect(rect, paint);
 
-    // Singles Sidelines (horizontal margins)
-    canvas.drawLine(Offset(rect.left + 10, rect.top), Offset(rect.left + 10, rect.bottom), linePaint);
-    canvas.drawLine(Offset(rect.right - 10, rect.top), Offset(rect.right - 10, rect.bottom), linePaint);
+    // Singles sidelines
+    canvas.drawLine(
+        Offset(rect.left + 8, rect.top), Offset(rect.left + 8, rect.bottom), paint);
+    canvas.drawLine(
+        Offset(rect.right - 8, rect.top), Offset(rect.right - 8, rect.bottom), paint);
 
-    // Net across middle (horizontal center)
+    // Middle net line
     final midY = rect.top + rect.height / 2;
-    canvas.drawLine(Offset(rect.left - 4, midY), Offset(rect.right + 4, midY), netPaint);
+    canvas.drawLine(Offset(rect.left - 2, midY), Offset(rect.right + 2, midY),
+        paint..strokeWidth = 1.8);
+    paint.strokeWidth = 1.2;
 
-    // Short service lines (above and below net)
-    canvas.drawLine(Offset(rect.left, midY - 20), Offset(rect.right, midY - 20), linePaint);
-    canvas.drawLine(Offset(rect.left, midY + 20), Offset(rect.right, midY + 20), linePaint);
+    // Service lines
+    canvas.drawLine(
+        Offset(rect.left, midY - 14), Offset(rect.right, midY - 14), paint);
+    canvas.drawLine(
+        Offset(rect.left, midY + 14), Offset(rect.right, midY + 14), paint);
 
-    // Long service lines for doubles (near top and bottom ends)
-    canvas.drawLine(Offset(rect.left, rect.top + 8), Offset(rect.right, rect.top + 8), linePaint);
-    canvas.drawLine(Offset(rect.left, rect.bottom - 8), Offset(rect.right, rect.bottom - 8), linePaint);
+    // Back doubles lines
+    canvas.drawLine(
+        Offset(rect.left, rect.top + 6), Offset(rect.right, rect.top + 6), paint);
+    canvas.drawLine(
+        Offset(rect.left, rect.bottom - 6), Offset(rect.right, rect.bottom - 6), paint);
 
-    // Center dividing lines (from short service line to back line)
+    // Center dividing lines
     final midX = rect.left + rect.width / 2;
-    canvas.drawLine(Offset(midX, rect.top), Offset(midX, midY - 20), linePaint);
-    canvas.drawLine(Offset(midX, midY + 20), Offset(midX, rect.bottom), linePaint);
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
-}
-
-// 2. Table Tennis Table Painter
-class _TableTennisTablePainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final linePaint = Paint()
-      ..color = Colors.white
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.5;
-
-    final netPaint = Paint()
-      ..color = Colors.white
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 2.5;
-
-    final rect = Rect.fromLTWH(12, 12, size.width - 24, size.height - 24);
-    canvas.drawRect(rect, linePaint);
-
-    // Middle Net
-    final midY = rect.top + rect.height / 2;
-    canvas.drawLine(Offset(rect.left - 4, midY), Offset(rect.right + 4, midY), netPaint);
-
-    // Center dividing line (vertical)
-    final midX = rect.left + rect.width / 2;
-    canvas.drawLine(Offset(midX, rect.top), Offset(midX, rect.bottom), linePaint);
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
-}
-
-// 3. Snooker Table Painter
-class _SnookerTablePainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final linePaint = Paint()
-      ..color = Colors.white.withValues(alpha: 0.6)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.2;
-
-    final pocketPaint = Paint()
-      ..color = Colors.black
-      ..style = PaintingStyle.fill;
-
-    final rect = Rect.fromLTWH(14, 14, size.width - 28, size.height - 28);
-    canvas.drawRect(rect, linePaint);
-
-    // 6 Pockets
-    canvas.drawCircle(Offset(rect.left, rect.top), 5, pocketPaint);
-    canvas.drawCircle(Offset(rect.right, rect.top), 5, pocketPaint);
-    canvas.drawCircle(Offset(rect.left, rect.bottom), 5, pocketPaint);
-    canvas.drawCircle(Offset(rect.right, rect.bottom), 5, pocketPaint);
-    canvas.drawCircle(Offset(rect.left, rect.top + rect.height / 2), 5, pocketPaint);
-    canvas.drawCircle(Offset(rect.right, rect.top + rect.height / 2), 5, pocketPaint);
-
-    // Baulk line
-    final baulkY = rect.top + rect.height * 0.25;
-    canvas.drawLine(Offset(rect.left, baulkY), Offset(rect.right, baulkY), linePaint);
+    canvas.drawLine(Offset(midX, rect.top), Offset(midX, midY - 14), paint);
+    canvas.drawLine(Offset(midX, midY + 14), Offset(midX, rect.bottom), paint);
   }
 
   @override

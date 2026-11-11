@@ -1,14 +1,19 @@
 import 'package:flutter/material.dart';
 import 'facilities_screen.dart';
+import 'booking_records_screen.dart';
 
 class FacilityInfoScreen extends StatefulWidget {
   final String category;
   final String email;
+  final String studentName;
+  final VoidCallback? onLogout;
 
   const FacilityInfoScreen({
     super.key,
     required this.category,
     required this.email,
+    this.studentName = 'Yu Xiang',
+    this.onLogout,
   });
 
   @override
@@ -60,13 +65,125 @@ class _FacilityInfoScreenState extends State<FacilityInfoScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.white,
+      drawer: Drawer(
+        child: ListView(
+          padding: EdgeInsets.zero,
+          children: [
+            DrawerHeader(
+              decoration: BoxDecoration(color: primaryGreen),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  CircleAvatar(
+                    radius: 26,
+                    backgroundColor: accentLime,
+                    child: Text(
+                      widget.studentName.isNotEmpty
+                          ? widget.studentName
+                              .trim()
+                              .split(' ')
+                              .map((w) => w.isNotEmpty ? w[0] : '')
+                              .take(2)
+                              .join()
+                              .toUpperCase()
+                          : 'YX',
+                      style: TextStyle(
+                        color: primaryGreen,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 18,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                    widget.studentName,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                    ),
+                  ),
+                  Text(
+                    widget.category,
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.8),
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.info_outline),
+              title: const Text('KRP Sports Complex Info'),
+              selected: true,
+              onTap: () => Navigator.pop(context),
+            ),
+            ListTile(
+              leading: const Icon(Icons.calendar_month_outlined),
+              title: const Text('Book a Facility'),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => FacilitiesScreen(
+                      category: widget.category,
+                      email: widget.email,
+                      studentName: widget.studentName,
+                    ),
+                  ),
+                );
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.receipt_long_outlined),
+              title: const Text('Booking Records'),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) =>
+                        BookingRecordsScreen(email: widget.email),
+                  ),
+                );
+              },
+            ),
+            if (widget.onLogout != null) ...[
+              const Divider(),
+              ListTile(
+                leading: const Icon(Icons.logout, color: Colors.red),
+                title:
+                    const Text('Log out', style: TextStyle(color: Colors.red)),
+                onTap: () {
+                  Navigator.pop(context);
+                  widget.onLogout!();
+                },
+              ),
+            ],
+          ],
+        ),
+      ),
       appBar: AppBar(
         backgroundColor: Colors.white,
         foregroundColor: primaryGreen,
         elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new, size: 20),
-          onPressed: () => Navigator.of(context).pop(),
+        leading: Builder(
+          builder: (context) {
+            final canPop = Navigator.canPop(context);
+            if (canPop) {
+              return IconButton(
+                icon: const Icon(Icons.arrow_back_ios_new, size: 20),
+                onPressed: () => Navigator.of(context).pop(),
+              );
+            }
+            return IconButton(
+              icon: const Icon(Icons.menu, size: 24),
+              onPressed: () => Scaffold.of(context).openDrawer(),
+            );
+          },
         ),
         title: const Text(
           'KRP Sports Complex',
@@ -77,6 +194,19 @@ class _FacilityInfoScreenState extends State<FacilityInfoScreen> {
           ),
         ),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.receipt_long_outlined, size: 22),
+            tooltip: 'Booking Records',
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) =>
+                      BookingRecordsScreen(email: widget.email),
+                ),
+              );
+            },
+          ),
           IconButton(
             icon: const Icon(Icons.share_outlined, size: 22),
             onPressed: () {
@@ -366,6 +496,7 @@ class _FacilityInfoScreenState extends State<FacilityInfoScreen> {
                           builder: (context) => FacilitiesScreen(
                             category: widget.category,
                             email: widget.email,
+                            studentName: widget.studentName,
                           ),
                         ),
                       );

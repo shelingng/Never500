@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'models/student_account.dart';
 import 'screens/login_screen.dart';
-import 'screens/home_screen.dart';
+import 'screens/facility_info_screen.dart';
 
 void main() {
   runApp(
@@ -82,7 +82,12 @@ class _KrpPlayAppState extends State<KrpPlayApp> {
       ),
       home: currentAccount == null
           ? AuthScreen(accounts: accounts, onRegister: register, onLogin: login)
-          : HomeScreen(account: currentAccount!, onLogout: logout),
+          : FacilityInfoScreen(
+              category: currentAccount!.category,
+              email: currentAccount!.email,
+              studentName: currentAccount!.fullName,
+              onLogout: logout,
+            ),
     );
   }
 }
