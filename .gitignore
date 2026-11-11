@@ -1,0 +1,15 @@
+# Operating System
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/workspace.xml
+.idea/caches/
+.idea/shelf/
+.idea/contentModel.xml
+*.log
+
+# Build artifacts
+build/
+.dart_tool/
+

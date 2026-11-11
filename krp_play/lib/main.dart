@@ -1,45 +1,66 @@
-import 'screens/login_screen.dart';
-
 import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'models/student_account.dart';
+import 'screens/login_screen.dart';
+import 'screens/facility_info_screen.dart';
 
-void main() async {
-  WidgetsFlutterBinding.ensureInitialized();
-
-  await Supabase.initialize(
-    url: 'https://ckhpsnuiypxetkmigqua.supabase.co',
-    anonKey: 'sb_publishable_jByO0pC0UVwMS5Jr1v5jhQ_VaCx8NV5',
+void main() {
+  runApp(
+    const KrpPlayApp(
+      // Default test account for developer convenience (Looi Yu Xiang)
+      // Pass null to test the sign-in / registration flow
+      initialAccount: StudentAccount(
+        fullName: 'Looi Yu Xiang',
+        email: 'yuxiang@student.utm.my',
+        contact: '0123456789',
+        matric: 'A24CS0107',
+        category: 'KRP Student',
+        password: 'devpassword123',
+      ),
+    ),
   );
-
-  runApp(const KrpPlayApp());
-}
-
-class StudentAccount {
-  final String fullName;
-  final String email;
-  final String contact;
-  final String matric;
-  final String category;
-  final String password;
-
-  StudentAccount({
-    required this.fullName,
-    required this.email,
-    required this.contact,
-    required this.matric,
-    required this.category,
-    required this.password,
-  });
 }
 
 class KrpPlayApp extends StatefulWidget {
-  const KrpPlayApp({super.key});
+  final StudentAccount? initialAccount;
+
+  const KrpPlayApp({super.key, this.initialAccount});
 
   @override
   State<KrpPlayApp> createState() => _KrpPlayAppState();
 }
 
 class _KrpPlayAppState extends State<KrpPlayApp> {
+  final List<StudentAccount> accounts = [];
+  StudentAccount? currentAccount;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.initialAccount != null) {
+      accounts.add(widget.initialAccount!);
+      currentAccount = widget.initialAccount;
+    }
+  }
+
+  void register(StudentAccount account) {
+    setState(() {
+      accounts.add(account);
+      currentAccount = account;
+    });
+  }
+
+  void login(StudentAccount account) {
+    setState(() {
+      currentAccount = account;
+    });
+  }
+
+  void logout() {
+    setState(() {
+      currentAccount = null;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
@@ -47,17 +68,26 @@ class _KrpPlayAppState extends State<KrpPlayApp> {
       title: 'KRP PLAY',
       theme: ThemeData(
         useMaterial3: true,
-        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF173F32)),
-        scaffoldBackgroundColor: const Color(0xFFF4F6F4),
-        fontFamily: 'Roboto',
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: const Color(0xFF103B2B),
+          primary: const Color(0xFF103B2B),
+          secondary: const Color(0xFFD2F865),
+        ),
+        scaffoldBackgroundColor: const Color(0xFFF7F9F7),
         appBarTheme: const AppBarTheme(
-          backgroundColor: Color(0xFFF4F6F4),
-          foregroundColor: Color(0xFF173F32),
+          backgroundColor: Color(0xFFF7F9F7),
+          foregroundColor: Color(0xFF103B2B),
           elevation: 0,
-          centerTitle: false,
         ),
       ),
-      home: const LoginScreen(),
+      home: currentAccount == null
+          ? AuthScreen(accounts: accounts, onRegister: register, onLogin: login)
+          : FacilityInfoScreen(
+              category: currentAccount!.category,
+              email: currentAccount!.email,
+              studentName: currentAccount!.fullName,
+              onLogout: logout,
+            ),
     );
   }
 }

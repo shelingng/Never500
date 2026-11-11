@@ -13,31 +13,34 @@ class PaymentScreen extends StatefulWidget {
 }
 
 class _PaymentScreenState extends State<PaymentScreen> {
-  String selectedPaymentMethod = 'Touch \'n Go eWallet';
-  String selectedBank = 'Maybank';
+  String selectedPaymentMethod = 'Online Banking';
   bool isProcessing = false;
 
-  final Color primaryColor = const Color(0xFF173F32);
-  final List<String> banks = const [
-    'Maybank',
-    'CIMB Bank',
-    'Public Bank',
-    'RHB Bank',
-    'Hong Leong Bank',
-    'AmBank',
-    'Bank Islam',
-    'BSN',
-  ];
+  final Color primaryColor = const Color(0xFF103B2B);
 
   void confirmPayment() {
-    BookingService.instance.recordPayment(widget.booking);
     setState(() {
       isProcessing = true;
     });
 
-    // Prototype only: no real payment transaction occurs.
+    // Prototype: simulate payment confirmation and update database status
     Future.delayed(const Duration(seconds: 1), () {
       if (!mounted) return;
+
+      // Update database status: add confirmed booking to BookingService
+      BookingService.instance.addBooking(
+        Booking(
+          id: widget.booking.id,
+          userEmail: widget.booking.userEmail,
+          facilityName: widget.booking.facilityName,
+          date: widget.booking.date,
+          timeSlots: widget.booking.timeSlots,
+          pricePerSession: widget.booking.pricePerSession,
+          participants: widget.booking.participants,
+          totalPrice: widget.booking.totalPrice,
+          status: 'Confirmed',
+        ),
+      );
 
       setState(() {
         isProcessing = false;
@@ -65,9 +68,10 @@ class _PaymentScreenState extends State<PaymentScreen> {
 
                 const SizedBox(height: 10),
 
-                const Text(
-                  'Your payment process has been completed in this prototype.',
+                Text(
+                  'Booking confirmed for ${widget.booking.facilityName}. Database status updated.',
                   textAlign: TextAlign.center,
+                  style: const TextStyle(fontSize: 13),
                 ),
 
                 const SizedBox(height: 20),
@@ -80,8 +84,9 @@ class _PaymentScreenState extends State<PaymentScreen> {
                     ),
                     onPressed: () {
                       Navigator.of(context)
-                        ..pop()
-                        ..pop();
+                        ..pop() // close dialog
+                        ..pop() // pop PaymentScreen
+                        ..pop(); // pop BookingConfirmScreen back to Court Layout
                     },
                     child: const Text('Done'),
                   ),
@@ -230,36 +235,23 @@ class _PaymentScreenState extends State<PaymentScreen> {
           const SizedBox(height: 12),
 
           _paymentOption(
-            title: 'FPX Online Banking',
-            subtitle: 'Pay securely from your bank',
+            title: 'Online Banking',
+            subtitle: 'Pay through online banking',
             icon: Icons.account_balance,
           ),
 
           _paymentOption(
-            title: 'Touch \'n Go eWallet',
-            subtitle: 'Pay using your TNG eWallet',
+            title: 'Debit / Credit Card',
+            subtitle: 'Pay using your bank card',
+            icon: Icons.credit_card,
+          ),
+
+          _paymentOption(
+            title: 'E-Wallet',
+            subtitle: 'Pay using an e-wallet',
             icon: Icons.account_balance_wallet,
           ),
 
-          if (selectedPaymentMethod == 'FPX Online Banking') ...[
-            const SizedBox(height: 4),
-            DropdownButtonFormField<String>(
-              initialValue: selectedBank,
-              decoration: const InputDecoration(
-                labelText: 'Select your bank',
-                prefixIcon: Icon(Icons.account_balance),
-                border: OutlineInputBorder(),
-              ),
-              items: banks
-                  .map(
-                    (bank) => DropdownMenuItem(value: bank, child: Text(bank)),
-                  )
-                  .toList(),
-              onChanged: (bank) {
-                if (bank != null) setState(() => selectedBank = bank);
-              },
-            ),
-          ],
           const SizedBox(height: 25),
 
           // CONFIRM PAYMENT

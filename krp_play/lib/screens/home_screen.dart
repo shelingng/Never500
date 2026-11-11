@@ -1,539 +1,826 @@
 import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
-
-import '../services/auth_service.dart';
+import '../models/student_account.dart';
 import '../services/booking_service.dart';
+import 'facility_info_screen.dart';
 import 'facilities_screen.dart';
-import 'login_screen.dart';
-import 'profile_screen.dart';
-
-const _green = Color(0xFF173F32);
-const _pale = Color(0xFFF2F6F2);
+import 'booking_records_screen.dart';
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key});
+  final StudentAccount account;
+  final VoidCallback onLogout;
+
+  const HomeScreen({
+    super.key,
+    required this.account,
+    required this.onLogout,
+  });
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  int _tab = 0;
-  int _profileTab = 0;
-  final _scaffoldKey = GlobalKey<ScaffoldState>();
+  int _currentIndex = 0;
 
-  String get _email =>
-      Supabase.instance.client.auth.currentUser?.email ?? 'Unknown User';
+  final Color primaryGreen = const Color(0xFF103B2B);
+  final Color accentLime = const Color(0xFFD2F865);
+  final Color subtleBorder = const Color(0xFFE9EFEA);
 
-  void _selectTab(int index) {
-    setState(() {
-      _tab = index;
-      if (index == 2) _profileTab = 0;
-    });
+  String get _greeting {
+    final hour = DateTime.now().hour;
+    if (hour < 12) {
+      return 'GOOD MORNING';
+    } else if (hour < 18) {
+      return 'GOOD AFTERNOON';
+    } else {
+      return 'GOOD EVENING';
+    }
   }
 
-  void _openBookings() {
-    setState(() {
-      _tab = 2;
-      _profileTab = 1;
-    });
-  }
-
-  void _navigateFromDrawer(int tab, {int profileTab = 0}) {
-    Navigator.pop(context);
-    setState(() {
-      _tab = tab;
-      _profileTab = profileTab;
-    });
-  }
-
-  Future<void> _logout() async {
-    await AuthService().signOut();
-    if (!mounted) return;
-    Navigator.pushReplacement(
-      context,
-      MaterialPageRoute(builder: (_) => const LoginScreen()),
-    );
+  String get _initials {
+    final names = widget.account.fullName.trim().split(' ');
+    if (names.isEmpty) return 'YX';
+    if (names.length == 1) {
+      return names[0].substring(0, names[0].length >= 2 ? 2 : 1).toUpperCase();
+    }
+    return (names.first[0] + names.last[0]).toUpperCase();
   }
 
   @override
   Widget build(BuildContext context) {
-    final titles = ['KRP PLAY', 'Book a Facility', 'KRP PLAY / My Profile'];
     return Scaffold(
-      key: _scaffoldKey,
+      backgroundColor: const Color(0xFFF7F9F7),
+      appBar: AppBar(
+        backgroundColor: const Color(0xFFF7F9F7),
+        elevation: 0,
+        leading: Builder(
+          builder: (context) => IconButton(
+            icon: const Icon(Icons.menu, color: Color(0xFF103B2B)),
+            onPressed: () => Scaffold.of(context).openDrawer(),
+          ),
+        ),
+        title: const Text(
+          'KRP PLAY  /  Home',
+          style: TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+            color: Color(0xFF708077),
+            letterSpacing: 0.5,
+          ),
+        ),
+        actions: [
+          Stack(
+            alignment: Alignment.topRight,
+            children: [
+              IconButton(
+                icon: const Icon(Icons.notifications_none_rounded,
+                    color: Color(0xFF103B2B), size: 26),
+                onPressed: () {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text(
+                        'No new notifications. Booking slots for today are open.',
+                      ),
+                      duration: Duration(seconds: 2),
+                    ),
+                  );
+                },
+              ),
+              Positioned(
+                top: 12,
+                right: 12,
+                child: Container(
+                  width: 8,
+                  height: 8,
+                  decoration: const BoxDecoration(
+                    color: Color(0xFFE53935),
+                    shape: BoxShape.circle,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          Padding(
+            padding: const EdgeInsets.only(right: 16, left: 4),
+            child: Center(
+              child: InkWell(
+                onTap: () {
+                  setState(() => _currentIndex = 2);
+                },
+                borderRadius: BorderRadius.circular(12),
+                child: Container(
+                  width: 38,
+                  height: 38,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFE8F6C8),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: primaryGreen.withValues(alpha: 0.15),
+                    ),
+                  ),
+                  child: Center(
+                    child: Text(
+                      _initials,
+                      style: TextStyle(
+                        color: primaryGreen,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
       drawer: Drawer(
-        width: 304,
-        backgroundColor: _green,
+        child: ListView(
+          padding: EdgeInsets.zero,
+          children: [
+            DrawerHeader(
+              decoration: BoxDecoration(color: primaryGreen),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  CircleAvatar(
+                    radius: 26,
+                    backgroundColor: accentLime,
+                    child: Text(
+                      _initials,
+                      style: TextStyle(
+                        color: primaryGreen,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 18,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                    widget.account.fullName,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                    ),
+                  ),
+                  Text(
+                    widget.account.category,
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.8),
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.home_outlined),
+              title: const Text('Home'),
+              selected: _currentIndex == 0,
+              onTap: () {
+                Navigator.pop(context);
+                setState(() => _currentIndex = 0);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.sports_tennis),
+              title: const Text('KRP Sports Complex Info'),
+              onTap: () {
+                Navigator.pop(context);
+                _openFacilityInfo();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.calendar_month_outlined),
+              title: const Text('Book a Facility'),
+              onTap: () {
+                Navigator.pop(context);
+                _openFacilitiesScreen();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.receipt_long_outlined),
+              title: const Text('Booking Records'),
+              onTap: () {
+                Navigator.pop(context);
+                _openBookingRecords();
+              },
+            ),
+            const Divider(),
+            ListTile(
+              leading: const Icon(Icons.logout, color: Colors.red),
+              title:
+                  const Text('Log out', style: TextStyle(color: Colors.red)),
+              onTap: () {
+                Navigator.pop(context);
+                widget.onLogout();
+              },
+            ),
+          ],
+        ),
+      ),
+      body: IndexedStack(
+        index: _currentIndex,
+        children: [
+          _buildHomeTab(),
+          _buildBookTabPlaceholder(),
+          _buildProfileTab(),
+        ],
+      ),
+      bottomNavigationBar: Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          border: Border(top: BorderSide(color: subtleBorder)),
+        ),
         child: SafeArea(
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(18, 20, 18, 14),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
               children: [
-                Row(
-                  children: [
-                    Container(
-                      width: 48,
-                      height: 48,
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFD4F048),
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                      child: const Icon(Icons.sports_tennis, color: _green),
-                    ),
-                    const SizedBox(width: 12),
-                    const Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'KRP PLAY',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 17,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        Text(
-                          'SPORTS HUB',
-                          style: TextStyle(
-                            color: Color(0xFFB7C7B9),
-                            fontSize: 10,
-                            letterSpacing: 1.2,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
+                _navItem(
+                  index: 0,
+                  icon: Icons.home_outlined,
+                  activeIcon: Icons.home,
+                  label: 'Home',
                 ),
-                const SizedBox(height: 38),
-                const Padding(
-                  padding: EdgeInsets.only(left: 12, bottom: 10),
-                  child: Text(
-                    'STUDENT PORTAL',
-                    style: TextStyle(
-                      color: Color(0xFFB7C7B9),
-                      fontSize: 10,
-                      letterSpacing: 1.2,
-                      fontWeight: FontWeight.w600,
-                    ),
+                _navItem(
+                  index: 1,
+                  icon: Icons.calendar_month_outlined,
+                  activeIcon: Icons.calendar_month,
+                  label: 'Book',
+                ),
+                _navItem(
+                  index: 2,
+                  icon: Icons.person_outline,
+                  activeIcon: Icons.person,
+                  label: 'Profile',
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _navItem({
+    required int index,
+    required IconData icon,
+    required IconData activeIcon,
+    required String label,
+  }) {
+    final active = _currentIndex == index;
+    return InkWell(
+      onTap: () {
+        if (index == 1) {
+          _openFacilityInfo();
+        } else {
+          setState(() => _currentIndex = index);
+        }
+      },
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
+        decoration: BoxDecoration(
+          color: active ? const Color(0xFFE8F6C8) : Colors.transparent,
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              active ? activeIcon : icon,
+              color: active ? primaryGreen : Colors.grey.shade600,
+              size: 24,
+            ),
+            const SizedBox(height: 3),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: active ? FontWeight.bold : FontWeight.normal,
+                color: active ? primaryGreen : Colors.grey.shade600,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // HOME TAB (Image 2 design)
+  Widget _buildHomeTab() {
+    final userBookings =
+        BookingService.instance.getBookingsByEmail(widget.account.email);
+    final bookingCount = userBookings.length;
+    final availableSlotsCount =
+        BookingService.instance.getAvailableSlotsCount(DateTime.now());
+
+    final formattedBookingCount =
+        bookingCount < 10 ? '0$bookingCount' : '$bookingCount';
+    final formattedSlotsCount = availableSlotsCount < 10
+        ? '0$availableSlotsCount'
+        : '$availableSlotsCount';
+
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+      children: [
+        // HERO CARD (Dark forest green with lime accent)
+        Container(
+          height: 290,
+          decoration: BoxDecoration(
+            color: primaryGreen,
+            borderRadius: BorderRadius.circular(24),
+            boxShadow: [
+              BoxShadow(
+                color: primaryGreen.withValues(alpha: 0.25),
+                blurRadius: 16,
+                offset: const Offset(0, 8),
+              ),
+            ],
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(24),
+            child: Stack(
+              children: [
+                // Badminton Court & Smash Art Painting in Background
+                Positioned.fill(
+                  child: CustomPaint(
+                    painter: _BadmintonCourtSmashPainter(),
                   ),
                 ),
-                _drawerItem('Home', Icons.home_outlined, 0),
-                _drawerItem('Facilities', Icons.calendar_month_outlined, 1),
-                _drawerItem('My Profile', Icons.person_outline, 2),
-                const Spacer(),
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF245343),
-                    borderRadius: BorderRadius.circular(16),
-                  ),
+                // Hero Content
+                Padding(
+                  padding: const EdgeInsets.all(24),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      const CircleAvatar(
-                        radius: 16,
-                        backgroundColor: Color(0xFF386754),
-                        child: Icon(
-                          Icons.info_outline,
-                          color: Colors.white,
-                          size: 18,
-                        ),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Container(
+                                width: 28,
+                                height: 3,
+                                decoration: BoxDecoration(
+                                  color: accentLime,
+                                  borderRadius: BorderRadius.circular(2),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  '$_greeting, ${widget.account.fullName.toUpperCase()}',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    color: Colors.white.withValues(alpha: 0.9),
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w700,
+                                    letterSpacing: 1.5,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 18),
+                          RichText(
+                            text: TextSpan(
+                              style: const TextStyle(
+                                fontSize: 30,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.white,
+                                height: 1.15,
+                                letterSpacing: -0.5,
+                              ),
+                              children: [
+                                const TextSpan(text: 'Your next game\nstarts '),
+                                TextSpan(
+                                  text: 'here.',
+                                  style: TextStyle(color: accentLime),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 14),
+                          ConstrainedBox(
+                            constraints: const BoxConstraints(maxWidth: 240),
+                            child: Text(
+                              'Seven facilities. Management-controlled availability. One smooth booking.',
+                              style: TextStyle(
+                                color: Colors.white.withValues(alpha: 0.8),
+                                fontSize: 13,
+                                height: 1.35,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
-                      const SizedBox(height: 12),
-                      const Text(
-                        'Need assistance?',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
+                      // Action Button (Lime Pill Button with Dark Text)
+                      ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: accentLime,
+                          foregroundColor: primaryGreen,
+                          elevation: 0,
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 22, vertical: 12),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(24),
+                          ),
                         ),
-                      ),
-                      const SizedBox(height: 5),
-                      const Text(
-                        'KRP Sports Unit\n+60 7-553 5000 • Block L50',
-                        style: TextStyle(
-                          color: Color(0xFFD0DED2),
-                          fontSize: 11,
-                          height: 1.5,
+                        onPressed: _openFacilityInfo,
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              'Find a slot',
+                              style: TextStyle(
+                                color: primaryGreen,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 15,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Icon(Icons.arrow_forward_rounded,
+                                size: 18, color: primaryGreen),
+                          ],
                         ),
-                      ),
-                      TextButton(
-                        onPressed: () => _navigateFromDrawer(2, profileTab: 3),
-                        style: TextButton.styleFrom(
-                          padding: const EdgeInsets.only(top: 10),
-                          minimumSize: Size.zero,
-                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                          foregroundColor: const Color(0xFFD4F048),
-                        ),
-                        child: const Text('Report a problem →'),
                       ),
                     ],
                   ),
                 ),
-                const SizedBox(height: 12),
-                TextButton.icon(
-                  onPressed: _logout,
-                  icon: const Icon(Icons.logout, color: Colors.white),
-                  label: const Align(
-                    alignment: Alignment.centerLeft,
-                    child: Text(
-                      'Sign out',
-                      style: TextStyle(color: Colors.white),
-                    ),
-                  ),
-                  style: TextButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 14,
-                      vertical: 13,
-                    ),
-                    alignment: Alignment.centerLeft,
-                  ),
-                ),
               ],
             ),
           ),
         ),
-      ),
-      appBar: _tab == 1
-          ? null
-          : AppBar(
-              leading: IconButton(
-                icon: const Icon(Icons.menu),
-                onPressed: () => _scaffoldKey.currentState?.openDrawer(),
-              ),
-              title: Text(
-                titles[_tab],
-                style: const TextStyle(fontWeight: FontWeight.w700),
-              ),
-              actions: [
-                IconButton(
-                  tooltip: 'Notifications',
-                  onPressed: () => showDialog<void>(
-                    context: context,
-                    builder: (_) => const AlertDialog(
-                      title: Text('Notifications'),
-                      content: Text('You are all caught up.'),
-                    ),
-                  ),
-                  icon: const Icon(Icons.notifications_none),
-                ),
-                const Padding(
-                  padding: EdgeInsets.only(right: 16),
-                  child: CircleAvatar(
-                    radius: 17,
-                    backgroundColor: Color(0xFFDCEADF),
-                    child: Text(
-                      'SL',
-                      style: TextStyle(
-                        color: _green,
-                        fontSize: 12,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-      body: IndexedStack(
-        index: _tab,
-        children: [
-          _HomeContent(onBook: () => _selectTab(1), onBookings: _openBookings),
-          FacilitiesScreen(
-            category: 'KRP Student',
-            email: _email,
-            onMenuPressed: () => _scaffoldKey.currentState?.openDrawer(),
-          ),
-          ProfileScreen(
-            key: ValueKey(_profileTab),
-            email: _email,
-            initialTab: _profileTab,
-          ),
-        ],
-      ),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _tab,
-        onDestinationSelected: _selectTab,
-        destinations: const [
-          NavigationDestination(
-            icon: Icon(Icons.home_outlined),
-            selectedIcon: Icon(Icons.home),
-            label: 'Home',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.sports_tennis_outlined),
-            selectedIcon: Icon(Icons.sports_tennis),
-            label: 'Book',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.person_outline),
-            selectedIcon: Icon(Icons.person),
-            label: 'Profile',
-          ),
-        ],
-      ),
-    );
-  }
 
-  Widget _drawerItem(String title, IconData icon, int tab) {
-    final selected = _tab == tab;
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 6),
-      child: Material(
-        color: selected ? const Color(0xFFD4F048) : Colors.transparent,
-        borderRadius: BorderRadius.circular(14),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(14),
-          onTap: () => _navigateFromDrawer(tab),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
-            child: Row(
-              children: [
-                Icon(icon, color: selected ? _green : Colors.white, size: 21),
-                const SizedBox(width: 14),
-                Text(
-                  title,
-                  style: TextStyle(
-                    color: selected ? _green : Colors.white,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
+        const SizedBox(height: 20),
 
-class _HomeContent extends StatelessWidget {
-  final VoidCallback onBook;
-  final VoidCallback onBookings;
-
-  const _HomeContent({required this.onBook, required this.onBookings});
-
-  @override
-  Widget build(BuildContext context) {
-    final bookings = BookingService.instance.bookings;
-    final confirmed = bookings
-        .where((booking) => booking.status == 'Confirmed')
-        .length;
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
-      children: [
+        // STATS CARDS CONTAINER (White rounded card with 2 items)
         Container(
-          height: 224,
-          padding: const EdgeInsets.all(22),
           decoration: BoxDecoration(
-            color: _green,
-            borderRadius: BorderRadius.circular(16),
-            image: const DecorationImage(
-              image: NetworkImage(
-                'https://images.unsplash.com/photo-1552674605-db6ffd4facb5?auto=format&fit=crop&w=1200&q=80',
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: subtleBorder),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.02),
+                blurRadius: 10,
+                offset: const Offset(0, 4),
               ),
-              fit: BoxFit.cover,
-              opacity: 0.28,
-            ),
+            ],
           ),
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
-                'GOOD AFTERNOON, SHE LING',
-                style: TextStyle(
-                  color: Colors.white70,
-                  fontSize: 11,
-                  letterSpacing: 1.1,
+              // 1. BOOKING RECORDS ROW
+              InkWell(
+                onTap: _openBookingRecords,
+                borderRadius: const BorderRadius.only(
+                  topLeft: Radius.circular(20),
+                  topRight: Radius.circular(20),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(18),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 48,
+                        height: 48,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFEBF5E9),
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        child: const Icon(
+                          Icons.calendar_today_outlined,
+                          color: Color(0xFF103B2B),
+                          size: 22,
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              formattedBookingCount,
+                              style: const TextStyle(
+                                fontSize: 22,
+                                fontWeight: FontWeight.bold,
+                                color: Color(0xFF103B2B),
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              'Booking records',
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: Colors.grey.shade600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Icon(
+                        Icons.chevron_right_rounded,
+                        color: Colors.grey.shade400,
+                        size: 26,
+                      ),
+                    ],
+                  ),
                 ),
               ),
-              const Spacer(),
-              const Text(
-                'Your next game\nstarts here.',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 27,
-                  height: 1.15,
-                  fontWeight: FontWeight.bold,
+
+              Divider(height: 1, thickness: 1, color: subtleBorder),
+
+              // 2. AVAILABLE SLOTS TODAY ROW
+              InkWell(
+                onTap: _openFacilitiesScreen,
+                borderRadius: const BorderRadius.only(
+                  bottomLeft: Radius.circular(20),
+                  bottomRight: Radius.circular(20),
                 ),
-              ),
-              const SizedBox(height: 14),
-              FilledButton(
-                onPressed: onBook,
-                style: FilledButton.styleFrom(
-                  backgroundColor: const Color(0xFFB8E986),
-                  foregroundColor: _green,
-                ),
-                child: const Text(
-                  'Find a slot  →',
-                  style: TextStyle(fontWeight: FontWeight.bold),
+                child: Padding(
+                  padding: const EdgeInsets.all(18),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 48,
+                        height: 48,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFEAF4FB),
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        child: const Icon(
+                          Icons.access_time_rounded,
+                          color: Color(0xFF1976D2),
+                          size: 24,
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              formattedSlotsCount,
+                              style: const TextStyle(
+                                fontSize: 22,
+                                fontWeight: FontWeight.bold,
+                                color: Color(0xFF103B2B),
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              'Available slots today',
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: Colors.grey.shade600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Icon(
+                        Icons.chevron_right_rounded,
+                        color: Colors.grey.shade400,
+                        size: 26,
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ],
           ),
         ),
-        const SizedBox(height: 22),
-        Row(
-          children: [
-            Expanded(
-              child: _StatCard(
-                icon: Icons.calendar_month_outlined,
-                count: bookings.length.toString().padLeft(2, '0'),
-                label: 'Booking records',
+
+        const SizedBox(height: 20),
+
+        // QUICK HIGHLIGHT / REVENUE BANNER FOR KRP
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: const Color(0xFFE5EFE9),
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Row(
+            children: [
+              Icon(Icons.verified_user_outlined,
+                  color: primaryGreen, size: 28),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Verified ${widget.account.category}',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: primaryGreen,
+                        fontSize: 14,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      widget.account.category == 'KRP Student'
+                          ? 'Subsidized collegian rates applied automatically.'
+                          : 'General student rates applied.',
+                      style: TextStyle(
+                        color: Colors.grey.shade700,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: _StatCard(
-                icon: Icons.confirmation_number_outlined,
-                count: '$confirmed',
-                label: 'Confirmed reservations',
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 28),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            const Text(
-              'Latest Updates',
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-            ),
-            TextButton(onPressed: onBookings, child: const Text('My bookings')),
-          ],
-        ),
-        const SizedBox(height: 8),
-        const _NoticeCard(
-          date: '17 MAR',
-          tag: 'IMPORTANT',
-          title: 'Facility booking is now open',
-          time: '09:30 AM',
-        ),
-        const _NoticeCard(
-          date: '12 MAR',
-          tag: 'UPDATE',
-          title: 'Please check in before your session',
-          time: '02:15 PM',
-        ),
-        const _NoticeCard(
-          date: '08 MAR',
-          tag: 'NOTICE',
-          title: 'Keep our courts clean and ready',
-          time: '11:00 AM',
+            ],
+          ),
         ),
       ],
     );
   }
-}
 
-class _StatCard extends StatelessWidget {
-  final IconData icon;
-  final String count;
-  final String label;
+  Widget _buildBookTabPlaceholder() {
+    return const SizedBox();
+  }
 
-  const _StatCard({
-    required this.icon,
-    required this.count,
-    required this.label,
-  });
-
-  @override
-  Widget build(BuildContext context) => Container(
-    constraints: const BoxConstraints(minHeight: 112),
-    padding: const EdgeInsets.all(16),
-    decoration: BoxDecoration(
-      color: Colors.white,
-      borderRadius: BorderRadius.circular(14),
-    ),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+  // PROFILE TAB
+  Widget _buildProfileTab() {
+    return ListView(
+      padding: const EdgeInsets.all(20),
       children: [
-        Icon(icon, color: _green),
-        const SizedBox(height: 10),
-        Text(
-          count,
-          style: const TextStyle(
-            fontSize: 22,
-            fontWeight: FontWeight.bold,
-            color: _green,
-          ),
-        ),
-        Text(
-          label,
-          style: const TextStyle(fontSize: 12, color: Colors.black54),
-        ),
-      ],
-    ),
-  );
-}
-
-class _NoticeCard extends StatelessWidget {
-  final String date;
-  final String tag;
-  final String title;
-  final String time;
-
-  const _NoticeCard({
-    required this.date,
-    required this.tag,
-    required this.title,
-    required this.time,
-  });
-
-  @override
-  Widget build(BuildContext context) => Card(
-    color: Colors.white,
-    margin: const EdgeInsets.only(bottom: 10),
-    child: Padding(
-      padding: const EdgeInsets.all(14),
-      child: Row(
-        children: [
-          Container(
-            width: 52,
-            padding: const EdgeInsets.symmetric(vertical: 10),
-            decoration: BoxDecoration(
-              color: _pale,
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Text(
-              date,
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                fontSize: 11,
-                color: _green,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  tag,
-                  style: const TextStyle(
-                    color: _green,
-                    fontSize: 10,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: .7,
+        Center(
+          child: Column(
+            children: [
+              Container(
+                width: 72,
+                height: 72,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFE8F6C8),
+                  shape: BoxShape.circle,
+                  border: Border.all(color: primaryGreen, width: 2),
+                ),
+                child: Center(
+                  child: Text(
+                    _initials,
+                    style: TextStyle(
+                      fontSize: 26,
+                      fontWeight: FontWeight.bold,
+                      color: primaryGreen,
+                    ),
                   ),
                 ),
-                const SizedBox(height: 4),
-                Text(
-                  title,
-                  style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                widget.account.fullName,
+                style: const TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: Color(0xFF103B2B),
                 ),
-                const SizedBox(height: 3),
-                Text(
-                  time,
-                  style: const TextStyle(color: Colors.black45, fontSize: 12),
-                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                widget.account.matric,
+                style: TextStyle(fontSize: 14, color: Colors.grey.shade600),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 24),
+        Card(
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              children: [
+                _profileDetailRow('Email', widget.account.email),
+                const Divider(),
+                _profileDetailRow('Contact', widget.account.contact),
+                const Divider(),
+                _profileDetailRow('Category', widget.account.category),
+                const Divider(),
+                _profileDetailRow('Matric No.', widget.account.matric),
               ],
             ),
           ),
+        ),
+        const SizedBox(height: 24),
+        FilledButton.icon(
+          style: FilledButton.styleFrom(
+            backgroundColor: Colors.red.shade700,
+            minimumSize: const Size.fromHeight(50),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          ),
+          onPressed: widget.onLogout,
+          icon: const Icon(Icons.logout),
+          label: const Text('Log out'),
+        ),
+      ],
+    );
+  }
+
+  Widget _profileDetailRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label, style: const TextStyle(color: Colors.grey)),
+          Text(value, style: const TextStyle(fontWeight: FontWeight.w600)),
         ],
       ),
-    ),
-  );
+    );
+  }
+
+  void _openFacilityInfo() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => FacilityInfoScreen(
+          category: widget.account.category,
+          email: widget.account.email,
+        ),
+      ),
+    );
+  }
+
+  void _openFacilitiesScreen() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => FacilitiesScreen(
+          category: widget.account.category,
+          email: widget.account.email,
+        ),
+      ),
+    );
+  }
+
+  void _openBookingRecords() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) =>
+            BookingRecordsScreen(email: widget.account.email),
+      ),
+    );
+  }
 }
+
+// Custom Painter for Hero Banner artistic court styling and smash motion lines
+class _BadmintonCourtSmashPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final courtLinePaint = Paint()
+      ..color = Colors.white.withValues(alpha: 0.08)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.5;
+
+    final limeLinePaint = Paint()
+      ..color = const Color(0xFFD2F865).withValues(alpha: 0.12)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.0;
+
+    // Court isometric / dynamic perspective lines on right side
+    final path = Path();
+    path.moveTo(size.width * 0.45, 0);
+    path.lineTo(size.width, size.height * 0.7);
+    path.lineTo(size.width * 0.7, size.height);
+    path.lineTo(size.width * 0.25, size.height * 0.3);
+    path.close();
+    canvas.drawPath(path, courtLinePaint);
+
+    // Shuttle smash arc
+    final arcPath = Path();
+    arcPath.moveTo(size.width * 0.9, size.height * 0.15);
+    arcPath.quadraticBezierTo(
+      size.width * 0.65,
+      size.height * 0.45,
+      size.width * 0.5,
+      size.height * 0.9,
+    );
+    canvas.drawPath(arcPath, limeLinePaint);
+
+    // Decorative circle
+    final glowPaint = Paint()
+      ..color = const Color(0xFF1B5E44).withValues(alpha: 0.3)
+      ..style = PaintingStyle.fill;
+    canvas.drawCircle(
+      Offset(size.width * 0.85, size.height * 0.3),
+      60,
+      glowPaint,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+

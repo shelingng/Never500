@@ -1,19 +1,24 @@
 import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
-import '../services/auth_service.dart';
-import 'home_screen.dart';
-import 'admin/admin_dashboard.dart'; // 引入管理员页面
+import '../models/student_account.dart';
 
-class LoginScreen extends StatefulWidget {
-  const LoginScreen({super.key});
+class AuthScreen extends StatefulWidget {
+  final List<StudentAccount> accounts;
+  final Function(StudentAccount) onRegister;
+  final Function(StudentAccount) onLogin;
+
+  const AuthScreen({
+    super.key,
+    required this.accounts,
+    required this.onRegister,
+    required this.onLogin,
+  });
 
   @override
-  State<LoginScreen> createState() => _LoginScreenState();
+  State<AuthScreen> createState() => _AuthScreenState();
 }
 
-class _LoginScreenState extends State<LoginScreen> {
+class _AuthScreenState extends State<AuthScreen> {
   final _formKey = GlobalKey<FormState>();
-  final AuthService _authService = AuthService();
 
   final nameController = TextEditingController();
   final emailController = TextEditingController();
@@ -25,9 +30,11 @@ class _LoginScreenState extends State<LoginScreen> {
   bool isSignup = false;
   bool acceptedDeclaration = false;
   bool showPassword = false;
-  bool isLoading = false;
   String category = 'KRP Student';
   String message = '';
+
+  final Color primaryGreen = const Color(0xFF103B2B);
+  final Color accentLime = const Color(0xFFD2F865);
 
   @override
   void dispose() {
@@ -40,68 +47,71 @@ class _LoginScreenState extends State<LoginScreen> {
     super.dispose();
   }
 
-  Future<void> submit() async {
+  void submit() {
     if (!_formKey.currentState!.validate()) return;
-    
-    setState(() {
-      isLoading = true;
-      message = '';
-    });
 
     final email = emailController.text.trim().toLowerCase();
     final password = passwordController.text;
 
-    try {
-      if (isSignup) {
-        if (!acceptedDeclaration) {
-          throw Exception('Please accept the student declaration.');
-        }
-        if (password != confirmController.text) {
-          throw Exception('Passwords do not match.');
-        }
-        
-        await _authService.signUp(
-          email: email,
-          password: password,
-          fullName: nameController.text.trim(),
-          contact: contactController.text.trim(),
-          matric: matricController.text.trim(),
-          category: category,
-        );
-        
+    if (isSignup) {
+      if (!acceptedDeclaration) {
         setState(() {
-          isSignup = false;
-          message = 'Account created successfully! Please sign in.';
+          message = 'Please accept the student declaration.';
         });
-      } else {
-        final role = await _authService.signIn(email: email, password: password);
-        
-        if (!mounted) return;
-        // 核心路由逻辑：根据权限身份跳转不同页面
-        if (role == 'admin') {
-          Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(builder: (context) => const AdminHomeScreen()),
-          );
-        } else {
-          Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(builder: (context) => const HomeScreen()),
-          );
+        return;
+      }
+
+      final exists = widget.accounts.any((account) => account.email == email);
+
+      if (exists) {
+        setState(() {
+          message = 'This email is already registered.';
+        });
+        return;
+      }
+
+      if (password != confirmController.text) {
+        setState(() {
+          message = 'Passwords do not match.';
+        });
+        return;
+      }
+
+      final account = StudentAccount(
+        fullName: nameController.text.trim(),
+        email: email,
+        contact: contactController.text.trim(),
+        matric: matricController.text.trim(),
+        category: category,
+        password: password,
+      );
+
+      widget.onRegister(account);
+    } else {
+      StudentAccount? account;
+
+      for (final item in widget.accounts) {
+        if (item.email == email && item.password == password) {
+          account = item;
+          break;
         }
       }
-    } on AuthException catch (e) {
-      setState(() => message = e.message);
-    } catch (e) {
-      setState(() => message = e.toString().replaceAll('Exception: ', ''));
-    } finally {
-      if (mounted) setState(() => isLoading = false);
+
+      if (account == null) {
+        setState(() {
+          message = 'Account not found. Please check your details.';
+        });
+        return;
+      }
+
+      widget.onLogin(account);
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: const Color(0xFFF7F9F7),
       body: Center(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(24),
@@ -109,119 +119,197 @@ class _LoginScreenState extends State<LoginScreen> {
             constraints: const BoxConstraints(maxWidth: 460),
             child: Card(
               color: Colors.white,
-              elevation: 4,
-              shadowColor: Colors.black12,
+              elevation: 2,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(24),
+                side: const BorderSide(color: Color(0xFFE9EFEA)),
               ),
               child: Padding(
-                padding: const EdgeInsets.all(32),
+                padding: const EdgeInsets.all(28),
                 child: Form(
                   key: _formKey,
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      const Icon(Icons.sports_tennis, size: 56, color: Color(0xFF173F32)),
-                      const SizedBox(height: 12),
-                      const Text(
+                      Center(
+                        child: Container(
+                          width: 58,
+                          height: 58,
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFE8F6C8),
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                          child: Icon(
+                            Icons.sports_tennis,
+                            size: 32,
+                            color: primaryGreen,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      Text(
                         'KRP PLAY',
                         textAlign: TextAlign.center,
                         style: TextStyle(
-                          fontSize: 28,
-                          fontWeight: FontWeight.w900,
-                          color: Color(0xFF173F32),
-                          letterSpacing: 1.5,
+                          fontSize: 26,
+                          fontWeight: FontWeight.bold,
+                          color: primaryGreen,
+                          letterSpacing: 0.5,
                         ),
                       ),
-                      const SizedBox(height: 32),
-                      Text(
-                        isSignup ? 'Create Account' : 'Welcome Back',
-                        style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+                      const Text(
+                        'SPORTS HUB · UTM',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          letterSpacing: 2.5,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.grey,
+                        ),
                       ),
-                      const SizedBox(height: 8),
+                      const SizedBox(height: 28),
                       Text(
-                        isSignup ? 'Register to book facilities' : 'Sign in to your account',
-                        style: const TextStyle(color: Colors.grey),
+                        isSignup ? 'Create your account' : 'Welcome back',
+                        style: const TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        isSignup
+                            ? 'Register to book KRP sports facilities.'
+                            : 'Sign in to continue to KRP PLAY.',
+                        style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
                       ),
                       const SizedBox(height: 24),
-
-                      // 动态展开注册字段
-                      AnimatedCrossFade(
-                        firstChild: const SizedBox.shrink(),
-                        secondChild: Column(
-                          children: [
-                            _field(nameController, 'Full name', Icons.person_outline, isSignupField: true),
-                            _field(contactController, 'Contact number', Icons.phone_outlined, isSignupField: true),
-                            _field(matricController, 'Matric number', Icons.badge_outlined, isSignupField: true),
-                            DropdownButtonFormField<String>(
-                              value: category,
-                              decoration: const InputDecoration(
-                                labelText: 'Student category',
-                                border: OutlineInputBorder(),
-                                prefixIcon: Icon(Icons.school_outlined),
-                              ),
-                              items: const [
-                                DropdownMenuItem(value: 'KRP Student', child: Text('KRP Student')),
-                                DropdownMenuItem(value: 'Non-KRP Student', child: Text('Non-KRP Student')),
-                              ],
-                              onChanged: (val) => setState(() => category = val!),
-                            ),
-                            const SizedBox(height: 16),
-                          ],
-                        ),
-                        crossFadeState: isSignup ? CrossFadeState.showSecond : CrossFadeState.showFirst,
-                        duration: const Duration(milliseconds: 300),
-                      ),
-
-                      _field(emailController, 'Email address', Icons.email_outlined, email: true),
-                      _field(passwordController, 'Password', Icons.lock_outline, obscure: !showPassword),
-
                       if (isSignup) ...[
-                        _field(confirmController, 'Confirm password', Icons.lock_outline, obscure: !showPassword),
+                        _field(
+                          nameController,
+                          'Full name',
+                          Icons.person_outline,
+                        ),
+                        _field(
+                          contactController,
+                          'Contact number',
+                          Icons.phone_outlined,
+                        ),
+                        _field(
+                          matricController,
+                          'Matric number',
+                          Icons.badge_outlined,
+                        ),
+                        const SizedBox(height: 12),
+                        DropdownButtonFormField<String>(
+                          initialValue: category,
+                          decoration: const InputDecoration(
+                            labelText: 'Student category',
+                            border: OutlineInputBorder(),
+                          ),
+                          items: const [
+                            DropdownMenuItem(
+                              value: 'KRP Student',
+                              child: Text('KRP Student'),
+                            ),
+                            DropdownMenuItem(
+                              value: 'Non-KRP Student / Other College',
+                              child: Text('Non-KRP Student / Other College'),
+                            ),
+                          ],
+                          onChanged: (value) {
+                            if (value != null) {
+                              setState(() => category = value);
+                            }
+                          },
+                        ),
+                        const SizedBox(height: 16),
+                      ],
+                      _field(
+                        emailController,
+                        'Email address',
+                        Icons.email_outlined,
+                        email: true,
+                      ),
+                      _field(
+                        passwordController,
+                        'Password',
+                        Icons.lock_outline,
+                        obscure: !showPassword,
+                      ),
+                      if (isSignup) ...[
+                        _field(
+                          confirmController,
+                          'Confirm password',
+                          Icons.lock_outline,
+                          obscure: true,
+                        ),
                         CheckboxListTile(
                           contentPadding: EdgeInsets.zero,
                           value: acceptedDeclaration,
-                          onChanged: (val) => setState(() => acceptedDeclaration = val ?? false),
+                          onChanged: (value) {
+                            setState(() {
+                              acceptedDeclaration = value ?? false;
+                            });
+                          },
                           title: const Text(
-                            'I verify my information is accurate.',
-                            style: TextStyle(fontSize: 13),
+                            'I confirm that my selected student category and information are accurate. I understand that KRP management may verify my eligibility.',
+                            style: TextStyle(fontSize: 12),
                           ),
                           controlAffinity: ListTileControlAffinity.leading,
                         ),
                       ],
-
-                      Align(
-                        alignment: Alignment.centerRight,
-                        child: TextButton(
-                          onPressed: () => setState(() => showPassword = !showPassword),
-                          child: Text(showPassword ? 'Hide password' : 'Show password'),
+                      if (!isSignup)
+                        Align(
+                          alignment: Alignment.centerRight,
+                          child: TextButton(
+                            onPressed: () {
+                              setState(() => showPassword = !showPassword);
+                            },
+                            child: Text(
+                              showPassword ? 'Hide password' : 'Show password',
+                              style: TextStyle(color: primaryGreen),
+                            ),
+                          ),
                         ),
-                      ),
-
-                      if (message.isNotEmpty)
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 16),
-                          child: Text(message, style: TextStyle(color: message.contains('success') ? Colors.green : Colors.red)),
+                      if (message.isNotEmpty) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          message,
+                          style: const TextStyle(color: Colors.red, fontSize: 13),
                         ),
-
+                      ],
+                      const SizedBox(height: 18),
                       FilledButton(
                         style: FilledButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 16),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          backgroundColor: primaryGreen,
+                          minimumSize: const Size.fromHeight(52),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
                         ),
-                        onPressed: isLoading ? null : submit,
-                        child: isLoading
-                            ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                            : Text(isSignup ? 'Create Account' : 'Sign In', style: const TextStyle(fontSize: 16)),
+                        onPressed: submit,
+                        child: Text(
+                          isSignup ? 'Create account' : 'Sign in',
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
                       ),
-                      
                       const SizedBox(height: 16),
                       TextButton(
-                        onPressed: () => setState(() {
-                          isSignup = !isSignup;
-                          message = '';
-                        }),
-                        child: Text(isSignup ? 'Already have an account? Sign in' : 'New user? Create an account'),
+                        onPressed: () {
+                          setState(() {
+                            isSignup = !isSignup;
+                            message = '';
+                          });
+                        },
+                        child: Text(
+                          isSignup
+                              ? 'Already have an account? Sign in'
+                              : 'New user? Create an account',
+                          style: TextStyle(color: primaryGreen),
+                        ),
                       ),
                     ],
                   ),
@@ -234,28 +322,44 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 
-  Widget _field(TextEditingController controller, String label, IconData icon, {bool email = false, bool obscure = false, bool isSignupField = false}) {
+  Widget _field(
+    TextEditingController controller,
+    String label,
+    IconData icon, {
+    bool email = false,
+    bool obscure = false,
+  }) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.only(bottom: 14),
       child: TextFormField(
         controller: controller,
         obscureText: obscure,
         keyboardType: email ? TextInputType.emailAddress : TextInputType.text,
         decoration: InputDecoration(
           labelText: label,
-          prefixIcon: Icon(icon),
-          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+          prefixIcon: Icon(icon, color: primaryGreen),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide(color: primaryGreen, width: 2),
+          ),
         ),
         validator: (value) {
-          // 🚨 核心修复：如果是登录模式，且当前是注册专属字段，直接跳过校验！
-          if (isSignupField && !isSignup) return null;
-
-          if (value == null || value.trim().isEmpty) return 'Please enter $label';
-          if (email && !value.contains('@')) return 'Invalid email';
-          if (label == 'Password' && value.length < 6) return 'At least 6 characters';
+          if (value == null || value.trim().isEmpty) {
+            return 'Please enter $label';
+          }
+          if (email && !value.contains('@')) {
+            return 'Please enter a valid email';
+          }
+          if (label == 'Password' && value.length < 8) {
+            return 'Use at least 8 characters';
+          }
           return null;
         },
       ),
     );
   }
 }
+

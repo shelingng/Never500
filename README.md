@@ -512,7 +512,7 @@ Never500/
 │
 ├── README.md
 │
-└── never500/
+└── krp_play/
     │
     ├── android/
     ├── ios/
@@ -606,7 +606,7 @@ git clone https://github.com/shelingng/Never500.git
 ### 2. Navigate to the Flutter Project
 
 ```bash
-cd Never500/never500
+cd krp_play
 ```
 
 ### 3. Check Flutter Installation
