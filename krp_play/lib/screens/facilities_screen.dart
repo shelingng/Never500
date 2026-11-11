@@ -8,11 +8,13 @@ import '../services/booking_service.dart';
 class FacilitiesScreen extends StatefulWidget {
   final String category;
   final String email;
+  final VoidCallback? onMenuPressed;
 
   const FacilitiesScreen({
     super.key,
     required this.category,
     required this.email,
+    this.onMenuPressed,
   });
 
   @override
@@ -140,6 +142,12 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
 
     return Scaffold(
       appBar: AppBar(
+        leading: widget.onMenuPressed == null
+            ? null
+            : IconButton(
+                icon: const Icon(Icons.menu),
+                onPressed: widget.onMenuPressed,
+              ),
         title: const Text('Book a Facility'),
         backgroundColor: const Color(0xFF173F32),
         foregroundColor: Colors.white,

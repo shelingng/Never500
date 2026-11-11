@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../models/booking.dart';
+import '../services/booking_service.dart';
 
 class PaymentScreen extends StatefulWidget {
   final Booking booking;
@@ -12,12 +13,24 @@ class PaymentScreen extends StatefulWidget {
 }
 
 class _PaymentScreenState extends State<PaymentScreen> {
-  String selectedPaymentMethod = 'Online Banking';
+  String selectedPaymentMethod = 'Touch \'n Go eWallet';
+  String selectedBank = 'Maybank';
   bool isProcessing = false;
 
   final Color primaryColor = const Color(0xFF173F32);
+  final List<String> banks = const [
+    'Maybank',
+    'CIMB Bank',
+    'Public Bank',
+    'RHB Bank',
+    'Hong Leong Bank',
+    'AmBank',
+    'Bank Islam',
+    'BSN',
+  ];
 
   void confirmPayment() {
+    BookingService.instance.recordPayment(widget.booking);
     setState(() {
       isProcessing = true;
     });
@@ -217,23 +230,36 @@ class _PaymentScreenState extends State<PaymentScreen> {
           const SizedBox(height: 12),
 
           _paymentOption(
-            title: 'Online Banking',
-            subtitle: 'Pay through online banking',
+            title: 'FPX Online Banking',
+            subtitle: 'Pay securely from your bank',
             icon: Icons.account_balance,
           ),
 
           _paymentOption(
-            title: 'Debit / Credit Card',
-            subtitle: 'Pay using your bank card',
-            icon: Icons.credit_card,
-          ),
-
-          _paymentOption(
-            title: 'E-Wallet',
-            subtitle: 'Pay using an e-wallet',
+            title: 'Touch \'n Go eWallet',
+            subtitle: 'Pay using your TNG eWallet',
             icon: Icons.account_balance_wallet,
           ),
 
+          if (selectedPaymentMethod == 'FPX Online Banking') ...[
+            const SizedBox(height: 4),
+            DropdownButtonFormField<String>(
+              initialValue: selectedBank,
+              decoration: const InputDecoration(
+                labelText: 'Select your bank',
+                prefixIcon: Icon(Icons.account_balance),
+                border: OutlineInputBorder(),
+              ),
+              items: banks
+                  .map(
+                    (bank) => DropdownMenuItem(value: bank, child: Text(bank)),
+                  )
+                  .toList(),
+              onChanged: (bank) {
+                if (bank != null) setState(() => selectedBank = bank);
+              },
+            ),
+          ],
           const SizedBox(height: 25),
 
           // CONFIRM PAYMENT
