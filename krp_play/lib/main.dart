@@ -4,20 +4,7 @@ import 'screens/login_screen.dart';
 import 'screens/facility_info_screen.dart';
 
 void main() {
-  runApp(
-    const KrpPlayApp(
-      // Default test account for developer convenience (Looi Yu Xiang)
-      // Pass null to test the sign-in / registration flow
-      initialAccount: StudentAccount(
-        fullName: 'Looi Yu Xiang',
-        email: 'yuxiang@student.utm.my',
-        contact: '0123456789',
-        matric: 'A24CS0107',
-        category: 'KRP Student',
-        password: 'devpassword123',
-      ),
-    ),
-  );
+  runApp(const KrpPlayApp());
 }
 
 class KrpPlayApp extends StatefulWidget {
@@ -86,6 +73,8 @@ class _KrpPlayAppState extends State<KrpPlayApp> {
               category: currentAccount!.category,
               email: currentAccount!.email,
               studentName: currentAccount!.fullName,
+              contact: currentAccount!.contact,
+              matric: currentAccount!.matric,
               onLogout: logout,
             ),
     );

@@ -10,9 +10,21 @@ const _pale = Color(0xFFE7F0E8);
 
 class ProfileScreen extends StatefulWidget {
   final String email;
+  final String? fullName;
+  final String? contact;
+  final String? matric;
+  final String? category;
   final int initialTab;
 
-  const ProfileScreen({super.key, required this.email, this.initialTab = 0});
+  const ProfileScreen({
+    super.key,
+    required this.email,
+    this.fullName,
+    this.contact,
+    this.matric,
+    this.category,
+    this.initialTab = 0,
+  });
 
   @override
   State<ProfileScreen> createState() => _ProfileScreenState();
@@ -22,11 +34,20 @@ class _ProfileScreenState extends _ProfileSectionsState {
   late int _tab = widget.initialTab;
   bool _editing = false, _verified = false;
   String _category = 'KRP Student';
-  final _name = TextEditingController(text: 'Ng She Ling');
+  final _name = TextEditingController();
   final _contact = TextEditingController();
   final _matric = TextEditingController();
   final _password = TextEditingController();
   final _confirm = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    _name.text = widget.fullName ?? 'Ng She Ling';
+    _contact.text = widget.contact ?? '';
+    _matric.text = widget.matric ?? '';
+    _category = widget.category ?? 'KRP Student';
+  }
 
   @override
   List<Booking> get _bookings {

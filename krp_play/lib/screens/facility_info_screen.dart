@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 import 'facilities_screen.dart';
 import 'booking_records_screen.dart';
+import 'profile_screen.dart';
 
 class FacilityInfoScreen extends StatefulWidget {
   final String category;
   final String email;
   final String studentName;
+  final String contact;
+  final String matric;
   final VoidCallback? onLogout;
 
   const FacilityInfoScreen({
@@ -13,6 +16,8 @@ class FacilityInfoScreen extends StatefulWidget {
     required this.category,
     required this.email,
     this.studentName = 'Yu Xiang',
+    this.contact = '',
+    this.matric = '',
     this.onLogout,
   });
 
@@ -25,6 +30,7 @@ class _FacilityInfoScreenState extends State<FacilityInfoScreen> {
   final Color accentLime = const Color(0xFFD2F865);
   final Color subtleBorder = const Color(0xFFE9EFEA);
 
+  int _selectedTab = 0;
   int _currentCarouselIndex = 0;
   final PageController _pageController = PageController();
 
@@ -151,6 +157,15 @@ class _FacilityInfoScreenState extends State<FacilityInfoScreen> {
                 );
               },
             ),
+            ListTile(
+              leading: const Icon(Icons.person_outline),
+              title: const Text('Profile'),
+              selected: _selectedTab == 2,
+              onTap: () {
+                Navigator.pop(context);
+                setState(() => _selectedTab = 2);
+              },
+            ),
             if (widget.onLogout != null) ...[
               const Divider(),
               ListTile(
@@ -185,8 +200,8 @@ class _FacilityInfoScreenState extends State<FacilityInfoScreen> {
             );
           },
         ),
-        title: const Text(
-          'KRP Sports Complex',
+        title: Text(
+          _selectedTab == 2 ? 'Profile' : 'KRP Sports Complex',
           style: TextStyle(
             fontSize: 18,
             fontWeight: FontWeight.bold,
@@ -220,7 +235,15 @@ class _FacilityInfoScreenState extends State<FacilityInfoScreen> {
           ),
         ],
       ),
-      body: Stack(
+      body: _selectedTab == 2
+          ? ProfileScreen(
+              email: widget.email,
+              fullName: widget.studentName,
+              contact: widget.contact,
+              matric: widget.matric,
+              category: widget.category,
+            )
+          : Stack(
         children: [
           ListView(
             padding: const EdgeInsets.only(bottom: 100),
@@ -523,6 +546,99 @@ class _FacilityInfoScreenState extends State<FacilityInfoScreen> {
             ),
           ),
         ],
+      ),
+      bottomNavigationBar: Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          border: Border(top: BorderSide(color: subtleBorder)),
+        ),
+        child: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              children: [
+                _bottomNavItem(
+                  index: 0,
+                  label: 'Home',
+                  icon: Icons.home_outlined,
+                  activeIcon: Icons.home_rounded,
+                ),
+                _bottomNavItem(
+                  index: 1,
+                  label: 'Book',
+                  icon: Icons.calendar_month_outlined,
+                  activeIcon: Icons.calendar_month_rounded,
+                ),
+                _bottomNavItem(
+                  index: 2,
+                  label: 'Profile',
+                  icon: Icons.person_outline,
+                  activeIcon: Icons.person_rounded,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _bottomNavItem({
+    required int index,
+    required String label,
+    required IconData icon,
+    required IconData activeIcon,
+  }) {
+    final active = _selectedTab == index;
+    return InkWell(
+      onTap: () {
+        if (index == 1) {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => FacilitiesScreen(
+                category: widget.category,
+                email: widget.email,
+                studentName: widget.studentName,
+              ),
+            ),
+          );
+        } else {
+          setState(() => _selectedTab = index);
+        }
+      },
+      borderRadius: BorderRadius.circular(14),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 3),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 38,
+              height: 32,
+              decoration: BoxDecoration(
+                color: active ? const Color(0xFFE8F6C8) : Colors.transparent,
+                borderRadius: BorderRadius.circular(11),
+              ),
+              alignment: Alignment.center,
+              child: Icon(
+                active ? activeIcon : icon,
+                color: active ? primaryGreen : Colors.grey.shade600,
+                size: 21,
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+                color: active ? primaryGreen : Colors.grey.shade600,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -995,4 +1111,3 @@ class _FacilityInfoScreenState extends State<FacilityInfoScreen> {
     );
   }
 }
-

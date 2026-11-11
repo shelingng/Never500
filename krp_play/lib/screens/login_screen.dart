@@ -180,7 +180,10 @@ class _AuthScreenState extends State<AuthScreen> {
                         isSignup
                             ? 'Register to book KRP sports facilities.'
                             : 'Sign in to continue to KRP PLAY.',
-                        style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
+                        style: TextStyle(
+                          color: Colors.grey.shade600,
+                          fontSize: 13,
+                        ),
                       ),
                       const SizedBox(height: 24),
                       if (isSignup) ...[
@@ -201,19 +204,34 @@ class _AuthScreenState extends State<AuthScreen> {
                         ),
                         const SizedBox(height: 12),
                         DropdownButtonFormField<String>(
+                          isExpanded: true,
                           initialValue: category,
-                          decoration: const InputDecoration(
+                          decoration: InputDecoration(
                             labelText: 'Student category',
-                            border: OutlineInputBorder(),
+                            prefixIcon: Icon(
+                              Icons.school_outlined,
+                              color: primaryGreen,
+                            ),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
                           ),
                           items: const [
                             DropdownMenuItem(
                               value: 'KRP Student',
-                              child: Text('KRP Student'),
+                              child: Text(
+                                'KRP Student',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
                             ),
                             DropdownMenuItem(
-                              value: 'Non-KRP Student / Other College',
-                              child: Text('Non-KRP Student / Other College'),
+                              value: 'Non-KRP Student',
+                              child: Text(
+                                'Non-KRP Student',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
                             ),
                           ],
                           onChanged: (value) {
@@ -275,7 +293,10 @@ class _AuthScreenState extends State<AuthScreen> {
                         const SizedBox(height: 8),
                         Text(
                           message,
-                          style: const TextStyle(color: Colors.red, fontSize: 13),
+                          style: const TextStyle(
+                            color: Colors.red,
+                            fontSize: 13,
+                          ),
                         ),
                       ],
                       const SizedBox(height: 18),
@@ -338,9 +359,7 @@ class _AuthScreenState extends State<AuthScreen> {
         decoration: InputDecoration(
           labelText: label,
           prefixIcon: Icon(icon, color: primaryGreen),
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
           focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(12),
             borderSide: BorderSide(color: primaryGreen, width: 2),
@@ -362,4 +381,3 @@ class _AuthScreenState extends State<AuthScreen> {
     );
   }
 }
-
