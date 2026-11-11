@@ -1,11 +1,11 @@
-import 'screens/facilities_screen.dart';
 import 'screens/login_screen.dart';
+
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  
+
   await Supabase.initialize(
     url: 'https://ckhpsnuiypxetkmigqua.supabase.co',
     anonKey: 'sb_publishable_jByO0pC0UVwMS5Jr1v5jhQ_VaCx8NV5',
@@ -49,12 +49,15 @@ class _KrpPlayAppState extends State<KrpPlayApp> {
         useMaterial3: true,
         colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF173F32)),
         scaffoldBackgroundColor: const Color(0xFFF4F6F4),
+        fontFamily: 'Roboto',
+        appBarTheme: const AppBarTheme(
+          backgroundColor: Color(0xFFF4F6F4),
+          foregroundColor: Color(0xFF173F32),
+          elevation: 0,
+          centerTitle: false,
+        ),
       ),
-      // 更改这里：不再判断 currentAccount，直接去登录页，后续逻辑交给 Supabase
-      home: const LoginScreen(), 
+      home: const LoginScreen(),
     );
   }
 }
-
-
-

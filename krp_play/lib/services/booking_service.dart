@@ -12,6 +12,24 @@ class BookingService {
   // Return all bookings without allowing external modification.
   List<Booking> get bookings => List.unmodifiable(_bookings);
 
+  void recordPayment(Booking booking) {
+    final index = _bookings.indexWhere((item) => item.id == booking.id);
+    if (index < 0) {
+      throw StateError('Cannot confirm payment for an unknown booking.');
+    }
+    _bookings[index] = Booking(
+      id: booking.id,
+      userEmail: booking.userEmail,
+      facilityName: booking.facilityName,
+      date: booking.date,
+      timeSlots: booking.timeSlots,
+      pricePerSession: booking.pricePerSession,
+      participants: booking.participants,
+      totalPrice: booking.totalPrice,
+      status: 'Confirmed',
+    );
+  }
+
   // Convert a time such as "5:00 PM" into minutes after midnight.
   int _minutesFor(String time) {
     final parts = time.split(' ');
