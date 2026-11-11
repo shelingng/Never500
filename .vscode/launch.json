@@ -1,0 +1,13 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "KRP PLAY (krp_play)",
+      "request": "launch",
+      "type": "dart",
+      "cwd": "krp_play",
+      "program": "krp_play/lib/main.dart"
+    }
+  ]
+}
+

@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
-import 'payment_screen.dart';
 import '../models/booking.dart';
+import '../services/booking_service.dart';
 
 class PaymentScreen extends StatefulWidget {
   final Booking booking;
@@ -16,16 +16,31 @@ class _PaymentScreenState extends State<PaymentScreen> {
   String selectedPaymentMethod = 'Online Banking';
   bool isProcessing = false;
 
-  final Color primaryColor = const Color(0xFF173F32);
+  final Color primaryColor = const Color(0xFF103B2B);
 
   void confirmPayment() {
     setState(() {
       isProcessing = true;
     });
 
-    // Prototype only: no real payment transaction occurs.
+    // Prototype: simulate payment confirmation and update database status
     Future.delayed(const Duration(seconds: 1), () {
       if (!mounted) return;
+
+      // Update database status: add confirmed booking to BookingService
+      BookingService.instance.addBooking(
+        Booking(
+          id: widget.booking.id,
+          userEmail: widget.booking.userEmail,
+          facilityName: widget.booking.facilityName,
+          date: widget.booking.date,
+          timeSlots: widget.booking.timeSlots,
+          pricePerSession: widget.booking.pricePerSession,
+          participants: widget.booking.participants,
+          totalPrice: widget.booking.totalPrice,
+          status: 'Confirmed',
+        ),
+      );
 
       setState(() {
         isProcessing = false;
@@ -53,9 +68,10 @@ class _PaymentScreenState extends State<PaymentScreen> {
 
                 const SizedBox(height: 10),
 
-                const Text(
-                  'Your payment process has been completed in this prototype.',
+                Text(
+                  'Booking confirmed for ${widget.booking.facilityName}. Database status updated.',
                   textAlign: TextAlign.center,
+                  style: const TextStyle(fontSize: 13),
                 ),
 
                 const SizedBox(height: 20),
@@ -68,8 +84,9 @@ class _PaymentScreenState extends State<PaymentScreen> {
                     ),
                     onPressed: () {
                       Navigator.of(context)
-                        ..pop()
-                        ..pop();
+                        ..pop() // close dialog
+                        ..pop() // pop PaymentScreen
+                        ..pop(); // pop BookingConfirmScreen back to Court Layout
                     },
                     child: const Text('Done'),
                   ),
