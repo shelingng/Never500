@@ -8,54 +8,284 @@ class AdminBookingsTab extends StatefulWidget {
 }
 
 class _AdminBookingsTabState extends State<AdminBookingsTab> {
-  String _selectedCategory = 'All Categories';
-  final TextEditingController _searchController = TextEditingController();
+  static const _green = Color(0xFF173F32);
 
-  // Mock database of bookings
-  final _bookings = [
+  final _searchController = TextEditingController();
+
+  String _selectedCategory = 'All Categories';
+  String _selectedStatus = 'All Statuses';
+
+  // Fictional UI examples only. No database or real payment connection.
+  final List<Map<String, String>> _bookings = [
     {
-      'ref': '#KRP-1842', 'payId': 'PAY-731842', 'name': 'Ng She Ling', 'matric': 'A24CS0285', 'contact': '012-345 6789',
-      'category': 'KRP Student', 'facility': 'Badminton Court 01', 'date': '12 Nov 2026', 'time': '8:00 PM - 9:00 PM',
-      'price': 'RM 6.00', 'status': 'Confirmed'
+      'ref': 'DEMO-1842',
+      'payId': 'DEMO-PAY-1842',
+      'name': 'Sample Student A',
+      'matric': 'DEMO-001',
+      'contact': 'Not provided',
+      'category': 'KRP Student',
+      'facility': 'Badminton Court 01',
+      'date': '14 Nov 2026',
+      'time': '8:00 PM–9:00 PM',
+      'price': 'RM 6.00',
+      'status': 'Confirmed',
+      'paymentStatus': 'Paid',
     },
     {
-      'ref': '#KRP-1841', 'payId': 'PAY-731841', 'name': 'Amir Hakim', 'matric': 'A24CS0117', 'contact': '017-820 4412',
-      'category': 'Non-KRP Student', 'facility': 'Ping Pong Table 02', 'date': '12 Nov 2026', 'time': '6:00 PM - 7:00 PM',
-      'price': 'RM 6.00', 'status': 'Confirmed'
+      'ref': 'DEMO-1841',
+      'payId': 'DEMO-PAY-1841',
+      'name': 'Sample Student B',
+      'matric': 'DEMO-002',
+      'contact': 'Not provided',
+      'category': 'Non-KRP Student',
+      'facility': 'Ping Pong Table 02',
+      'date': '14 Nov 2026',
+      'time': '6:00 PM–7:00 PM',
+      'price': 'RM 6.00',
+      'status': 'Confirmed',
+      'paymentStatus': 'Paid',
     },
     {
-      'ref': '#KRP-1840', 'payId': 'PAY-731840', 'name': 'Tan Jia Yie', 'matric': 'A24CS0302', 'contact': '016-993 0208',
-      'category': 'KRP Student', 'facility': 'Snooker Table', 'date': '13 Nov 2026', 'time': '5:00 PM - 6:00 PM',
-      'price': 'RM 10.00', 'status': 'Confirmed'
+      'ref': 'DEMO-1840',
+      'payId': 'Not available',
+      'name': 'Sample Student C',
+      'matric': 'DEMO-003',
+      'contact': 'Not provided',
+      'category': 'KRP Student',
+      'facility': 'Snooker Table',
+      'date': '15 Nov 2026',
+      'time': '5:00 PM–6:00 PM',
+      'price': 'RM 10.00',
+      'status': 'Pending Payment',
+      'paymentStatus': 'Pending',
     },
     {
-      'ref': '#KRP-1839', 'payId': 'PAY-731839', 'name': 'Nur Izzati', 'matric': 'A24CS0211', 'contact': '011-310 7291',
-      'category': 'KRP Student', 'facility': 'Dart Board', 'date': '13 Nov 2026', 'time': '10:00 PM - 11:00 PM',
-      'price': 'RM 3.00', 'status': 'Confirmed'
+      'ref': 'DEMO-1839',
+      'payId': 'DEMO-PAY-1839',
+      'name': 'Sample Student D',
+      'matric': 'DEMO-004',
+      'contact': 'Not provided',
+      'category': 'KRP Student',
+      'facility': 'Dart Board',
+      'date': '15 Nov 2026',
+      'time': '10:00 PM–11:00 PM',
+      'price': 'RM 3.00',
+      'status': 'Cancelled',
+      'paymentStatus': 'Refunded',
     },
   ];
 
-  // Logic to filter bookings based on the dropdown category
-  get _filteredBookings {
-    if (_selectedCategory == 'All Categories') {
-      return _bookings;
-    }
-    return _bookings.where((b) => b['category'].toString().contains(_selectedCategory)).toList();
+  List<Map<String, String>> get _filteredBookings {
+    final query = _searchController.text.trim().toLowerCase();
+
+    return _bookings.where((booking) {
+      final matchesCategory =
+          _selectedCategory == 'All Categories' ||
+          booking['category'] == _selectedCategory;
+
+      final matchesStatus =
+          _selectedStatus == 'All Statuses' ||
+          booking['status'] == _selectedStatus;
+
+      final searchableText = [
+        booking['ref'] ?? '',
+        booking['payId'] ?? '',
+        booking['name'] ?? '',
+        booking['matric'] ?? '',
+        booking['facility'] ?? '',
+      ].join(' ').toLowerCase();
+
+      return matchesCategory && matchesStatus && searchableText.contains(query);
+    }).toList();
   }
 
-  // Opens the Refund Modal Bottom Sheet
-  void _showRefundModal(Map<String, dynamic> booking, int index) {
-    showModalBottomSheet(
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  void _clearFilters() {
+    setState(() {
+      _searchController.clear();
+      _selectedCategory = 'All Categories';
+      _selectedStatus = 'All Statuses';
+    });
+  }
+
+  Color _statusColor(String status) {
+    switch (status) {
+      case 'Confirmed':
+      case 'Paid':
+        return const Color(0xFF237346);
+      case 'Pending Payment':
+      case 'Pending':
+        return const Color(0xFF9A6500);
+      case 'Cancelled':
+      case 'Failed':
+        return const Color(0xFFB13D35);
+      case 'Refunded':
+        return const Color(0xFF6350A1);
+      default:
+        return Colors.blueGrey;
+    }
+  }
+
+  Widget _statusBadge(String status) {
+    final color = _statusColor(status);
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: color.withAlpha(22),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Text(
+        status,
+        style: TextStyle(
+          color: color,
+          fontSize: 12,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    );
+  }
+
+  Widget _detailRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 7),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            flex: 2,
+            child: Text(label, style: const TextStyle(color: Colors.grey)),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            flex: 3,
+            child: Text(
+              value,
+              style: const TextStyle(fontWeight: FontWeight.w600),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showDetails(Map<String, String> booking) {
+    showDialog<void>(
       context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (context) => _RefundProcessSheet(
-        booking: booking,
-        onRefundConfirmed: () {
-          setState(() {
-            // Update the status in our list to reflect the refund
-            _bookings[index]['status'] = 'Refunded';
-          });
+      builder: (dialogContext) => AlertDialog(
+        title: Text(booking['ref']!),
+        content: SizedBox(
+          width: 480,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Booking details',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+                const Divider(height: 24),
+                _detailRow('Student', booking['name']!),
+                _detailRow('Matric number', booking['matric']!),
+                _detailRow('Contact', booking['contact']!),
+                _detailRow('Category', booking['category']!),
+                const Divider(height: 24),
+                _detailRow('Facility', booking['facility']!),
+                _detailRow('Date', booking['date']!),
+                _detailRow('Time', booking['time']!),
+                _detailRow('Amount', booking['price']!),
+                _detailRow('Booking status', booking['status']!),
+                _detailRow('Payment status', booking['paymentStatus']!),
+                _detailRow('Payment reference', booking['payId']!),
+                const SizedBox(height: 16),
+                const Text(
+                  'Demo record only. No actual booking or payment.',
+                  style: TextStyle(fontSize: 12, color: Colors.grey),
+                ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _showDemoRefund(Map<String, String> booking) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Simulate refund'),
+        content: Text(
+          'Simulate a full refund for ${booking['ref']} '
+          '(${booking['price']})?\n\n'
+          'This changes this demo record to Cancelled / Refunded. '
+          'No money is transferred, and the separate Refunds page '
+          'is not updated.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Back'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Simulate refund'),
+          ),
+        ],
+      ),
+    );
+
+    if (!mounted || confirmed != true) return;
+
+    setState(() {
+      booking['status'] = 'Cancelled';
+      booking['paymentStatus'] = 'Refunded';
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Demo record updated. No actual refund was processed.'),
+      ),
+    );
+  }
+
+  Widget _filter({
+    required String label,
+    required String value,
+    required List<String> options,
+    required ValueChanged<String> onChanged,
+  }) {
+    return SizedBox(
+      width: 220,
+      child: DropdownButtonFormField<String>(
+        // Rebuild when Clear filters resets the selected value.
+        key: ValueKey('$label:$value'),
+        initialValue: value,
+        isExpanded: true,
+        decoration: InputDecoration(
+          labelText: label,
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+        ),
+        items: options
+            .map(
+              (option) =>
+                  DropdownMenuItem<String>(value: option, child: Text(option)),
+            )
+            .toList(),
+        onChanged: (selected) {
+          if (selected != null) onChanged(selected);
         },
       ),
     );
@@ -63,325 +293,246 @@ class _AdminBookingsTabState extends State<AdminBookingsTab> {
 
   @override
   Widget build(BuildContext context) {
-    final displayList = _filteredBookings;
+    final bookings = _filteredBookings;
 
     return SingleChildScrollView(
-      padding: const EdgeInsets.all(20.0),
+      padding: const EdgeInsets.all(20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('— SHARED BOOKING RECORDS', style: TextStyle(color: Color(0xFF173F32), fontWeight: FontWeight.bold, fontSize: 12, letterSpacing: 1)),
+          const Text(
+            'ADMIN BOOKING RECORDS',
+            style: TextStyle(
+              color: _green,
+              fontWeight: FontWeight.bold,
+              fontSize: 12,
+              letterSpacing: 1.5,
+            ),
+          ),
           const SizedBox(height: 8),
-          const Text('Reservations', style: TextStyle(fontSize: 28, fontWeight: FontWeight.w900, color: Color(0xFF0D211A))),
+          const Text(
+            'Reservations',
+            style: TextStyle(
+              fontSize: 28,
+              fontWeight: FontWeight.w800,
+              color: _green,
+            ),
+          ),
           const SizedBox(height: 8),
-          const Text('Confirmed payments and facility reservations from the same student booking records.', style: TextStyle(color: Colors.grey, fontSize: 14)),
-          const SizedBox(height: 24),
+          const Text(
+            'Search reservations and inspect booking and payment statuses.',
+            style: TextStyle(color: Colors.grey),
+          ),
+          const SizedBox(height: 20),
 
-          // Pricing Verification Filter
+          // Honest prototype notice.
           Container(
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.grey.shade200)),
+            width: double.infinity,
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFFF4D6),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: const Text(
+              'Demo data — these records are not connected to student '
+              'bookings or Supabase. Changes reset when the app restarts.',
+              style: TextStyle(color: Color(0xFF705500)),
+            ),
+          ),
+          const SizedBox(height: 20),
+
+          Container(
+            padding: const EdgeInsets.all(18),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: const Color(0xFFE2E8E3)),
+            ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Row(
-                  children: [
-                    Icon(Icons.verified_user_outlined, color: Color(0xFF173F32)),
-                    SizedBox(width: 8),
-                    Text('KRP residency pricing verification', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                  ],
+                TextField(
+                  controller: _searchController,
+                  decoration: InputDecoration(
+                    labelText: 'Search bookings',
+                    hintText: 'Reference, student, matric or facility',
+                    prefixIcon: const Icon(Icons.search),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                  ),
+                  onChanged: (_) => setState(() {}),
                 ),
-                const SizedBox(height: 4),
-                const Text('Administrator-controlled category for students.', style: TextStyle(color: Colors.grey, fontSize: 12)),
                 const SizedBox(height: 16),
-                DropdownButtonFormField<String>(
-                  value: _selectedCategory,
-                  decoration: const InputDecoration(border: OutlineInputBorder(), contentPadding: EdgeInsets.symmetric(horizontal: 12)),
-                  items: ['All Categories', 'KRP Student', 'Non-KRP Student'].map((e) => DropdownMenuItem(value: e, child: Text(e))).toList(),
-                  onChanged: (val) => setState(() => _selectedCategory = val!),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 24),
-
-          // Search and Table
-          Container(
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.grey.shade200)),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
+                Wrap(
+                  spacing: 12,
+                  runSpacing: 12,
+                  crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
-                    Expanded(
-                      child: TextField(
-                        controller: _searchController,
-                        decoration: InputDecoration(
-                          prefixIcon: const Icon(Icons.search),
-                          hintText: 'Search booking, student or facility',
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                          contentPadding: const EdgeInsets.symmetric(vertical: 0),
-                        ),
-                        onChanged: (val) => setState(() {}),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Container(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12), decoration: BoxDecoration(color: Colors.grey.shade100, borderRadius: BorderRadius.circular(8)), child: Text('${displayList.length} records', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.grey))),
-                  ],
-                ),
-                const SizedBox(height: 24),
-                
-                // Horizontal Scrollable Table (to fit all columns including Action button)
-                SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(minWidth: 800),
-                    child: Column(
-                      children: [
-                        const Row(
-                          children: [
-                            SizedBox(width: 120, child: Text('REFERENCE', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.grey))),
-                            SizedBox(width: 160, child: Text('STUDENT', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.grey))),
-                            SizedBox(width: 140, child: Text('DATE & TIME', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.grey))),
-                            SizedBox(width: 90, child: Text('PAYMENT', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.grey))),
-                            SizedBox(width: 100, child: Text('STATUS', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.grey))),
-                            SizedBox(width: 90, child: Text('ACTION', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.grey))),
-                          ],
-                        ),
-                        const Divider(),
-                        
-                        // Map through filtered list
-                        ...displayList.asMap().entries.map((entry) {
-                          int actualIndex = _bookings.indexOf(entry.value); // Keep track of actual index in main list
-                          return Column(
-                            children: [
-                              _buildBookingRow(entry.value, actualIndex),
-                              const Divider(),
-                            ],
-                          );
-                        }).toList(),
-
-                        if (displayList.isEmpty)
-                          const Padding(padding: EdgeInsets.all(32.0), child: Text('No records found for this category.', style: TextStyle(color: Colors.grey))),
+                    _filter(
+                      label: 'Student category',
+                      value: _selectedCategory,
+                      options: const [
+                        'All Categories',
+                        'KRP Student',
+                        'Non-KRP Student',
                       ],
+                      onChanged: (value) {
+                        setState(() => _selectedCategory = value);
+                      },
                     ),
-                  ),
-                ),
-              ],
-            ),
-          )
-        ],
-      ),
-    );
-  }
-
-  Widget _buildBookingRow(Map<String, dynamic> booking, int index) {
-    bool isRefunded = booking['status'] == 'Refunded';
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 12.0),
-      child: Row(
-        children: [
-          SizedBox(width: 120, child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(booking['ref'], style: const TextStyle(fontWeight: FontWeight.bold)), Text(booking['payId'], style: const TextStyle(color: Colors.grey, fontSize: 10))])),
-          SizedBox(width: 160, child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(booking['name'], style: const TextStyle(fontWeight: FontWeight.bold)), Text('${booking['matric']} · ${booking['contact']}', style: const TextStyle(color: Colors.grey, fontSize: 10))])),
-          SizedBox(width: 140, child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(booking['date'], style: const TextStyle(fontWeight: FontWeight.bold)), Text(booking['time'], style: const TextStyle(color: Colors.grey, fontSize: 10))])),
-          SizedBox(width: 90, child: Text(booking['price'], style: const TextStyle(fontSize: 12))),
-          
-          // Status Badge
-          SizedBox(
-            width: 100, 
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4), 
-                decoration: BoxDecoration(color: isRefunded ? Colors.grey.shade200 : const Color(0xFFE8F6C8), borderRadius: BorderRadius.circular(6)), 
-                child: Text(booking['status'], style: TextStyle(color: isRefunded ? Colors.grey.shade700 : const Color(0xFF173F32), fontWeight: FontWeight.bold, fontSize: 11))
-              ),
-            ),
-          ),
-          
-          // Refund Action Button
-          SizedBox(
-            width: 90, 
-            child: OutlinedButton(
-              style: OutlinedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                side: BorderSide(color: isRefunded ? Colors.grey.shade300 : Colors.orange.shade300),
-                foregroundColor: isRefunded ? Colors.grey : Colors.orange.shade800,
-              ),
-              onPressed: isRefunded ? null : () => _showRefundModal(booking, index),
-              child: const Text('Refund', style: TextStyle(fontSize: 12)),
-            )
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-
-// -------------------------------------------------------------
-// Interactive bottom sheet for Processing a Refund
-// -------------------------------------------------------------
-class _RefundProcessSheet extends StatefulWidget {
-  final Map<String, dynamic> booking;
-  final VoidCallback onRefundConfirmed;
-
-  const _RefundProcessSheet({required this.booking, required this.onRefundConfirmed});
-
-  @override
-  State<_RefundProcessSheet> createState() => _RefundProcessSheetState();
-}
-
-class _RefundProcessSheetState extends State<_RefundProcessSheet> {
-  String _selectedReason = 'Facility closed by administrator';
-  final TextEditingController _noteController = TextEditingController(text: 'Verified against facility and payment records.');
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      height: MediaQuery.of(context).size.height * 0.9,
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      child: Column(
-        children: [
-          // Header
-          Padding(
-            padding: const EdgeInsets.all(20.0),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('— ADMIN REFUND', style: TextStyle(color: Color(0xFFD2F865), fontWeight: FontWeight.bold, fontSize: 10, letterSpacing: 1)),
-                    const SizedBox(height: 4),
-                    const Text('Process a refund', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
-                    const SizedBox(height: 4),
-                    const Text('Select a confirmed booking and record the administrator-\napproved reason.', style: TextStyle(color: Colors.grey, fontSize: 12)),
+                    _filter(
+                      label: 'Booking status',
+                      value: _selectedStatus,
+                      options: const [
+                        'All Statuses',
+                        'Pending Payment',
+                        'Confirmed',
+                        'Cancelled',
+                        'Expired',
+                      ],
+                      onChanged: (value) {
+                        setState(() => _selectedStatus = value);
+                      },
+                    ),
+                    TextButton.icon(
+                      onPressed: _clearFilters,
+                      icon: const Icon(Icons.filter_alt_off_outlined),
+                      label: const Text('Clear filters'),
+                    ),
                   ],
                 ),
-                IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(context))
               ],
             ),
           ),
-          const Divider(height: 1),
-          
-          // Scrollable Form
-          Expanded(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.all(20.0),
+          const SizedBox(height: 18),
+          Text(
+            '${bookings.length} reservation(s)',
+            style: const TextStyle(
+              fontWeight: FontWeight.w600,
+              color: Colors.grey,
+            ),
+          ),
+          const SizedBox(height: 12),
+
+          if (bookings.isEmpty)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(32),
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('Booking', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey)),
+                  const Icon(Icons.search_off, size: 44, color: Colors.grey),
+                  const SizedBox(height: 12),
+                  const Text('No bookings match your search and filters.'),
                   const SizedBox(height: 8),
-                  DropdownButtonFormField<String>(
-                    value: 'selected',
-                    decoration: InputDecoration(border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)), contentPadding: const EdgeInsets.symmetric(horizontal: 16)),
-                    items: [DropdownMenuItem(value: 'selected', child: Text('${widget.booking['ref']} · ${widget.booking['name']} · ${widget.booking['facility']}'))],
-                    onChanged: null,
+                  TextButton(
+                    onPressed: _clearFilters,
+                    child: const Text('Clear filters'),
                   ),
-                  const SizedBox(height: 16),
-                  
-                  // Booking Details Card
-                  Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(color: Colors.grey.shade50, borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.grey.shade200)),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text('STUDENT', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.grey)),
-                        Text(widget.booking['name'], style: const TextStyle(fontWeight: FontWeight.bold)),
-                        Text('${widget.booking['matric']} · ${widget.booking['contact']}', style: const TextStyle(fontSize: 11, color: Colors.grey)),
-                        const SizedBox(height: 12),
-                        const Text('BOOKING', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.grey)),
-                        Text(widget.booking['facility'], style: const TextStyle(fontWeight: FontWeight.bold)),
-                        Text('${widget.booking['date']} · ${widget.booking['time']}', style: const TextStyle(fontSize: 11, color: Colors.grey)),
-                        const SizedBox(height: 12),
-                        const Text('REFUND AMOUNT', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.grey)),
-                        Text(widget.booking['price'], style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                        const Text('Original payment method', style: TextStyle(fontSize: 11, color: Colors.grey)),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 24),
-                  
-                  const Text('Refund reason', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey)),
-                  const SizedBox(height: 8),
-                  DropdownButtonFormField<String>(
-                    value: _selectedReason,
-                    decoration: InputDecoration(border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)), contentPadding: const EdgeInsets.symmetric(horizontal: 16)),
-                    items: ['Facility closed by administrator', 'Student requested cancellation', 'Duplicate payment', 'System error']
-                        .map((e) => DropdownMenuItem(value: e, child: Text(e))).toList(),
-                    onChanged: (val) => setState(() => _selectedReason = val!),
-                  ),
-                  const SizedBox(height: 16),
-                  
-                  const Text('Internal note', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey)),
-                  const SizedBox(height: 8),
-                  TextField(
-                    controller: _noteController,
-                    maxLines: 4,
-                    decoration: InputDecoration(
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                      contentPadding: const EdgeInsets.all(16),
-                    ),
-                  ),
-                  const SizedBox(height: 24),
+                ],
+              ),
+            )
+          else
+            Container(
+              width: double.infinity,
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: const Color(0xFFE2E8E3)),
+              ),
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: DataTable(
+                  headingRowHeight: 52,
+                  dataRowMinHeight: 88,
+                  dataRowMaxHeight: 110,
+                  columnSpacing: 24,
+                  columns: const [
+                    DataColumn(label: Text('Reference')),
+                    DataColumn(label: Text('Student')),
+                    DataColumn(label: Text('Facility / Schedule')),
+                    DataColumn(label: Text('Amount')),
+                    DataColumn(label: Text('Booking')),
+                    DataColumn(label: Text('Payment')),
+                    DataColumn(label: Text('Actions')),
+                  ],
+                  rows: bookings.map((booking) {
+                    final canRefund =
+                        booking['status'] == 'Confirmed' &&
+                        booking['paymentStatus'] == 'Paid';
 
-                  Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(color: const Color(0xFFFFF3E0), borderRadius: BorderRadius.circular(8)),
-                    child: const Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Icon(Icons.info_outline, color: Color(0xFFE65100), size: 20),
-                        SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
+                    return DataRow(
+                      cells: [
+                        DataCell(
+                          Text(
+                            booking['ref']!,
+                            style: const TextStyle(fontWeight: FontWeight.bold),
+                          ),
+                        ),
+                        DataCell(
+                          Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text('Administrator action', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Color(0xFFE65100))),
-                              SizedBox(height: 4),
-                              Text('This creates a booking-linked refund in bank processing status. Track or resolve it on the Refund Management page.', style: TextStyle(fontSize: 12, color: Color(0xFFE65100))),
+                              Text(booking['name']!),
+                              Text(
+                                booking['matric']!,
+                                style: const TextStyle(
+                                  color: Colors.grey,
+                                  fontSize: 12,
+                                ),
+                              ),
+                              Text(
+                                booking['category']!,
+                                style: const TextStyle(fontSize: 12),
+                              ),
+                            ],
+                          ),
+                        ),
+                        DataCell(
+                          Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(booking['facility']!),
+                              Text(booking['date']!),
+                              Text(
+                                booking['time']!,
+                                style: const TextStyle(
+                                  color: Colors.grey,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        DataCell(Text(booking['price']!)),
+                        DataCell(_statusBadge(booking['status']!)),
+                        DataCell(_statusBadge(booking['paymentStatus']!)),
+                        DataCell(
+                          Row(
+                            children: [
+                              TextButton(
+                                onPressed: () => _showDetails(booking),
+                                child: const Text('Details'),
+                              ),
+                              const SizedBox(width: 4),
+                              TextButton(
+                                onPressed: canRefund
+                                    ? () => _showDemoRefund(booking)
+                                    : null,
+                                child: const Text('Demo refund'),
+                              ),
                             ],
                           ),
                         ),
                       ],
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-                ],
-              ),
-            ),
-          ),
-
-          // Bottom Fixed Action Bar
-          Container(
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(color: Colors.white, boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, -5))]),
-            child: SizedBox(
-              width: double.infinity,
-              child: ElevatedButton.icon(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF173F32),
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    );
+                  }).toList(),
                 ),
-                onPressed: () {
-                  widget.onRefundConfirmed(); // Updates the status in the table
-                  Navigator.pop(context); // Closes bottom sheet
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Refund sent to bank for processing.')));
-                },
-                icon: const Text('Send refund to bank', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
-                label: const Icon(Icons.check, color: Colors.white),
               ),
             ),
-          )
+          const SizedBox(height: 20),
         ],
       ),
     );
