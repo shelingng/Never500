@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:krp_play/screens/admin/admin_dashboard.dart';
 import 'models/student_account.dart';
 import 'screens/login_screen.dart';
 import 'screens/facility_info_screen.dart';
@@ -23,6 +24,18 @@ class _KrpPlayAppState extends State<KrpPlayApp> {
   @override
   void initState() {
     super.initState();
+
+    accounts.add(
+      const StudentAccount(
+        fullName: 'System Admin',
+        email: 'admin@gmail.com',  // 测试用的管理员账号
+        contact: '000000000',
+        matric: 'ADMIN',
+        category: 'Admin',         // 权限标识
+        password: 'admin123',         // 测试用的管理员密码
+      ),
+    );
+
     if (widget.initialAccount != null) {
       accounts.add(widget.initialAccount!);
       currentAccount = widget.initialAccount;
@@ -69,14 +82,16 @@ class _KrpPlayAppState extends State<KrpPlayApp> {
       ),
       home: currentAccount == null
           ? AuthScreen(accounts: accounts, onRegister: register, onLogin: login)
-          : FacilityInfoScreen(
-              category: currentAccount!.category,
-              email: currentAccount!.email,
-              studentName: currentAccount!.fullName,
-              contact: currentAccount!.contact,
-              matric: currentAccount!.matric,
-              onLogout: logout,
-            ),
+          : (currentAccount!.category == 'Admin'
+              ? AdminHomeScreen(onLogout: logout) // 去管理员页面
+              : FacilityInfoScreen(               // 去学生主页
+                  category: currentAccount!.category,
+                  email: currentAccount!.email,
+                  studentName: currentAccount!.fullName,
+                  contact: currentAccount!.contact,
+                  matric: currentAccount!.matric,
+                  onLogout: logout,
+                )),
     );
   }
 }
