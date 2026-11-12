@@ -15,7 +15,7 @@ class _AdminBookingsTabState extends State<AdminBookingsTab> {
   String _selectedCategory = 'All Categories';
   String _selectedStatus = 'All Statuses';
 
-  // Fictional UI examples only. No database or real payment connection.
+  // Fictional UI examples only.
   final List<Map<String, String>> _bookings = [
     {
       'ref': 'DEMO-1842',
@@ -120,7 +120,7 @@ class _AdminBookingsTabState extends State<AdminBookingsTab> {
         return const Color(0xFF237346);
       case 'Pending Payment':
       case 'Pending':
-        return const Color(0xFF9A6500);
+        return const Color(0xFF946000);
       case 'Cancelled':
       case 'Failed':
         return const Color(0xFFB13D35);
@@ -187,7 +187,7 @@ class _AdminBookingsTabState extends State<AdminBookingsTab> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Text(
-                  'Booking details',
+                  'Student information',
                   style: TextStyle(fontWeight: FontWeight.bold),
                 ),
                 const Divider(height: 24),
@@ -196,17 +196,37 @@ class _AdminBookingsTabState extends State<AdminBookingsTab> {
                 _detailRow('Contact', booking['contact']!),
                 _detailRow('Category', booking['category']!),
                 const Divider(height: 24),
+                const Text(
+                  'Reservation information',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
                 _detailRow('Facility', booking['facility']!),
                 _detailRow('Date', booking['date']!),
                 _detailRow('Time', booking['time']!),
                 _detailRow('Amount', booking['price']!),
                 _detailRow('Booking status', booking['status']!),
+                const Divider(height: 24),
+                const Text(
+                  'Payment information',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
                 _detailRow('Payment status', booking['paymentStatus']!),
                 _detailRow('Payment reference', booking['payId']!),
                 const SizedBox(height: 16),
-                const Text(
-                  'Demo record only. No actual booking or payment.',
-                  style: TextStyle(fontSize: 12, color: Colors.grey),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF0F4F1),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Text(
+                    'Refund requests and decisions are handled '
+                    'in Refund Management. These demo records '
+                    'are not yet synchronised between pages.',
+                    style: TextStyle(fontSize: 12, color: _green),
+                  ),
                 ),
               ],
             ),
@@ -222,45 +242,6 @@ class _AdminBookingsTabState extends State<AdminBookingsTab> {
     );
   }
 
-  Future<void> _showDemoRefund(Map<String, String> booking) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Simulate refund'),
-        content: Text(
-          'Simulate a full refund for ${booking['ref']} '
-          '(${booking['price']})?\n\n'
-          'This changes this demo record to Cancelled / Refunded. '
-          'No money is transferred, and the separate Refunds page '
-          'is not updated.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('Back'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(dialogContext, true),
-            child: const Text('Simulate refund'),
-          ),
-        ],
-      ),
-    );
-
-    if (!mounted || confirmed != true) return;
-
-    setState(() {
-      booking['status'] = 'Cancelled';
-      booking['paymentStatus'] = 'Refunded';
-    });
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Demo record updated. No actual refund was processed.'),
-      ),
-    );
-  }
-
   Widget _filter({
     required String label,
     required String value,
@@ -270,7 +251,6 @@ class _AdminBookingsTabState extends State<AdminBookingsTab> {
     return SizedBox(
       width: 220,
       child: DropdownButtonFormField<String>(
-        // Rebuild when Clear filters resets the selected value.
         key: ValueKey('$label:$value'),
         initialValue: value,
         isExpanded: true,
@@ -285,7 +265,9 @@ class _AdminBookingsTabState extends State<AdminBookingsTab> {
             )
             .toList(),
         onChanged: (selected) {
-          if (selected != null) onChanged(selected);
+          if (selected != null) {
+            onChanged(selected);
+          }
         },
       ),
     );
@@ -320,12 +302,11 @@ class _AdminBookingsTabState extends State<AdminBookingsTab> {
           ),
           const SizedBox(height: 8),
           const Text(
-            'Search reservations and inspect booking and payment statuses.',
+            'Search reservations and view booking '
+            'and payment information.',
             style: TextStyle(color: Colors.grey),
           ),
           const SizedBox(height: 20),
-
-          // Honest prototype notice.
           Container(
             width: double.infinity,
             padding: const EdgeInsets.all(14),
@@ -334,13 +315,12 @@ class _AdminBookingsTabState extends State<AdminBookingsTab> {
               borderRadius: BorderRadius.circular(12),
             ),
             child: const Text(
-              'Demo data — these records are not connected to student '
-              'bookings or Supabase. Changes reset when the app restarts.',
+              'Demo data — these records are not connected '
+              'to student bookings or Supabase.',
               style: TextStyle(color: Color(0xFF705500)),
             ),
           ),
           const SizedBox(height: 20),
-
           Container(
             padding: const EdgeInsets.all(18),
             decoration: BoxDecoration(
@@ -414,7 +394,6 @@ class _AdminBookingsTabState extends State<AdminBookingsTab> {
             ),
           ),
           const SizedBox(height: 12),
-
           if (bookings.isEmpty)
             Container(
               width: double.infinity,
@@ -423,7 +402,10 @@ class _AdminBookingsTabState extends State<AdminBookingsTab> {
                 children: [
                   const Icon(Icons.search_off, size: 44, color: Colors.grey),
                   const SizedBox(height: 12),
-                  const Text('No bookings match your search and filters.'),
+                  const Text(
+                    'No bookings match your search and filters.',
+                    textAlign: TextAlign.center,
+                  ),
                   const SizedBox(height: 8),
                   TextButton(
                     onPressed: _clearFilters,
@@ -454,13 +436,9 @@ class _AdminBookingsTabState extends State<AdminBookingsTab> {
                     DataColumn(label: Text('Amount')),
                     DataColumn(label: Text('Booking')),
                     DataColumn(label: Text('Payment')),
-                    DataColumn(label: Text('Actions')),
+                    DataColumn(label: Text('Action')),
                   ],
                   rows: bookings.map((booking) {
-                    final canRefund =
-                        booking['status'] == 'Confirmed' &&
-                        booking['paymentStatus'] == 'Paid';
-
                     return DataRow(
                       cells: [
                         DataCell(
@@ -510,20 +488,13 @@ class _AdminBookingsTabState extends State<AdminBookingsTab> {
                         DataCell(_statusBadge(booking['status']!)),
                         DataCell(_statusBadge(booking['paymentStatus']!)),
                         DataCell(
-                          Row(
-                            children: [
-                              TextButton(
-                                onPressed: () => _showDetails(booking),
-                                child: const Text('Details'),
-                              ),
-                              const SizedBox(width: 4),
-                              TextButton(
-                                onPressed: canRefund
-                                    ? () => _showDemoRefund(booking)
-                                    : null,
-                                child: const Text('Demo refund'),
-                              ),
-                            ],
+                          TextButton.icon(
+                            onPressed: () => _showDetails(booking),
+                            icon: const Icon(
+                              Icons.visibility_outlined,
+                              size: 18,
+                            ),
+                            label: const Text('Details'),
                           ),
                         ),
                       ],

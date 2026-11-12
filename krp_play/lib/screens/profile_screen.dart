@@ -83,7 +83,7 @@ class _ProfileScreenState extends _ProfileSectionsState {
             children: [
               _tabButton('Personal details', 0),
               _tabButton('My bookings', 1, '3'),
-              _tabButton('Refund requests', 2, '1'),
+              _tabButton('Refund status', 2),
               _tabButton('My reports', 3),
             ],
           ),

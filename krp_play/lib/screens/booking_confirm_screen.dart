@@ -38,10 +38,7 @@ class BookingConfirmScreen extends StatelessWidget {
         ),
         title: const Text(
           'Confirm Booking',
-          style: TextStyle(
-            fontWeight: FontWeight.bold,
-            fontSize: 18,
-          ),
+          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
         ),
       ),
       body: ListView(
@@ -195,8 +192,12 @@ class BookingConfirmScreen extends StatelessWidget {
                 Text(
                   '• Non-marking sports shoes are strictly required on all courts.\n'
                   '• Present your UTM Matric Card upon check-in at the counter.\n'
-                  '• Cancellation allows 100% credit refund up to 24 hours prior.',
-                  style: TextStyle(fontSize: 12, color: Colors.grey.shade700, height: 1.4),
+                  '• Students cannot cancel bookings or request refunds. Eligible refunds for management-related facility unavailability are handled by KRP Management.',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Colors.grey.shade700,
+                    height: 1.4,
+                  ),
                 ),
               ],
             ),
@@ -280,4 +281,3 @@ class BookingConfirmScreen extends StatelessWidget {
     );
   }
 }
-
