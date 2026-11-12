@@ -1,5 +1,32 @@
 import 'package:flutter/material.dart';
 
+enum _SlotStatus { open, reserved, closed }
+
+class _DemoBooking {
+  final String id;
+  final int amount;
+  final bool paid;
+  bool cancelled = false;
+
+  _DemoBooking({required this.id, required this.amount, required this.paid});
+}
+
+class _Slot {
+  final DateTime start;
+  final List<_DemoBooking> bookings;
+  _SlotStatus status;
+  String? closureReason;
+
+  _Slot({required this.start, required this.status, required this.bookings});
+
+  DateTime get end => start.add(const Duration(hours: 1));
+
+  bool get hasEnded => !end.isAfter(DateTime.now());
+
+  List<_DemoBooking> get activeBookings =>
+      bookings.where((booking) => !booking.cancelled).toList();
+}
+
 class AdminSlotsTab extends StatefulWidget {
   const AdminSlotsTab({super.key});
 
@@ -8,317 +35,635 @@ class AdminSlotsTab extends StatefulWidget {
 }
 
 class _AdminSlotsTabState extends State<AdminSlotsTab> {
-  String _selectedFacility = 'Badminton Court 01';
-  String _selectedReason = 'Maintenance';
-  
-  int _selectedDateIndex = 3; // Default to SAT 14 Nov to match screenshot
+  static const _green = Color(0xFF173F32);
 
-  // 1. Generate 7 clickable days matching the screenshots
-  final List _dates = [
-    {'day': 'WED', 'date': '11', 'month': 'Nov', 'isWeekend': false},
-    {'day': 'THU', 'date': '12', 'month': 'Nov', 'isWeekend': false},
-    {'day': 'FRI', 'date': '13', 'month': 'Nov', 'isWeekend': false},
-    {'day': 'SAT', 'date': '14', 'month': 'Nov', 'isWeekend': true},
-    {'day': 'SUN', 'date': '15', 'month': 'Nov', 'isWeekend': true},
-    {'day': 'MON', 'date': '16', 'month': 'Nov', 'isWeekend': false},
-    {'day': 'TUE', 'date': '17', 'month': 'Nov', 'isWeekend': false},
+  static const _facilities = [
+    'Badminton Court 01',
+    'Badminton Court 02',
+    'Ping Pong Table 01',
+    'Ping Pong Table 02',
+    'Snooker Table',
+    'Dart Board',
+    'Gym',
   ];
 
-  // 2. Facilities data mapped directly from the KRP Poster
-  final List<String> _facilitiesList = [
-    'Badminton Court 01', 'Badminton Court 02', 
-    'Ping Pong Table 01', 'Ping Pong Table 02',
-    'Snooker Table', 'Dart Board', 'Gym'
+  static const _reasons = [
+    'Maintenance',
+    'College event',
+    'Safety inspection',
+    'Operational requirement',
   ];
 
-  Map<String, String> _getFacilityDetails(String facility) {
-    if (facility.contains('Badminton')) return {'code': 'B01', 'price': 'RM 6 KRP · RM 8 non-KRP'};
-    if (facility.contains('Ping Pong')) return {'code': 'P01', 'price': 'RM 4 KRP · RM 6 non-KRP'};
-    if (facility.contains('Snooker')) return {'code': 'S01', 'price': 'RM 10 KRP · RM 12 non-KRP'};
-    if (facility.contains('Dart')) return {'code': 'D01', 'price': 'RM 3 KRP · RM 5 non-KRP'};
-    if (facility.contains('Gym')) return {'code': 'G01', 'price': 'RM 2 KRP · RM 4 non-KRP'};
-    return {'code': 'F01', 'price': 'RM 0'};
-  }
+  final Map<String, List<_Slot>> _sessions = {};
+  final Set<_Slot> _selected = {};
 
-  // 3. Dynamic Slots based on Weekday/Weekend logic from the poster
-  final List<String> _weekdaySlots = ['5:00 PM', '6:00 PM', '8:00 PM', '9:00 PM', '10:00 PM']; // 7PM break excluded
-  final List<String> _weekendSlots = ['10:00 AM', '11:00 AM', '12:00 PM', '2:00 PM', '3:00 PM', '4:00 PM', '5:00 PM', '6:00 PM', '8:00 PM', '9:00 PM', '10:00 PM']; // 1PM & 7PM breaks excluded
+  late final List<DateTime> _dates;
 
-  // State map to track whether a slot is 'Open', 'Closed', or 'Reserved'
-  Map<String, String> _slotStatus = {};
+  int _dateIndex = 0;
+  String _facility = _facilities.first;
 
   @override
   void initState() {
     super.initState();
-    _generateSlotsForSelectedDay();
+
+    final now = DateTime.now();
+
+    _dates = List.generate(
+      7,
+      (index) => DateTime(now.year, now.month, now.day + index),
+    );
   }
 
-  void _generateSlotsForSelectedDay() {
-    bool isWeekend = _dates[_selectedDateIndex]['isWeekend'];
-    List<String> currentSlots = isWeekend ? _weekendSlots : _weekdaySlots;
-    
-    _slotStatus.clear();
-    for (int i = 0; i < currentSlots.length; i++) {
-      // Simulate some slots being reserved for realistic UI testing
-      if (i == 2 || (isWeekend && i == 5)) {
-        _slotStatus[currentSlots[i]] = 'Reserved';
-      } else {
-        _slotStatus[currentSlots[i]] = 'Open';
-      }
+  String get _sessionKey =>
+      '$_facility|${_dates[_dateIndex].toIso8601String()}';
+
+  int get _demoPrice {
+    if (_facility.startsWith('Badminton')) return 600;
+    if (_facility.startsWith('Ping Pong')) return 400;
+    if (_facility == 'Snooker Table') return 1000;
+    if (_facility == 'Dart Board') return 300;
+    return 200;
+  }
+
+  String _money(int cents) => 'RM ${(cents / 100).toStringAsFixed(2)}';
+
+  String _dateLabel(DateTime date) {
+    const months = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ];
+
+    return '${date.day} ${months[date.month - 1]} ${date.year}';
+  }
+
+  String _time(DateTime date) {
+    final hour = date.hour % 12 == 0 ? 12 : date.hour % 12;
+    return '$hour:00 ${date.hour < 12 ? 'AM' : 'PM'}';
+  }
+
+  String _timeRange(_Slot slot) => '${_time(slot.start)} - ${_time(slot.end)}';
+
+  List<_Slot> get _slots {
+    return _sessions.putIfAbsent(_sessionKey, () {
+      final date = _dates[_dateIndex];
+      final weekend =
+          date.weekday == DateTime.saturday || date.weekday == DateTime.sunday;
+
+      final hours = weekend
+          ? [10, 11, 12, 14, 15, 16, 17, 18, 20, 21, 22]
+          : [17, 18, 20, 21, 22];
+
+      return hours.map((hour) {
+        // Local fixtures only:
+        // 8 PM demonstrates a paid reservation.
+        // 9 PM demonstrates an unpaid reservation.
+        final reserved = hour == 20 || hour == 21;
+
+        return _Slot(
+          start: DateTime(date.year, date.month, date.day, hour),
+          status: reserved ? _SlotStatus.reserved : _SlotStatus.open,
+          bookings: reserved
+              ? [
+                  _DemoBooking(
+                    id:
+                        'DEMO-${_facilities.indexOf(_facility) + 1}'
+                        '-${date.month}${date.day}-$hour',
+                    amount: _demoPrice,
+                    paid: hour == 20,
+                  ),
+                ]
+              : [],
+        );
+      }).toList();
+    });
+  }
+
+  String _statusLabel(_Slot slot) {
+    switch (slot.status) {
+      case _SlotStatus.open:
+        return 'Open';
+      case _SlotStatus.reserved:
+        return 'Reserved';
+      case _SlotStatus.closed:
+        return 'Closed by management';
     }
   }
 
-  // 4. Close all slots functionality
-  void _closeAllSlots() {
-    setState(() {
-      _slotStatus.forEach((key, value) {
-        if (value == 'Open') {
-          _slotStatus[key] = 'Closed by admin';
-        }
-      });
-    });
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('All open slots have been closed.')));
+  Color _statusColor(_Slot slot) {
+    switch (slot.status) {
+      case _SlotStatus.open:
+        return Colors.green.shade800;
+      case _SlotStatus.reserved:
+        return Colors.blue.shade800;
+      case _SlotStatus.closed:
+        return Colors.grey.shade700;
+    }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    bool isWeekend = _dates[_selectedDateIndex]['isWeekend'];
-    List<String> activeSlots = isWeekend ? _weekendSlots : _weekdaySlots;
-    var facilityInfo = _getFacilityDetails(_selectedFacility);
+  void _message(String text) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+  }
 
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(20.0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text('— AVAILABILITY CONTROL', style: TextStyle(color: Color(0xFF173F32), fontWeight: FontWeight.bold, fontSize: 12, letterSpacing: 1)),
-          const SizedBox(height: 8),
-          const Text('Manage slots', style: TextStyle(fontSize: 28, fontWeight: FontWeight.w900, color: Color(0xFF0D211A))),
-          const SizedBox(height: 8),
-          const Text('Bookings update here in real time. Saved closures are reflected to students instantly.', style: TextStyle(color: Colors.grey, fontSize: 14)),
-          const SizedBox(height: 16),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF173F32),
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-            ),
-            onPressed: () {
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Availability Saved!')));
-            },
-            child: const Text('Availability saved', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-          ),
-          const SizedBox(height: 24),
+  Future<void> _reviewClosure(List<_Slot> requested) async {
+    final targets = requested
+        .where((slot) => !slot.hasEnded && slot.status != _SlotStatus.closed)
+        .toList();
 
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.grey.shade200)),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Interactive Horizontal Date Selector
-                SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: Row(
-                    children: List.generate(_dates.length, (index) {
-                      return _buildDateBox(
-                        _dates[index]['day'], 
-                        _dates[index]['date'], 
-                        _dates[index]['month'], 
-                        _selectedDateIndex == index,
-                        () {
-                          setState(() {
-                            _selectedDateIndex = index;
-                            _generateSlotsForSelectedDay(); // Regenerate times based on day
-                          });
-                        }
-                      );
-                    }),
+    if (targets.isEmpty) {
+      _message('Select an open or reserved session first.');
+      return;
+    }
+
+    final affected = targets.expand((slot) => slot.activeBookings).toList();
+
+    final paid = affected.where((booking) => booking.paid).toList();
+
+    final refundTotal = paid.fold<int>(
+      0,
+      (total, booking) => total + booking.amount,
+    );
+
+    String reason = _reasons.first;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Review closure'),
+          content: SizedBox(
+            width: 480,
+            child: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    _facility,
+                    style: const TextStyle(fontWeight: FontWeight.bold),
                   ),
-                ),
-                const SizedBox(height: 24),
-
-                // Facility Dropdown
-                const Text('Facility', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey)),
-                const SizedBox(height: 4),
-                DropdownButtonFormField<String>(
-                  value: _selectedFacility,
-                  decoration: const InputDecoration(border: OutlineInputBorder(), contentPadding: EdgeInsets.symmetric(horizontal: 12)),
-                  items: _facilitiesList.map((e) => DropdownMenuItem(value: e, child: Text(e))).toList(),
-                  onChanged: (val) {
-                    setState(() => _selectedFacility = val!);
-                  },
-                ),
-                const SizedBox(height: 16),
-
-                // Updated Closure Reasons
-                const Text('Closure reason', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey)),
-                const SizedBox(height: 4),
-                DropdownButtonFormField<String>(
-                  value: _selectedReason,
-                  decoration: const InputDecoration(border: OutlineInputBorder(), contentPadding: EdgeInsets.symmetric(horizontal: 12)),
-                  items: ['Maintenance', 'College event', 'Safety inspection', 'Operational requirement']
-                      .map((e) => DropdownMenuItem(value: e, child: Text(e))).toList(),
-                  onChanged: (val) => setState(() => _selectedReason = val!),
-                ),
-                const SizedBox(height: 16),
-
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(color: const Color(0xFFFFF3E0), borderRadius: BorderRadius.circular(8)),
-                  child: const Row(
-                    children: [
-                      Icon(Icons.verified_user_outlined, color: Color(0xFFE65100), size: 20),
-                      SizedBox(width: 8),
-                      Expanded(child: Text('Paid reservations are protected and cannot be closed from this control.', style: TextStyle(fontSize: 12, color: Color(0xFFE65100)))),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 24),
-
-                // Legend & Close All Slots
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Row(
-                      children: [
-                        _buildLegend(Colors.green, 'Open'),
-                        const SizedBox(width: 12),
-                        _buildLegend(Colors.redAccent, 'Closed by admin'),
-                        const SizedBox(width: 12),
-                        _buildLegend(Colors.grey.shade400, 'Reserved'),
-                      ],
+                  Text(_dateLabel(_dates[_dateIndex])),
+                  const SizedBox(height: 12),
+                  ...targets.map(
+                    (slot) => Padding(
+                      padding: const EdgeInsets.only(bottom: 6),
+                      child: Text('${_timeRange(slot)}: ${_statusLabel(slot)}'),
                     ),
-                    InkWell(
-                      onTap: _closeAllSlots,
-                      child: const Text('Close all slots', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold, fontSize: 13)),
+                  ),
+                  const SizedBox(height: 16),
+                  DropdownButtonFormField<String>(
+                    initialValue: reason,
+                    isExpanded: true,
+                    decoration: const InputDecoration(
+                      labelText: 'Closure reason',
+                      border: OutlineInputBorder(),
+                    ),
+                    items: _reasons
+                        .map(
+                          (item) =>
+                              DropdownMenuItem(value: item, child: Text(item)),
+                        )
+                        .toList(),
+                    onChanged: (value) {
+                      if (value != null) reason = value;
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                  Text('Sessions to close: ${targets.length}'),
+                  Text('Affected demo bookings: ${affected.length}'),
+                  Text('Paid bookings: ${paid.length}'),
+                  Text(
+                    'Refund preview: ${_money(refundTotal)}',
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  if (affected.isNotEmpty) ...[
+                    const Divider(height: 28),
+                    const Text(
+                      'Affected bookings',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    ...affected.map(
+                      (booking) => Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: Text(
+                          '${booking.id}\n'
+                          '${booking.paid ? 'Paid' : 'Unpaid'}'
+                          ' · ${_money(booking.amount)}',
+                        ),
+                      ),
                     ),
                   ],
-                ),
-                const SizedBox(height: 16),
+                  const Divider(height: 28),
+                  const Text(
+                    'Confirming closes these sessions in this demo and '
+                    'marks their active demo bookings as cancelled by '
+                    'management. Unpaid bookings have no refund.',
+                  ),
+                  const SizedBox(height: 10),
+                  const Text(
+                    'In the connected app, eligible paid booking items '
+                    'would enter Refund Management as Awaiting action. '
+                    'This preview does not create shared refund records, '
+                    'send notifications or transfer money.',
+                    style: TextStyle(color: Colors.grey, fontSize: 12),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Back'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Simulate closure'),
+            ),
+          ],
+        );
+      },
+    );
 
-                // Interactive Slots Table
-                Container(
-                  decoration: BoxDecoration(border: Border.all(color: Colors.grey.shade300), borderRadius: BorderRadius.circular(8)),
-                  child: SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        // Fixed First Column (Facility Info)
-                        Container(
-                          width: 200,
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(color: Colors.grey.shade50, border: Border(right: BorderSide(color: Colors.grey.shade300))),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text('FACILITY', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.grey)),
-                              const SizedBox(height: 12),
-                              Row(
-                                children: [
-                                  Container(
-                                    padding: const EdgeInsets.all(8), 
-                                    decoration: BoxDecoration(color: const Color(0xFFE8F5E9), borderRadius: BorderRadius.circular(4)), 
-                                    child: Text(facilityInfo['code']!, style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.green))
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start, 
-                                      children: [
-                                        Text(_selectedFacility, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)), 
-                                        Text(facilityInfo['price']!, style: const TextStyle(fontSize: 10, color: Colors.grey))
-                                      ]
-                                    )
-                                  ),
-                                ],
-                              )
-                            ],
-                          ),
-                        ),
-                        // Dynamic Scrollable Time Columns
-                        ...activeSlots.map((time) {
-                          String status = _slotStatus[time] ?? 'Open';
-                          return _buildSlotCell(time, status, (bool switchValue) {
-                            setState(() {
-                              _slotStatus[time] = switchValue ? 'Open' : 'Closed by admin';
-                            });
-                          });
-                        }).toList(),
-                      ],
+    if (!mounted || confirmed != true) return;
+
+    setState(() {
+      for (final slot in targets) {
+        slot.status = _SlotStatus.closed;
+        slot.closureReason = reason;
+
+        for (final booking in slot.activeBookings) {
+          booking.cancelled = true;
+        }
+      }
+
+      _selected.clear();
+    });
+
+    _message(
+      'Demo: ${targets.length} session(s) closed. '
+      '${affected.length} booking(s) cancelled. '
+      'Would queue ${_money(refundTotal)} for refund.',
+    );
+  }
+
+  Future<void> _reopen(_Slot slot) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Reopen session?'),
+        content: Text(
+          '$_facility\n'
+          '${_dateLabel(slot.start)}\n'
+          '${_timeRange(slot)}\n\n'
+          'This makes the session available for new bookings in the demo. '
+          'Previously cancelled bookings remain cancelled. '
+          'Reopening does not reverse refunds.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Keep closed'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Reopen session'),
+          ),
+        ],
+      ),
+    );
+
+    if (!mounted || confirmed != true) return;
+
+    setState(() {
+      slot.status = _SlotStatus.open;
+      slot.closureReason = null;
+    });
+
+    _message('Demo session reopened. Cancelled bookings remain cancelled.');
+  }
+
+  void _viewDetails(_Slot slot) {
+    showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Session details'),
+        content: SizedBox(
+          width: 420,
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(_facility),
+                Text(_dateLabel(slot.start)),
+                Text(_timeRange(slot)),
+                const SizedBox(height: 12),
+                Text('Status: ${_statusLabel(slot)}'),
+                if (slot.closureReason != null)
+                  Text('Closure reason: ${slot.closureReason}'),
+                const Divider(height: 24),
+                if (slot.bookings.isEmpty)
+                  const Text('No demo bookings for this session.'),
+                ...slot.bookings.map(
+                  (booking) => Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: Text(
+                      '${booking.id}\n'
+                      '${booking.cancelled ? 'Cancelled by management' : 'Active reservation'}\n'
+                      '${booking.paid ? 'Paid' : 'Unpaid'}'
+                      ' · ${_money(booking.amount)}',
                     ),
                   ),
-                )
+                ),
+                const Text(
+                  'Sample records only. No live booking data is loaded.',
+                  style: TextStyle(color: Colors.grey, fontSize: 12),
+                ),
               ],
             ),
-          )
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Close'),
+          ),
         ],
       ),
     );
   }
 
-  Widget _buildDateBox(String day, String date, String month, bool isActive, VoidCallback onTap) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        margin: const EdgeInsets.only(right: 8),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        decoration: BoxDecoration(
-          color: isActive ? const Color(0xFF173F32) : Colors.white,
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: isActive ? const Color(0xFF173F32) : Colors.grey.shade300),
+  Widget _slotCard(_Slot slot, double width) {
+    final past = slot.hasEnded;
+    final closed = slot.status == _SlotStatus.closed;
+    final reserved = slot.status == _SlotStatus.reserved;
+
+    return SizedBox(
+      width: width,
+      child: Card(
+        elevation: 0,
+        color: Colors.white,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: BorderSide(color: Colors.grey.shade300),
         ),
-        child: Column(
-          children: [
-            Text(day, style: TextStyle(fontSize: 10, color: isActive ? Colors.greenAccent : Colors.grey)),
-            Text(date, style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: isActive ? Colors.white : Colors.black)),
-            Text(month, style: TextStyle(fontSize: 12, color: isActive ? Colors.white : Colors.grey)),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildLegend(Color color, String label) {
-    return Row(
-      children: [
-        Container(width: 10, height: 10, decoration: BoxDecoration(color: Colors.white, border: Border.all(color: color, width: 2))),
-        const SizedBox(width: 4),
-        Text(label, style: const TextStyle(fontSize: 10)),
-      ],
-    );
-  }
-
-  Widget _buildSlotCell(String time, String status, ValueChanged<bool> onChanged) {
-    bool isReserved = status == 'Reserved';
-    bool isOpen = status == 'Open';
-
-    return Container(
-      width: 110, // Fixed width to allow smooth horizontal scrolling
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: isReserved ? Colors.grey.shade100 : Colors.white,
-        border: Border(right: BorderSide(color: Colors.grey.shade300))
-      ),
-      child: Column(
-        children: [
-          Text(time, style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.grey)),
-          const SizedBox(height: 12),
-          Text(
-            status, 
-            style: TextStyle(
-              fontSize: 12, 
-              color: isReserved ? Colors.grey : (isOpen ? Colors.green : Colors.redAccent),
-              fontWeight: FontWeight.w600
-            )
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      _timeRange(slot),
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                  Checkbox(
+                    value: _selected.contains(slot),
+                    onChanged: past || closed
+                        ? null
+                        : (checked) {
+                            setState(() {
+                              if (checked == true) {
+                                _selected.add(slot);
+                              } else {
+                                _selected.remove(slot);
+                              }
+                            });
+                          },
+                  ),
+                ],
+              ),
+              Text(
+                _statusLabel(slot),
+                style: TextStyle(
+                  color: _statusColor(slot),
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                past
+                    ? 'Session ended'
+                    : closed
+                    ? 'Reason: ${slot.closureReason}'
+                    : reserved
+                    ? 'Demo booking · '
+                          '${slot.activeBookings.first.paid ? 'Paid' : 'Unpaid'}'
+                    : 'Available for booking',
+                style: const TextStyle(color: Colors.grey, fontSize: 12),
+              ),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  if (!past)
+                    OutlinedButton(
+                      onPressed: closed
+                          ? () => _reopen(slot)
+                          : () => _reviewClosure([slot]),
+                      child: Text(
+                        closed
+                            ? 'Reopen'
+                            : reserved
+                            ? 'Review closure'
+                            : 'Close session',
+                      ),
+                    ),
+                  TextButton(
+                    onPressed: () => _viewDetails(slot),
+                    child: const Text('View details'),
+                  ),
+                ],
+              ),
+            ],
           ),
-          Switch(
-            value: isOpen || isReserved, 
-            onChanged: isReserved ? null : onChanged, 
-            activeColor: isReserved ? Colors.grey.shade300 : Colors.green,
-            inactiveTrackColor: Colors.redAccent.withOpacity(0.3),
-            inactiveThumbColor: Colors.redAccent,
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final slots = _slots;
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'AVAILABILITY CONTROL',
+            style: TextStyle(
+              color: _green,
+              fontWeight: FontWeight.bold,
+              fontSize: 12,
+              letterSpacing: 1,
+            ),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'Manage slots',
+            style: TextStyle(
+              fontSize: 28,
+              fontWeight: FontWeight.w900,
+              color: _green,
+            ),
+          ),
+          const SizedBox(height: 8),
+          const Text('Review the booking impact before closing a session.'),
+          const SizedBox(height: 16),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: const Color(0xFFEAF2EE),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: const Text(
+              'UI DEMO · Changes stay in this screen while it is mounted. '
+              'Restarting resets them. Student bookings, Refund Management '
+              'and notifications are not connected yet.',
+              style: TextStyle(color: _green),
+            ),
+          ),
+          const SizedBox(height: 20),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: List.generate(_dates.length, (index) {
+                const weekdays = [
+                  'Mon',
+                  'Tue',
+                  'Wed',
+                  'Thu',
+                  'Fri',
+                  'Sat',
+                  'Sun',
+                ];
+
+                final date = _dates[index];
+
+                return Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: ChoiceChip(
+                    label: Text(
+                      '${weekdays[date.weekday - 1]}\n${_dateLabel(date)}',
+                    ),
+                    selected: index == _dateIndex,
+                    onSelected: (_) {
+                      setState(() {
+                        _dateIndex = index;
+                        _selected.clear();
+                      });
+                    },
+                  ),
+                );
+              }),
+            ),
+          ),
+          const SizedBox(height: 20),
+          DropdownButtonFormField<String>(
+            initialValue: _facility,
+            isExpanded: true,
+            decoration: const InputDecoration(
+              labelText: 'Facility',
+              border: OutlineInputBorder(),
+            ),
+            items: _facilities
+                .map(
+                  (facility) =>
+                      DropdownMenuItem(value: facility, child: Text(facility)),
+                )
+                .toList(),
+            onChanged: (value) {
+              if (value == null) return;
+
+              setState(() {
+                _facility = value;
+                _selected.clear();
+              });
+            },
+          ),
+          const SizedBox(height: 16),
+          const Text(
+            'Reserved sessions can be closed by management after review. '
+            'Eligible paid bookings require a refund; unpaid bookings do not.',
+            style: TextStyle(color: _green),
+          ),
+          const SizedBox(height: 16),
+          Wrap(
+            spacing: 12,
+            runSpacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              FilledButton.icon(
+                onPressed: _selected.isEmpty
+                    ? null
+                    : () => _reviewClosure(_selected.toList()),
+                icon: const Icon(Icons.event_busy_outlined),
+                label: Text('Review selected (${_selected.length})'),
+              ),
+              TextButton(
+                onPressed: () {
+                  setState(() {
+                    _selected
+                      ..clear()
+                      ..addAll(
+                        slots.where(
+                          (slot) =>
+                              !slot.hasEnded &&
+                              slot.status != _SlotStatus.closed,
+                        ),
+                      );
+                  });
+                },
+                child: const Text('Select available and reserved sessions'),
+              ),
+              if (_selected.isNotEmpty)
+                TextButton(
+                  onPressed: () => setState(_selected.clear),
+                  child: const Text('Clear selection'),
+                ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          const Text(
+            'Each session is one hour. Break periods are excluded. '
+            'Demo reservations are shown at 8 PM and 9 PM.',
+            style: TextStyle(color: Colors.grey, fontSize: 12),
+          ),
+          const SizedBox(height: 16),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final columns = constraints.maxWidth >= 1000
+                  ? 3
+                  : constraints.maxWidth >= 650
+                  ? 2
+                  : 1;
+
+              final width =
+                  (constraints.maxWidth - (columns - 1) * 12) / columns;
+
+              return Wrap(
+                spacing: 12,
+                runSpacing: 12,
+                children: slots.map((slot) => _slotCard(slot, width)).toList(),
+              );
+            },
           ),
         ],
       ),

@@ -29,7 +29,7 @@ abstract class _ProfileSectionsState extends State<ProfileScreen> {
       _card(
         color: const Color(0xFFEFF4EF),
         child: const Text(
-          'Refund eligibility: Bookings cannot be cancelled by users. Refunds can only be requested when the facility is closed, under maintenance, or made unavailable by an admin.',
+          'Students cannot cancel bookings or submit refund requests. KRP Management handles eligible refunds when a booked facility is closed, under maintenance, or otherwise unavailable. Students can view refund progress here.',
           style: TextStyle(height: 1.4),
         ),
       ),
@@ -53,15 +53,15 @@ abstract class _ProfileSectionsState extends State<ProfileScreen> {
       _refundCard(
         'BK-2026-0224',
         'Ping Pong Table 01',
-        'Insufficient closure evidence',
+        'Refund processing failed; management will retry',
         'FPX Online Banking · CIMB Bank',
         'Manual (Admin)',
-        'REJECTED',
+        'FAILED',
       ),
       const Padding(
         padding: EdgeInsets.symmetric(horizontal: 4, vertical: 4),
         child: Text(
-          'Bank/TNG refunds may take a few business days to process.',
+          'Demo refund status only. Processing times depend on the payment provider; no transaction is performed in this prototype.',
           style: TextStyle(
             fontSize: 12,
             color: Colors.black54,
@@ -82,12 +82,12 @@ abstract class _ProfileSectionsState extends State<ProfileScreen> {
   ) {
     final color = status == 'REFUNDED'
         ? _green
-        : status == 'REJECTED'
+        : status == 'FAILED'
         ? const Color(0xFFB3261E)
         : const Color(0xFFB36B00);
     final background = status == 'REFUNDED'
         ? _pale
-        : status == 'REJECTED'
+        : status == 'FAILED'
         ? const Color(0xFFFCE8E6)
         : const Color(0xFFFFF0D8);
     return _card(
