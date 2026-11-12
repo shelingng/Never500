@@ -38,6 +38,31 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
 
   bool paymentCompleted = false;
   String generatedBookingRef = 'DEMO-KRP-001';
+  String selectedPaymentMethod = '';
+  String? selectedBank;
+
+  static const List<String> malaysianBanks = [
+    'Maybank2u',
+    'CIMB Clicks',
+    'Public Bank',
+    'RHB Now',
+    'Hong Leong Bank',
+    'Bank Islam',
+    'AmBank',
+    'Bank Rakyat',
+    'Affin Bank',
+    'Alliance Bank',
+    'BSN',
+    'Bank Muamalat',
+    'Agrobank',
+    'OCBC Bank',
+    'UOB Malaysia',
+    'HSBC Bank Malaysia',
+    'Standard Chartered',
+    'Kuwait Finance House',
+    'Al Rajhi Bank',
+    'MBSB Bank',
+  ];
 
   final List<String> availableStartTimes = [
     '5:00 PM',
@@ -808,63 +833,129 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Sandbox Payment Alert Box
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFFEF7E8),
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: const Color(0xFFF3E7C9)),
+                if (!paymentCompleted) ...[
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 14,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: subtleBorder),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Amount due',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey.shade600,
+                              ),
+                            ),
+                            const SizedBox(height: 3),
+                            const Text(
+                              'Booking total',
+                              style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                                color: Color(0xFF304137),
+                              ),
+                            ),
+                          ],
+                        ),
+                        Text(
+                          'RM$totalAmount.00',
+                          style: TextStyle(
+                            fontSize: 24,
+                            fontWeight: FontWeight.bold,
+                            color: primaryGreen,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'Sandbox payment',
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.bold,
-                          color: Color(0xFF7A5400),
+                  const SizedBox(height: 20),
+                  const Text(
+                    'Select payment method',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 10),
+                  _buildPaymentMethodOption(
+                    title: 'FPX Online Banking',
+                    subtitle: 'All Malaysian banks',
+                    icon: Icons.account_balance_outlined,
+                    selected: selectedPaymentMethod == 'FPX',
+                    onTap: () {
+                      setState(() => selectedPaymentMethod = 'FPX');
+                    },
+                    expandedContent: DropdownButtonFormField<String>(
+                      key: ValueKey<String?>(selectedBank),
+                      initialValue: selectedBank,
+                      isExpanded: true,
+                      decoration: InputDecoration(
+                        labelText: 'Choose your bank',
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 12,
                         ),
                       ),
-                      const SizedBox(height: 2),
-                      Text(
-                        'Demo only. No actual charge.',
-                        style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
-                      ),
-                    ],
+                      items: malaysianBanks
+                          .map(
+                            (bank) => DropdownMenuItem(
+                              value: bank,
+                              child: Text(bank),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: (bank) {
+                        setState(() => selectedBank = bank);
+                      },
+                    ),
                   ),
-                ),
-
-                const SizedBox(height: 20),
-
-                // Amount Due Row
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Text(
-                      'Amount due',
-                      style: TextStyle(fontSize: 14, color: Colors.grey),
-                    ),
-                    Text(
-                      'RM$totalAmount.00',
-                      style: const TextStyle(
-                        fontSize: 22,
-                        fontWeight: FontWeight.bold,
-                        color: Color(0xFF1B2420),
+                  const SizedBox(height: 10),
+                  _buildPaymentMethodOption(
+                    title: 'E-Wallet',
+                    subtitle: "Touch 'n Go eWallet",
+                    icon: Icons.account_balance_wallet_outlined,
+                    selected: selectedPaymentMethod == 'E-Wallet',
+                    onTap: () {
+                      setState(() => selectedPaymentMethod = 'E-Wallet');
+                    },
+                    expandedContent: Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF8FAF8),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: subtleBorder),
+                      ),
+                      child: const Row(
+                        children: [
+                          Icon(Icons.wallet_outlined, color: Color(0xFF315A3B)),
+                          SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              "Touch 'n Go eWallet",
+                              style: TextStyle(fontWeight: FontWeight.w600),
+                            ),
+                          ),
+                          Icon(Icons.check_circle, color: Color(0xFF315A3B)),
+                        ],
                       ),
                     ),
-                  ],
-                ),
-
-                const SizedBox(height: 20),
-
-                // Continue to Billplz sandbox button
-                if (!paymentCompleted)
+                  ),
+                  const SizedBox(height: 20),
                   SizedBox(
                     width: double.infinity,
-                    height: 48,
+                    height: 50,
                     child: ElevatedButton(
                       style: ElevatedButton.styleFrom(
                         backgroundColor: primaryGreen,
@@ -874,9 +965,9 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
                           borderRadius: BorderRadius.circular(10),
                         ),
                       ),
-                      onPressed: _processSandboxPayment,
+                      onPressed: _canSubmitPayment ? _processDemoPayment : null,
                       child: const Text(
-                        'Continue to Billplz sandbox',
+                        'Pay Now',
                         style: TextStyle(
                           fontSize: 15,
                           fontWeight: FontWeight.bold,
@@ -884,6 +975,17 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
                       ),
                     ),
                   ),
+                  const SizedBox(height: 12),
+                  Center(
+                    child: Text(
+                      'Secure payment powered by Billplz.',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey.shade600,
+                      ),
+                    ),
+                  ),
+                ],
 
                 // Booking Confirmed Success Card
                 if (paymentCompleted) ...[
@@ -955,12 +1057,6 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
                     ),
                   ),
                 ],
-
-                const SizedBox(height: 16),
-                Text(
-                  'Success appears only after verified payment confirmation.',
-                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
-                ),
               ],
             ),
           ),
@@ -969,12 +1065,98 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
     );
   }
 
-  void _processSandboxPayment() {
+  bool get _canSubmitPayment =>
+      selectedPaymentMethod == 'E-Wallet' ||
+      (selectedPaymentMethod == 'FPX' && selectedBank != null);
+
+  Widget _buildPaymentMethodOption({
+    required String title,
+    required String subtitle,
+    required IconData icon,
+    required bool selected,
+    required VoidCallback onTap,
+    required Widget expandedContent,
+  }) {
+    final borderColor = selected ? primaryGreen : const Color(0xFFE2E8E4);
+
+    return Column(
+      children: [
+        Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: onTap,
+            borderRadius: BorderRadius.circular(12),
+            child: Container(
+              padding: const EdgeInsets.all(13),
+              decoration: BoxDecoration(
+                color: selected ? const Color(0xFFF5F9F3) : Colors.white,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: borderColor,
+                  width: selected ? 1.5 : 1,
+                ),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFEDF4E9),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Icon(icon, color: primaryGreen),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          title,
+                          style: const TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold,
+                            color: Color(0xFF304137),
+                          ),
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          subtitle,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey.shade600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Icon(
+                    selected
+                        ? Icons.radio_button_checked
+                        : Icons.radio_button_unchecked,
+                    color: selected ? primaryGreen : Colors.grey.shade400,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+        if (selected)
+          Padding(
+            padding: const EdgeInsets.only(left: 12, right: 12, top: 10),
+            child: expandedContent,
+          ),
+      ],
+    );
+  }
+
+  void _processDemoPayment() {
     setState(() {
       paymentCompleted = true;
     });
 
-    // Add confirmed booking into BookingService database
+    // Keep the mock booking in the in-memory booking service.
     BookingService.instance.addBooking(
       Booking(
         id: generatedBookingRef,
