@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:url_launcher/url_launcher.dart';
+
 import 'facilities_screen.dart';
 import 'profile_screen.dart';
 
@@ -35,30 +38,270 @@ class _FacilityInfoScreenState extends State<FacilityInfoScreen> {
 
   final List<Map<String, dynamic>> carouselItems = [
     {
-      'title': 'KRP Badminton Arena',
-      'subtitle': 'Courts 01 & 02 · Tournament-grade synthetic flooring',
+      'title': 'Badminton Courts 01 & 02',
+      'subtitle': 'Indoor badminton facilities at KRP',
       'icon': Icons.sports_tennis,
-      'gradient': [const Color(0xFF103B2B), const Color(0xFF1B5E44)],
+      'photo': 'assets/facilities/badminton_courts.jpg',
     },
     {
-      'title': 'Table Tennis Hall',
-      'subtitle': 'Tables 01 & 02 · High-rebound standard tables',
-      'icon': Icons.sports_tennis_rounded,
-      'gradient': [const Color(0xFF144533), const Color(0xFF226E51)],
-    },
-    {
-      'title': 'KRP Fitness Centre & Gym',
-      'subtitle': 'Free weights, cardio equipment & resistance machines',
-      'icon': Icons.fitness_center,
-      'gradient': [const Color(0xFF0F3626), const Color(0xFF18553D)],
-    },
-    {
-      'title': 'Snooker & Dart Lounge',
-      'subtitle': 'Regulation snooker table & electronic dartboards',
+      'title': 'Snooker & Darts',
+      'subtitle': 'Snooker table and dart area',
       'icon': Icons.sports_baseball_outlined,
-      'gradient': [const Color(0xFF0B2B1E), const Color(0xFF154834)],
+      'photo': 'assets/facilities/snooker_darts.jpg',
+    },
+    {
+      'title': 'Table Tennis',
+      'subtitle': 'Indoor table tennis facilities',
+      'icon': Icons.sports_tennis_rounded,
+      'photo': 'assets/facilities/table_tennis.jpg',
+    },
+    {
+      'title': 'KRP Gym',
+      'subtitle': 'A look inside the fitness facilities',
+      'icon': Icons.fitness_center,
+      'photo': 'assets/facilities/gym.jpg',
+    },
+    {
+      'title': 'Welcome to Kolej Rahman Putra',
+      'subtitle': 'KRP entrance landmark',
+      'icon': Icons.location_on_outlined,
+      'photo': 'assets/facilities/krp_entrance.jpg',
     },
   ];
+
+  static const _mapsUrl =
+      'https://maps.google.com/maps?udm&fvr=1&pvq=CgwvZy8xMTl0eXAzcnMiDQoHa3JwIGcwMRACGAM&lqi=CgdrcnAgZzAxSPid6p6ngYCACFoNEAAQASIHa3JwIGcwMZIBFnN0dWRlbnRfaG91c2luZ19jZW50ZXI&vet=10CAAQoqAOahcKEwigk5uS9IOYAxUAAAAAHQAAAAAQBg..i&cs=0&um=1&ie=UTF-8&fb=1&gl=my&sa=X&ftid=0x31da76ac90393b45:0xca01a207fd92c603';
+
+  Future<void> _openMaps() async {
+    try {
+      // Launch directly from the click; do not await a permission check first.
+      final opened = await launchUrl(
+        Uri.parse(_mapsUrl),
+        mode: LaunchMode.externalApplication,
+        webOnlyWindowName: '_blank',
+      );
+      if (opened) return;
+    } catch (_) {
+      // Offer the link when the device cannot open it.
+    }
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Text('Could not open Maps. You can copy the link.'),
+        action: SnackBarAction(
+          label: 'Copy link',
+          onPressed: () {
+            Clipboard.setData(const ClipboardData(text: _mapsUrl));
+          },
+        ),
+      ),
+    );
+  }
+
+  void _showFacilityPhoto(Map<String, dynamic> item) {
+    showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(item['title'] as String),
+        content: SizedBox(
+          width: 900,
+          height: MediaQuery.sizeOf(dialogContext).height * 0.6,
+          child: InteractiveViewer(
+            child: Center(
+              child: Image.asset(
+                item['photo'] as String,
+                fit: BoxFit.contain,
+                errorBuilder: (_, error, stackTrace) =>
+                    const Text('Photo unavailable. Check the image assets.'),
+              ),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _changePhoto(int index) {
+    if (!_pageController.hasClients) return;
+    _pageController.animateToPage(
+      index,
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeInOut,
+    );
+  }
+
+  Widget _photoArrow({required bool next}) {
+    final enabled = next
+        ? _currentCarouselIndex < carouselItems.length - 1
+        : _currentCarouselIndex > 0;
+    return SizedBox(
+      width: 40,
+      height: 40,
+      child: Material(
+        color: Colors.black.withValues(alpha: enabled ? 0.55 : 0.2),
+        shape: const CircleBorder(),
+        child: IconButton(
+          tooltip: next ? 'Next facility photo' : 'Previous facility photo',
+          onPressed: enabled
+              ? () => _changePhoto(_currentCarouselIndex + (next ? 1 : -1))
+              : null,
+          icon: Icon(next ? Icons.chevron_right : Icons.chevron_left),
+          color: Colors.white,
+          disabledColor: Colors.white38,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildFacilityPhotos() {
+    return Column(
+      children: [
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final height = (constraints.maxWidth * 0.48)
+                .clamp(250.0, 420.0)
+                .toDouble();
+            return SizedBox(
+              height: height,
+              child: Stack(
+                children: [
+                  PageView.builder(
+                    controller: _pageController,
+                    itemCount: carouselItems.length,
+                    onPageChanged: (index) =>
+                        setState(() => _currentCarouselIndex = index),
+                    itemBuilder: (context, index) {
+                      final item = carouselItems[index];
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(18),
+                          child: Material(
+                            color: primaryGreen,
+                            child: InkWell(
+                              onTap: () => _showFacilityPhoto(item),
+                              child: Stack(
+                                fit: StackFit.expand,
+                                children: [
+                                  Image.asset(
+                                    item['photo'] as String,
+                                    fit: BoxFit.cover,
+                                    semanticLabel: item['title'] as String,
+                                    errorBuilder: (_, error, stackTrace) =>
+                                        Center(
+                                          child: Icon(
+                                            item['icon'] as IconData,
+                                            color: accentLime,
+                                            size: 64,
+                                          ),
+                                        ),
+                                  ),
+                                  const DecoratedBox(
+                                    decoration: BoxDecoration(
+                                      gradient: LinearGradient(
+                                        begin: Alignment.topCenter,
+                                        end: Alignment.bottomCenter,
+                                        colors: [
+                                          Colors.transparent,
+                                          Color(0xE6103B2B),
+                                        ],
+                                        stops: [0.25, 1],
+                                      ),
+                                    ),
+                                  ),
+                                  Positioned(
+                                    left: 20,
+                                    right: 20,
+                                    bottom: 22,
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          item['title'] as String,
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 23,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 6),
+                                        Text(
+                                          item['subtitle'] as String,
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 13,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 8),
+                                        const Text(
+                                          'Tap to view full photo',
+                                          style: TextStyle(
+                                            color: Colors.white70,
+                                            fontSize: 11,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                  Positioned(
+                    left: 24,
+                    top: 12,
+                    child: _photoArrow(next: false),
+                  ),
+                  Positioned(
+                    right: 24,
+                    top: 12,
+                    child: _photoArrow(next: true),
+                  ),
+                ],
+              ),
+            );
+          },
+        ),
+        const SizedBox(height: 6),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            ...List.generate(
+              carouselItems.length,
+              (index) => SizedBox(
+                width: 40,
+                height: 44,
+                child: IconButton(
+                  tooltip: 'View ${carouselItems[index]['title']}',
+                  onPressed: () => _changePhoto(index),
+                  icon: Icon(
+                    _currentCarouselIndex == index
+                        ? Icons.radio_button_checked
+                        : Icons.radio_button_unchecked,
+                    size: 12,
+                    color: _currentCarouselIndex == index
+                        ? primaryGreen
+                        : Colors.grey,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
 
   @override
   void dispose() {
@@ -272,125 +515,8 @@ class _FacilityInfoScreenState extends State<FacilityInfoScreen> {
 
                   const SizedBox(height: 16),
 
-                  // PHOTO / FACILITY SHOWCASE CAROUSEL
-                  SizedBox(
-                    height: 190,
-                    child: PageView.builder(
-                      controller: _pageController,
-                      itemCount: carouselItems.length,
-                      onPageChanged: (index) {
-                        setState(() => _currentCarouselIndex = index);
-                      },
-                      itemBuilder: (context, index) {
-                        final item = carouselItems[index];
-                        return Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 16),
-                          child: Container(
-                            decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(18),
-                              gradient: LinearGradient(
-                                colors: item['gradient'] as List<Color>,
-                                begin: Alignment.topLeft,
-                                end: Alignment.bottomRight,
-                              ),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: primaryGreen.withValues(alpha: 0.15),
-                                  blurRadius: 10,
-                                  offset: const Offset(0, 4),
-                                ),
-                              ],
-                            ),
-                            child: Stack(
-                              children: [
-                                // Subtle background pattern
-                                Positioned(
-                                  right: -20,
-                                  bottom: -20,
-                                  child: Icon(
-                                    item['icon'] as IconData,
-                                    size: 140,
-                                    color: Colors.white.withValues(alpha: 0.08),
-                                  ),
-                                ),
-                                Padding(
-                                  padding: const EdgeInsets.all(22),
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    mainAxisAlignment: MainAxisAlignment.end,
-                                    children: [
-                                      Row(
-                                        children: [
-                                          Container(
-                                            padding: const EdgeInsets.all(8),
-                                            decoration: BoxDecoration(
-                                              color: accentLime.withValues(
-                                                alpha: 0.2,
-                                              ),
-                                              shape: BoxShape.circle,
-                                            ),
-                                            child: Icon(
-                                              item['icon'] as IconData,
-                                              color: accentLime,
-                                              size: 20,
-                                            ),
-                                          ),
-                                          const SizedBox(width: 10),
-                                          Text(
-                                            item['title'] as String,
-                                            style: const TextStyle(
-                                              color: Colors.white,
-                                              fontSize: 19,
-                                              fontWeight: FontWeight.bold,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                      const SizedBox(height: 8),
-                                      Text(
-                                        item['subtitle'] as String,
-                                        style: TextStyle(
-                                          color: Colors.white.withValues(
-                                            alpha: 0.85,
-                                          ),
-                                          fontSize: 13,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-
-                  const SizedBox(height: 12),
-
-                  // CAROUSEL DOT INDICATORS
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: List.generate(
-                      carouselItems.length,
-                      (index) => AnimatedContainer(
-                        duration: const Duration(milliseconds: 300),
-                        margin: const EdgeInsets.symmetric(horizontal: 3),
-                        width: _currentCarouselIndex == index ? 22 : 6,
-                        height: 6,
-                        decoration: BoxDecoration(
-                          color: _currentCarouselIndex == index
-                              ? primaryGreen
-                              : const Color(0xFFD6DFD8),
-                          borderRadius: BorderRadius.circular(3),
-                        ),
-                      ),
-                    ),
-                  ),
-
-                  const SizedBox(height: 20),
+                  _buildFacilityPhotos(),
+                  const SizedBox(height: 16),
 
                   // VENUE LOCATION & DETAILS CARD
                   Padding(
@@ -422,7 +548,7 @@ class _FacilityInfoScreenState extends State<FacilityInfoScreen> {
                                     ),
                                     const SizedBox(height: 6),
                                     Text(
-                                      'Jalan Pontian Lama, Universiti Teknologi Malaysia, 81310 Skudai, Johor',
+                                      "G09 (RF), 601, Jalan Meranti 1, 80990 Johor Bahru, Johor Darul Ta’zim",
                                       style: TextStyle(
                                         fontSize: 13,
                                         color: Colors.grey.shade700,
@@ -453,15 +579,7 @@ class _FacilityInfoScreenState extends State<FacilityInfoScreen> {
                                     vertical: 8,
                                   ),
                                 ),
-                                onPressed: () {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(
-                                      content: Text(
-                                        'Opening Google Maps: Kolej Rahman Putra UTM',
-                                      ),
-                                    ),
-                                  );
-                                },
+                                onPressed: _openMaps,
                                 icon: const Icon(Icons.map_outlined, size: 16),
                                 label: const Text(
                                   'Open Maps',
@@ -1177,7 +1295,7 @@ class _FacilityInfoScreenState extends State<FacilityInfoScreen> {
                   '3. Proper Attire: Non-marking sports shoes and appropriate sportswear are strictly required on all badminton courts and gym areas.',
                 ),
                 _bulletPoint(
-                  '4. Cancellation & Refunds: Students cannot cancel bookings or submit refund requests. KRP Management handles eligible refunds when a booked facility is closed, under maintenance, or otherwise unavailable. Students can view refund progress in their profile.',
+                  '4. Cancellation & Refunds: Students cannot cancel bookings or submit refund requests. KRP Management handles eligible refunds when a booked facility is closed, under maintenance, or otherwise unavailable. Students can view refund progress under My Bookings.',
                 ),
                 _bulletPoint(
                   '5. Non-transferable: Reservations cannot be transferred or sublet to third parties without KRP management consent.',
