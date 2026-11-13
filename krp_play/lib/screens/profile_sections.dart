@@ -1,11 +1,43 @@
 part of 'profile_screen.dart';
 
+class _ReportPhoto {
+  final String name;
+  final Uint8List bytes;
+
+  const _ReportPhoto({required this.name, required this.bytes});
+}
+
+class _LocalReport {
+  final String id;
+  final String category;
+  final String date;
+  final String booking;
+  final String description;
+  final List<_ReportPhoto> photos;
+  final String status;
+
+  const _LocalReport({
+    required this.id,
+    required this.category,
+    required this.date,
+    required this.booking,
+    required this.description,
+    required this.photos,
+  }) : status = 'Submitted';
+}
+
 abstract class _ProfileSectionsState extends State<ProfileScreen> {
   bool _showReport = false;
   String _reportCategory = 'Booking Issue';
   String? _bookingId;
   final _description = TextEditingController();
-  final _reports = <Map<String, String>>[];
+  final _reports = <_LocalReport>[];
+  final _draftPhotos = <_ReportPhoto>[];
+  bool _pickingPhoto = false;
+  int _reportSequence = 0;
+
+  static const _maxPhotos = 3;
+  static const _maxPhotoBytes = 5 * 1024 * 1024;
 
   static const _categories = [
     'Booking Issue',
@@ -152,6 +184,12 @@ abstract class _ProfileSectionsState extends State<ProfileScreen> {
         ),
       ),
       const SizedBox(height: 12),
+      const Text(
+        'Prototype: reports and photos are stored only in this app session. '
+        'They are not sent to management and reset when the app restarts.',
+        style: TextStyle(fontSize: 12, color: Colors.black54),
+      ),
+      const SizedBox(height: 12),
       if (!_showReport)
         FilledButton.icon(
           onPressed: () => setState(() => _showReport = true),
@@ -236,7 +274,7 @@ abstract class _ProfileSectionsState extends State<ProfileScreen> {
             const Padding(
               padding: EdgeInsets.only(top: 6),
               child: Text(
-                'No past bookings available.',
+                'No bookings available to link.',
                 style: TextStyle(fontSize: 12, color: Colors.black54),
               ),
             ),
@@ -252,21 +290,225 @@ abstract class _ProfileSectionsState extends State<ProfileScreen> {
               alignLabelWithHint: true,
             ),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 16),
+          const Text(
+            'Photos (optional)',
+            style: TextStyle(fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 6),
+          const Text(
+            'Up to 3 JPG or PNG photos, 5 MB each. '
+            'Tap a photo to enlarge it.',
+            style: TextStyle(fontSize: 12, color: Colors.black54),
+          ),
+          const SizedBox(height: 10),
+          if (_draftPhotos.isNotEmpty) ...[
+            _photoGrid(_draftPhotos, editable: true),
+            const SizedBox(height: 10),
+          ],
+          Align(
+            alignment: Alignment.centerLeft,
+            child: OutlinedButton.icon(
+              onPressed: _pickingPhoto || _draftPhotos.length >= _maxPhotos
+                  ? null
+                  : _pickReportPhoto,
+              icon: const Icon(Icons.add_photo_alternate_outlined),
+              label: Text(
+                _pickingPhoto
+                    ? 'Reading photo...'
+                    : 'Add photo (${_draftPhotos.length}/$_maxPhotos)',
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
           FilledButton(
-            onPressed: _submitReport,
+            onPressed: _pickingPhoto ? null : _submitReport,
             style: FilledButton.styleFrom(
               backgroundColor: _green,
               minimumSize: const Size.fromHeight(48),
             ),
-            child: const Text('Submit Report'),
+            child: const Text('Submit demo report'),
           ),
         ],
       ),
     );
   }
 
+  Future<void> _pickReportPhoto() async {
+    if (_pickingPhoto || _draftPhotos.length >= _maxPhotos) return;
+    setState(() => _pickingPhoto = true);
+
+    try {
+      // Add one photo at a time so the limit is clear and large batches
+      // are never read into memory together.
+      final file = await FilePicker.pickFile(
+        type: FileType.custom,
+        allowedExtensions: ['jpg', 'jpeg', 'png'],
+      );
+      if (!mounted || file == null) return;
+
+      final extension = file.name.split('.').last.toLowerCase();
+      if (!['jpg', 'jpeg', 'png'].contains(extension)) {
+        _message('Choose a JPG or PNG photo.');
+        return;
+      }
+
+      final size = await file.length();
+      if (!mounted) return;
+      if (size == null || size <= 0 || size > _maxPhotoBytes) {
+        _message('Choose a non-empty photo no larger than 5 MB.');
+        return;
+      }
+
+      final bytes = await file.readAsBytes();
+      if (!mounted) return;
+      if (bytes.isEmpty || bytes.length > _maxPhotoBytes) {
+        _message('Choose a non-empty photo no larger than 5 MB.');
+        return;
+      }
+
+      final jpeg =
+          bytes.length >= 3 &&
+          bytes[0] == 0xFF &&
+          bytes[1] == 0xD8 &&
+          bytes[2] == 0xFF;
+      final png =
+          bytes.length >= 8 &&
+          listEquals(bytes.sublist(0, 8), [
+            0x89,
+            0x50,
+            0x4E,
+            0x47,
+            0x0D,
+            0x0A,
+            0x1A,
+            0x0A,
+          ]);
+      if (!jpeg && !png) {
+        _message('This file is not a valid JPG or PNG photo.');
+        return;
+      }
+
+      // Verify the image can be decoded before accepting it.
+      final codec = await ui.instantiateImageCodec(
+        bytes,
+        targetWidth: 1,
+        targetHeight: 1,
+      );
+      try {
+        final frame = await codec.getNextFrame();
+        frame.image.dispose();
+      } finally {
+        codec.dispose();
+      }
+      if (!mounted) return;
+      if (_draftPhotos.any((photo) => listEquals(photo.bytes, bytes))) {
+        _message('That photo is already attached.');
+        return;
+      }
+      setState(() {
+        _draftPhotos.add(_ReportPhoto(name: file.name, bytes: bytes));
+      });
+    } catch (_) {
+      if (mounted) {
+        _message('Could not open this photo. Try another JPG or PNG.');
+      }
+    } finally {
+      if (mounted) setState(() => _pickingPhoto = false);
+    }
+  }
+
+  void _openPhoto(_ReportPhoto photo) {
+    showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(photo.name, maxLines: 2, overflow: TextOverflow.ellipsis),
+        content: SizedBox(
+          width: 640,
+          height: MediaQuery.sizeOf(dialogContext).height * 0.55,
+          child: InteractiveViewer(
+            minScale: 1,
+            maxScale: 4,
+            child: Center(
+              child: Image.memory(
+                photo.bytes,
+                fit: BoxFit.contain,
+                cacheWidth: 1600,
+                errorBuilder: (_, error, stackTrace) =>
+                    const Text('Unable to display this photo.'),
+              ),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _photoGrid(List<_ReportPhoto> photos, {bool editable = false}) {
+    return Wrap(
+      spacing: 12,
+      runSpacing: 12,
+      children: photos
+          .map(
+            (photo) => SizedBox(
+              width: 128,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(10),
+                    child: Material(
+                      color: _pale,
+                      child: InkWell(
+                        onTap: () => _openPhoto(photo),
+                        child: SizedBox(
+                          width: 128,
+                          height: 96,
+                          child: Image.memory(
+                            photo.bytes,
+                            fit: BoxFit.cover,
+                            cacheWidth: 384,
+                            semanticLabel: 'Report photo: ${photo.name}',
+                            errorBuilder: (_, error, stackTrace) =>
+                                const Icon(Icons.broken_image_outlined),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    photo.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 11),
+                  ),
+                  if (editable)
+                    TextButton.icon(
+                      onPressed: _pickingPhoto
+                          ? null
+                          : () {
+                              setState(() => _draftPhotos.remove(photo));
+                            },
+                      icon: const Icon(Icons.close, size: 16),
+                      label: const Text('Remove'),
+                    ),
+                ],
+              ),
+            ),
+          )
+          .toList(),
+    );
+  }
+
   void _submitReport() {
+    if (_pickingPhoto) return;
     final description = _description.text.trim();
     if (description.isEmpty) {
       _message('Please describe the problem.');
@@ -274,52 +516,78 @@ abstract class _ProfileSectionsState extends State<ProfileScreen> {
     }
     final related = _bookings.where((item) => item.id == _bookingId);
     final booking = related.isEmpty ? null : related.first;
+    final now = DateTime.now();
     setState(() {
-      _reports.insert(0, {
-        'category': _reportCategory,
-        'date': _shortDate(DateTime.now()),
-        'booking': booking == null
-            ? 'No related booking'
-            : '${booking.id} - ${booking.facilityName} - ${booking.date.day} ${_month(booking.date.month)} ${_bookingTime(booking)}',
-        'description': description,
-        'status': 'Under Review',
-      });
+      _reportSequence++;
+      _reports.insert(
+        0,
+        _LocalReport(
+          id: 'LOCAL-${now.microsecondsSinceEpoch}-$_reportSequence',
+          category: _reportCategory,
+          date: _shortDate(now),
+          booking: booking == null
+              ? 'No related booking'
+              : '${booking.id} - ${booking.facilityName} - '
+                    '${booking.date.day} ${_month(booking.date.month)} '
+                    '${_bookingTime(booking)}',
+          description: description,
+          photos: List<_ReportPhoto>.unmodifiable(_draftPhotos),
+        ),
+      );
       _description.clear();
+      _draftPhotos.clear();
+      _bookingId = null;
+      _reportCategory = _categories.first;
       _showReport = false;
     });
+    _message('Demo report saved with photos locally. Not sent to management.');
   }
 
-  Widget _reportCard(Map<String, String> report) => _card(
+  Widget _reportCard(_LocalReport report) => _card(
     margin: const EdgeInsets.only(bottom: 10),
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        Wrap(
+          spacing: 12,
+          runSpacing: 8,
           children: [
-            _badge(report['category']!, _pale, _green),
-            Text(
-              report['status']!,
-              style: const TextStyle(
-                color: _green,
-                fontSize: 12,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
+            _badge(report.category, _pale, _green),
+            _badge(report.status, _pale, _green),
           ],
         ),
         const SizedBox(height: 8),
+        SelectableText(
+          'Report ID: ${report.id}',
+          style: const TextStyle(fontSize: 11, color: Colors.black54),
+        ),
+        const SizedBox(height: 6),
         Text(
-          'Submitted ${report['date']}',
+          'Submitted ${report.date}',
           style: const TextStyle(color: Colors.black54, fontSize: 12),
         ),
         const SizedBox(height: 6),
         Text(
-          report['booking']!,
+          report.booking,
           style: const TextStyle(fontWeight: FontWeight.w600),
         ),
         const SizedBox(height: 6),
-        Text(report['description']!),
+        Text(report.description),
+        if (report.photos.isNotEmpty) ...[
+          const SizedBox(height: 14),
+          Text(
+            'Photos (${report.photos.length})',
+            style: const TextStyle(fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 8),
+          _photoGrid(report.photos),
+        ] else ...[
+          const SizedBox(height: 8),
+          const Text(
+            'No photos attached.',
+            style: TextStyle(fontSize: 12, color: Colors.black54),
+          ),
+        ],
       ],
     ),
   );

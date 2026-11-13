@@ -1,3 +1,7 @@
+import 'dart:typed_data';
+import 'dart:ui' as ui;
+import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
 
 import '../models/booking.dart';
@@ -15,6 +19,7 @@ class ProfileScreen extends StatefulWidget {
   final String? matric;
   final String? category;
   final int initialTab;
+  final bool navigationSection;
 
   const ProfileScreen({
     super.key,
@@ -24,6 +29,7 @@ class ProfileScreen extends StatefulWidget {
     this.matric,
     this.category,
     this.initialTab = 0,
+    this.navigationSection = false,
   });
 
   @override
@@ -70,32 +76,61 @@ class _ProfileScreenState extends _ProfileSectionsState {
   }
 
   @override
-  Widget build(BuildContext context) => ListView(
-    padding: const EdgeInsets.fromLTRB(18, 12, 18, 28),
-    children: [
-      _header(),
-      const SizedBox(height: 18),
-      SizedBox(
-        height: 44,
-        child: SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: Row(
-            children: [
-              _tabButton('Personal details', 0),
-              _tabButton('My bookings', 1, '3'),
-              _tabButton('Refund status', 2),
-              _tabButton('My reports', 3),
-            ],
+  Widget build(BuildContext context) {
+    if (widget.navigationSection) {
+      return ListView(
+        padding: const EdgeInsets.fromLTRB(18, 16, 18, 28),
+        children: [
+          if (widget.initialTab == 0) ...[
+            _header(),
+            const SizedBox(height: 20),
+            _personalDetails(),
+          ],
+          if (widget.initialTab == 1) ...[
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  _tabButton('Bookings', 1),
+                  _tabButton('Refund status', 2),
+                ],
+              ),
+            ),
+            const SizedBox(height: 20),
+            if (_tab == 1) _myBookings(),
+            if (_tab == 2) _refundRequests(),
+          ],
+          if (widget.initialTab == 3) _myReports(),
+        ],
+      );
+    }
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(18, 12, 18, 28),
+      children: [
+        _header(),
+        const SizedBox(height: 18),
+        SizedBox(
+          height: 44,
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                _tabButton('Personal details', 0),
+                _tabButton('My bookings', 1),
+                _tabButton('Refund status', 2),
+                _tabButton('My reports', 3),
+              ],
+            ),
           ),
         ),
-      ),
-      const SizedBox(height: 16),
-      if (_tab == 0) _personalDetails(),
-      if (_tab == 1) _myBookings(),
-      if (_tab == 2) _refundRequests(),
-      if (_tab == 3) _myReports(),
-    ],
-  );
+        const SizedBox(height: 16),
+        if (_tab == 0) _personalDetails(),
+        if (_tab == 1) _myBookings(),
+        if (_tab == 2) _refundRequests(),
+        if (_tab == 3) _myReports(),
+      ],
+    );
+  }
 
   Widget _header() => Container(
     padding: const EdgeInsets.all(18),
@@ -409,17 +444,60 @@ class _ProfileScreenState extends _ProfileSectionsState {
               ),
               const SizedBox(height: 7),
               Text(
-                'RM ${booking.totalPrice}.00',
+                'RM ${booking.totalPrice.toStringAsFixed(2)}',
                 style: const TextStyle(fontWeight: FontWeight.bold),
               ),
               TextButton(
                 onPressed: () => showDialog<void>(
                   context: context,
-                  builder: (_) => AlertDialog(
-                    title: const Text('Booking receipt'),
-                    content: Text(
-                      '${booking.facilityName}\\n${booking.date.day} ${_month(booking.date.month)} ${booking.date.year}\\n${_bookingTime(booking)}\\nBooking ID: ${booking.id}\\nPayment status: ${booking.status}\\nTotal: RM ${booking.totalPrice}.00',
+                  builder: (dialogContext) => AlertDialog(
+                    title: const Text('Booking details'),
+                    content: SizedBox(
+                      width: 420,
+                      child: SingleChildScrollView(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              booking.facilityName,
+                              style: const TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                                color: _green,
+                              ),
+                            ),
+                            const SizedBox(height: 16),
+                            Text(
+                              'Date: ${booking.date.day} '
+                              '${_month(booking.date.month)} '
+                              '${booking.date.year}',
+                            ),
+                            const SizedBox(height: 10),
+                            Text('Time: ${_bookingTime(booking)}'),
+                            const SizedBox(height: 10),
+                            SelectableText('Booking ID: ${booking.id}'),
+                            const SizedBox(height: 10),
+                            Text('Booking status: ${booking.status}'),
+                            const Divider(height: 28),
+                            Text(
+                              'Total: RM ${booking.totalPrice.toStringAsFixed(2)}',
+                              style: const TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                                color: _green,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
                     ),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(dialogContext),
+                        child: const Text('Close'),
+                      ),
+                    ],
                   ),
                 ),
                 style: TextButton.styleFrom(
@@ -427,7 +505,7 @@ class _ProfileScreenState extends _ProfileSectionsState {
                   minimumSize: const Size(0, 28),
                   alignment: Alignment.centerLeft,
                 ),
-                child: const Text('View receipt'),
+                child: const Text('View details'),
               ),
             ],
           ),
