@@ -21,7 +21,7 @@ class _AdminReportsTabState extends State<AdminReportsTab> {
   String _selectedStatus = 'All';
 
   // Fictional examples for UI testing only.
-  final List<Map<String, String>> _reports = [
+  final List _reports = [
     {
       'id': 'DEMO-RPT-003',
       'name': 'Sample Student A',
@@ -62,7 +62,7 @@ class _AdminReportsTabState extends State<AdminReportsTab> {
     },
   ];
 
-  List<Map<String, String>> get _filteredReports {
+   get _filteredReports {
     final query = _searchController.text.trim().toLowerCase();
 
     return _reports.where((report) {
@@ -145,7 +145,7 @@ class _AdminReportsTabState extends State<AdminReportsTab> {
   }
 
   Future<void> _openReport(Map<String, String> report) async {
-    final result = await showDialog<Map<String, String>>(
+    final result = await showDialog(
       context: context,
       barrierDismissible: false,
       builder: (_) =>
@@ -236,41 +236,58 @@ class _AdminReportsTabState extends State<AdminReportsTab> {
                   onChanged: (_) => setState(() {}),
                 ),
                 const SizedBox(height: 16),
-                Wrap(
-                  spacing: 12,
-                  runSpacing: 12,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  children: [
-                    SizedBox(
-                      width: 220,
-                      child: DropdownButtonFormField<String>(
-                        key: ValueKey(_selectedStatus),
-                        initialValue: _selectedStatus,
-                        decoration: const InputDecoration(
-                          labelText: 'Report status',
-                          border: OutlineInputBorder(),
+                
+                // 🌟 FIX: Updated layout to match the screenshot for responsiveness
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    return Row(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Expanded(
+                          flex: 2, // Gives the dropdown more width 
+                          child: DropdownButtonFormField<String>(
+                            key: ValueKey(_selectedStatus),
+                            initialValue: _selectedStatus,
+                            decoration: const InputDecoration(
+                              labelText: 'Report status',
+                              border: OutlineInputBorder(),
+                            ),
+                            items: ['All', ..._statuses]
+                                .map(
+                                  (status) => DropdownMenuItem(
+                                    value: status,
+                                    child: Text(
+                                      status,
+                                      overflow: TextOverflow.ellipsis, // Prevents overflow on small screens
+                                    ),
+                                  ),
+                                )
+                                .toList(),
+                            onChanged: (value) {
+                              if (value != null) {
+                                setState(() => _selectedStatus = value);
+                              }
+                            },
+                          ),
                         ),
-                        items: ['All', ..._statuses]
-                            .map(
-                              (status) => DropdownMenuItem(
-                                value: status,
-                                child: Text(status),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          flex: 1, // Ensures the button fits neatly beside it
+                          child: Align(
+                            alignment: Alignment.center,
+                            child: TextButton.icon(
+                              onPressed: _clearFilters,
+                              style: TextButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 16),
                               ),
-                            )
-                            .toList(),
-                        onChanged: (value) {
-                          if (value != null) {
-                            setState(() => _selectedStatus = value);
-                          }
-                        },
-                      ),
-                    ),
-                    TextButton.icon(
-                      onPressed: _clearFilters,
-                      icon: const Icon(Icons.filter_alt_off_outlined),
-                      label: const Text('Clear filters'),
-                    ),
-                  ],
+                              icon: const Icon(Icons.filter_alt_off_outlined, color: _green, size: 18),
+                              label: const Text('Clear filters', style: TextStyle(color: _green, fontSize: 13, fontWeight: FontWeight.w600)),
+                            ),
+                          ),
+                        ),
+                      ],
+                    );
+                  }
                 ),
               ],
             ),
@@ -314,10 +331,8 @@ class _AdminReportsTabState extends State<AdminReportsTab> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Wrap(
-                        spacing: 12,
-                        runSpacing: 8,
-                        crossAxisAlignment: WrapCrossAlignment.center,
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
                           Text(
                             report['id']!,
@@ -348,10 +363,20 @@ class _AdminReportsTabState extends State<AdminReportsTab> {
                         ),
                       ),
                       const SizedBox(height: 14),
-                      OutlinedButton.icon(
-                        onPressed: () => _openReport(report),
-                        icon: const Icon(Icons.visibility_outlined),
-                        label: const Text('View / Update'),
+                      
+                      // 🌟 FIX: Full-width button matching the screenshot on mobile
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          onPressed: () => _openReport(report),
+                          icon: const Icon(Icons.visibility_outlined, color: Colors.black87),
+                          label: const Text('View / Update', style: TextStyle(color: Colors.black87)),
+                          style: OutlinedButton.styleFrom(
+                            side: const BorderSide(color: Colors.grey),
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+                          ),
+                        ),
                       ),
                     ],
                   ),
