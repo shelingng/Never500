@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'facilities_screen.dart';
-import 'booking_records_screen.dart';
 import 'profile_screen.dart';
 
 class FacilityInfoScreen extends StatefulWidget {
@@ -123,8 +122,11 @@ class _FacilityInfoScreenState extends State<FacilityInfoScreen> {
             ListTile(
               leading: const Icon(Icons.info_outline),
               title: const Text('KRP Sports Complex Info'),
-              selected: true,
-              onTap: () => Navigator.pop(context),
+              selected: _selectedTab == 0,
+              onTap: () {
+                Navigator.pop(context);
+                setState(() => _selectedTab = 0);
+              },
             ),
             ListTile(
               leading: const Icon(Icons.calendar_month_outlined),
@@ -148,22 +150,16 @@ class _FacilityInfoScreenState extends State<FacilityInfoScreen> {
               title: const Text('Booking Records'),
               onTap: () {
                 Navigator.pop(context);
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) =>
-                        BookingRecordsScreen(email: widget.email),
-                  ),
-                );
+                setState(() => _selectedTab = 1);
               },
             ),
             ListTile(
               leading: const Icon(Icons.person_outline),
               title: const Text('Profile'),
-              selected: _selectedTab == 2,
+              selected: _selectedTab == 3,
               onTap: () {
                 Navigator.pop(context);
-                setState(() => _selectedTab = 2);
+                setState(() => _selectedTab = 3);
               },
             ),
             if (widget.onLogout != null) ...[
@@ -203,7 +199,12 @@ class _FacilityInfoScreenState extends State<FacilityInfoScreen> {
           },
         ),
         title: Text(
-          _selectedTab == 2 ? 'Profile' : 'KRP Sports Complex',
+          const [
+            'KRP Sports Complex',
+            'My Bookings',
+            'Reports',
+            'Profile',
+          ][_selectedTab],
           style: TextStyle(
             fontSize: 18,
             fontWeight: FontWeight.bold,
@@ -215,13 +216,7 @@ class _FacilityInfoScreenState extends State<FacilityInfoScreen> {
             icon: const Icon(Icons.receipt_long_outlined, size: 22),
             tooltip: 'Booking Records',
             onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) =>
-                      BookingRecordsScreen(email: widget.email),
-                ),
-              );
+              setState(() => _selectedTab = 1);
             },
           ),
           IconButton(
@@ -237,344 +232,266 @@ class _FacilityInfoScreenState extends State<FacilityInfoScreen> {
           ),
         ],
       ),
-      body: _selectedTab == 2
-          ? ProfileScreen(
-              email: widget.email,
-              fullName: widget.studentName,
-              contact: widget.contact,
-              matric: widget.matric,
-              category: widget.category,
-            )
-          : Stack(
-              children: [
-                ListView(
-                  padding: const EdgeInsets.only(bottom: 100),
-                  children: [
-                    // INFO TAB HEADER (Matching orange layout with green underline)
-                    Container(
-                      decoration: BoxDecoration(
-                        border: Border(bottom: BorderSide(color: subtleBorder)),
-                      ),
-                      child: Row(
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 24,
-                              vertical: 14,
-                            ),
-                            decoration: BoxDecoration(
-                              border: Border(
-                                bottom: BorderSide(
-                                  color: primaryGreen,
-                                  width: 3,
-                                ),
-                              ),
-                            ),
-                            child: Text(
-                              'Info',
-                              style: TextStyle(
-                                color: primaryGreen,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 15,
-                              ),
-                            ),
+      body: IndexedStack(
+        index: _selectedTab,
+        children: [
+          Stack(
+            children: [
+              ListView(
+                padding: const EdgeInsets.only(bottom: 24),
+                children: [
+                  // INFO TAB HEADER (Matching orange layout with green underline)
+                  Container(
+                    decoration: BoxDecoration(
+                      border: Border(bottom: BorderSide(color: subtleBorder)),
+                    ),
+                    child: Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 24,
+                            vertical: 14,
                           ),
-                        ],
-                      ),
-                    ),
-
-                    const SizedBox(height: 16),
-
-                    // PHOTO / FACILITY SHOWCASE CAROUSEL
-                    SizedBox(
-                      height: 190,
-                      child: PageView.builder(
-                        controller: _pageController,
-                        itemCount: carouselItems.length,
-                        onPageChanged: (index) {
-                          setState(() => _currentCarouselIndex = index);
-                        },
-                        itemBuilder: (context, index) {
-                          final item = carouselItems[index];
-                          return Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 16),
-                            child: Container(
-                              decoration: BoxDecoration(
-                                borderRadius: BorderRadius.circular(18),
-                                gradient: LinearGradient(
-                                  colors: item['gradient'] as List<Color>,
-                                  begin: Alignment.topLeft,
-                                  end: Alignment.bottomRight,
-                                ),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: primaryGreen.withValues(alpha: 0.15),
-                                    blurRadius: 10,
-                                    offset: const Offset(0, 4),
-                                  ),
-                                ],
-                              ),
-                              child: Stack(
-                                children: [
-                                  // Subtle background pattern
-                                  Positioned(
-                                    right: -20,
-                                    bottom: -20,
-                                    child: Icon(
-                                      item['icon'] as IconData,
-                                      size: 140,
-                                      color: Colors.white.withValues(
-                                        alpha: 0.08,
-                                      ),
-                                    ),
-                                  ),
-                                  Padding(
-                                    padding: const EdgeInsets.all(22),
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      mainAxisAlignment: MainAxisAlignment.end,
-                                      children: [
-                                        Row(
-                                          children: [
-                                            Container(
-                                              padding: const EdgeInsets.all(8),
-                                              decoration: BoxDecoration(
-                                                color: accentLime.withValues(
-                                                  alpha: 0.2,
-                                                ),
-                                                shape: BoxShape.circle,
-                                              ),
-                                              child: Icon(
-                                                item['icon'] as IconData,
-                                                color: accentLime,
-                                                size: 20,
-                                              ),
-                                            ),
-                                            const SizedBox(width: 10),
-                                            Text(
-                                              item['title'] as String,
-                                              style: const TextStyle(
-                                                color: Colors.white,
-                                                fontSize: 19,
-                                                fontWeight: FontWeight.bold,
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                        const SizedBox(height: 8),
-                                        Text(
-                                          item['subtitle'] as String,
-                                          style: TextStyle(
-                                            color: Colors.white.withValues(
-                                              alpha: 0.85,
-                                            ),
-                                            fontSize: 13,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          );
-                        },
-                      ),
-                    ),
-
-                    const SizedBox(height: 12),
-
-                    // CAROUSEL DOT INDICATORS
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: List.generate(
-                        carouselItems.length,
-                        (index) => AnimatedContainer(
-                          duration: const Duration(milliseconds: 300),
-                          margin: const EdgeInsets.symmetric(horizontal: 3),
-                          width: _currentCarouselIndex == index ? 22 : 6,
-                          height: 6,
                           decoration: BoxDecoration(
-                            color: _currentCarouselIndex == index
-                                ? primaryGreen
-                                : const Color(0xFFD6DFD8),
-                            borderRadius: BorderRadius.circular(3),
+                            border: Border(
+                              bottom: BorderSide(color: primaryGreen, width: 3),
+                            ),
+                          ),
+                          child: Text(
+                            'Info',
+                            style: TextStyle(
+                              color: primaryGreen,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 15,
+                            ),
                           ),
                         ),
-                      ),
+                      ],
                     ),
+                  ),
 
-                    const SizedBox(height: 20),
+                  const SizedBox(height: 16),
 
-                    // VENUE LOCATION & DETAILS CARD
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      child: Container(
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFF9FAF9),
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(color: subtleBorder),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
+                  // PHOTO / FACILITY SHOWCASE CAROUSEL
+                  SizedBox(
+                    height: 190,
+                    child: PageView.builder(
+                      controller: _pageController,
+                      itemCount: carouselItems.length,
+                      onPageChanged: (index) {
+                        setState(() => _currentCarouselIndex = index);
+                      },
+                      itemBuilder: (context, index) {
+                        final item = carouselItems[index];
+                        return Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                          child: Container(
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(18),
+                              gradient: LinearGradient(
+                                colors: item['gradient'] as List<Color>,
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
+                              ),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: primaryGreen.withValues(alpha: 0.15),
+                                  blurRadius: 10,
+                                  offset: const Offset(0, 4),
+                                ),
+                              ],
+                            ),
+                            child: Stack(
                               children: [
-                                Expanded(
+                                // Subtle background pattern
+                                Positioned(
+                                  right: -20,
+                                  bottom: -20,
+                                  child: Icon(
+                                    item['icon'] as IconData,
+                                    size: 140,
+                                    color: Colors.white.withValues(alpha: 0.08),
+                                  ),
+                                ),
+                                Padding(
+                                  padding: const EdgeInsets.all(22),
                                   child: Column(
                                     crossAxisAlignment:
                                         CrossAxisAlignment.start,
+                                    mainAxisAlignment: MainAxisAlignment.end,
                                     children: [
-                                      const Text(
-                                        'Kolej Rahman Putra (KRP) Sports Complex',
-                                        style: TextStyle(
-                                          fontSize: 16,
-                                          fontWeight: FontWeight.bold,
-                                          color: Color(0xFF103B2B),
-                                        ),
+                                      Row(
+                                        children: [
+                                          Container(
+                                            padding: const EdgeInsets.all(8),
+                                            decoration: BoxDecoration(
+                                              color: accentLime.withValues(
+                                                alpha: 0.2,
+                                              ),
+                                              shape: BoxShape.circle,
+                                            ),
+                                            child: Icon(
+                                              item['icon'] as IconData,
+                                              color: accentLime,
+                                              size: 20,
+                                            ),
+                                          ),
+                                          const SizedBox(width: 10),
+                                          Text(
+                                            item['title'] as String,
+                                            style: const TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 19,
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                          ),
+                                        ],
                                       ),
-                                      const SizedBox(height: 6),
+                                      const SizedBox(height: 8),
                                       Text(
-                                        'Jalan Pontian Lama, Universiti Teknologi Malaysia, 81310 Skudai, Johor',
+                                        item['subtitle'] as String,
                                         style: TextStyle(
+                                          color: Colors.white.withValues(
+                                            alpha: 0.85,
+                                          ),
                                           fontSize: 13,
-                                          color: Colors.grey.shade700,
-                                          height: 1.3,
-                                        ),
-                                      ),
-                                      const SizedBox(height: 6),
-                                      Text(
-                                        'Tel: +60 7-553 3333 · KRP Office',
-                                        style: TextStyle(
-                                          fontSize: 12,
-                                          color: Colors.grey.shade600,
                                         ),
                                       ),
                                     ],
                                   ),
                                 ),
-                                const SizedBox(width: 12),
-                                OutlinedButton.icon(
-                                  style: OutlinedButton.styleFrom(
-                                    foregroundColor: primaryGreen,
-                                    side: BorderSide(color: primaryGreen),
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(20),
-                                    ),
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 12,
-                                      vertical: 8,
-                                    ),
-                                  ),
-                                  onPressed: () {
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      const SnackBar(
-                                        content: Text(
-                                          'Opening Google Maps: Kolej Rahman Putra UTM',
-                                        ),
-                                      ),
-                                    );
-                                  },
-                                  icon: const Icon(
-                                    Icons.map_outlined,
-                                    size: 16,
-                                  ),
-                                  label: const Text(
-                                    'Open Maps',
-                                    style: TextStyle(fontSize: 12),
-                                  ),
-                                ),
                               ],
                             ),
-                          ],
-                        ),
-                      ),
-                    ),
-
-                    const SizedBox(height: 12),
-
-                    // EXPANDABLE SECTIONS (Accordion Layout like Orange Reference)
-                    _buildPricingSection(),
-                    _buildOpeningHoursSection(),
-                    _buildAmenitiesSection(),
-                    _buildCentreLayoutSection(),
-                    _buildCentrePolicySection(),
-                  ],
-                ),
-
-                // STICKY BOTTOM "BOOK NOW" BAR (Green theme)
-                Positioned(
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 20,
-                      vertical: 14,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.08),
-                          blurRadius: 10,
-                          offset: const Offset(0, -4),
-                        ),
-                      ],
-                    ),
-                    child: SafeArea(
-                      child: SizedBox(
-                        height: 52,
-                        child: ElevatedButton(
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: primaryGreen,
-                            foregroundColor: Colors.white,
-                            elevation: 0,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(14),
-                            ),
                           ),
-                          onPressed: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) => FacilitiesScreen(
-                                  category: widget.category,
-                                  email: widget.email,
-                                  studentName: widget.studentName,
-                                ),
-                              ),
-                            );
-                          },
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              const Text(
-                                'Book Now',
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.bold,
-                                  letterSpacing: 0.5,
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              Icon(
-                                Icons.arrow_forward_rounded,
-                                size: 18,
-                                color: accentLime,
-                              ),
-                            ],
-                          ),
+                        );
+                      },
+                    ),
+                  ),
+
+                  const SizedBox(height: 12),
+
+                  // CAROUSEL DOT INDICATORS
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: List.generate(
+                      carouselItems.length,
+                      (index) => AnimatedContainer(
+                        duration: const Duration(milliseconds: 300),
+                        margin: const EdgeInsets.symmetric(horizontal: 3),
+                        width: _currentCarouselIndex == index ? 22 : 6,
+                        height: 6,
+                        decoration: BoxDecoration(
+                          color: _currentCarouselIndex == index
+                              ? primaryGreen
+                              : const Color(0xFFD6DFD8),
+                          borderRadius: BorderRadius.circular(3),
                         ),
                       ),
                     ),
                   ),
-                ),
-              ],
-            ),
+
+                  const SizedBox(height: 20),
+
+                  // VENUE LOCATION & DETAILS CARD
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF9FAF9),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: subtleBorder),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    const Text(
+                                      'Kolej Rahman Putra (KRP) Sports Complex',
+                                      style: TextStyle(
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.bold,
+                                        color: Color(0xFF103B2B),
+                                      ),
+                                    ),
+                                    const SizedBox(height: 6),
+                                    Text(
+                                      'Jalan Pontian Lama, Universiti Teknologi Malaysia, 81310 Skudai, Johor',
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        color: Colors.grey.shade700,
+                                        height: 1.3,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 6),
+                                    Text(
+                                      'Tel: +60 7-553 3333 · KRP Office',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: Colors.grey.shade600,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              OutlinedButton.icon(
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor: primaryGreen,
+                                  side: BorderSide(color: primaryGreen),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(20),
+                                  ),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 8,
+                                  ),
+                                ),
+                                onPressed: () {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text(
+                                        'Opening Google Maps: Kolej Rahman Putra UTM',
+                                      ),
+                                    ),
+                                  );
+                                },
+                                icon: const Icon(Icons.map_outlined, size: 16),
+                                label: const Text(
+                                  'Open Maps',
+                                  style: TextStyle(fontSize: 12),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+
+                  const SizedBox(height: 12),
+
+                  // EXPANDABLE SECTIONS (Accordion Layout like Orange Reference)
+                  _buildPricingSection(),
+                  _buildOpeningHoursSection(),
+                  _buildAmenitiesSection(),
+                  _buildCentreLayoutSection(),
+                  _buildCentrePolicySection(),
+                ],
+              ),
+            ],
+          ),
+          _studentSection('student-bookings', 1),
+          _studentSection('student-reports', 3),
+          _studentSection('student-profile', 0),
+        ],
+      ),
       bottomNavigationBar: Container(
         decoration: BoxDecoration(
           color: Colors.white,
@@ -594,12 +511,19 @@ class _FacilityInfoScreenState extends State<FacilityInfoScreen> {
                 ),
                 _bottomNavItem(
                   index: 1,
-                  label: 'Book',
-                  icon: Icons.calendar_month_outlined,
-                  activeIcon: Icons.calendar_month_rounded,
+                  label: 'My Bookings',
+                  icon: Icons.receipt_long_outlined,
+                  activeIcon: Icons.receipt_long,
                 ),
+                _createNavItem(),
                 _bottomNavItem(
                   index: 2,
+                  label: 'Reports',
+                  icon: Icons.chat_bubble_outline,
+                  activeIcon: Icons.chat_bubble,
+                ),
+                _bottomNavItem(
+                  index: 3,
                   label: 'Profile',
                   icon: Icons.person_outline,
                   activeIcon: Icons.person_rounded,
@@ -612,6 +536,34 @@ class _FacilityInfoScreenState extends State<FacilityInfoScreen> {
     );
   }
 
+  Widget _studentSection(String sectionKey, int initialTab) {
+    return ProfileScreen(
+      key: ValueKey(sectionKey),
+      email: widget.email,
+      fullName: widget.studentName,
+      contact: widget.contact,
+      matric: widget.matric,
+      category: widget.category,
+      initialTab: initialTab,
+      navigationSection: true,
+    );
+  }
+
+  Future<void> _openCreateBooking() async {
+    await Navigator.push<void>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => FacilitiesScreen(
+          category: widget.category,
+          email: widget.email,
+          studentName: widget.studentName,
+        ),
+      ),
+    );
+    if (!mounted) return;
+    setState(() {});
+  }
+
   Widget _bottomNavItem({
     required int index,
     required String label,
@@ -619,50 +571,81 @@ class _FacilityInfoScreenState extends State<FacilityInfoScreen> {
     required IconData activeIcon,
   }) {
     final active = _selectedTab == index;
-    return InkWell(
-      onTap: () {
-        if (index == 1) {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (context) => FacilitiesScreen(
-                category: widget.category,
-                email: widget.email,
-                studentName: widget.studentName,
-              ),
+    return Expanded(
+      child: Semantics(
+        selected: active,
+        child: InkWell(
+          onTap: () => setState(() => _selectedTab = index),
+          borderRadius: BorderRadius.circular(14),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 44,
+                  height: 32,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: active
+                        ? const Color(0xFFE8F6C8)
+                        : Colors.transparent,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(
+                    active ? activeIcon : icon,
+                    color: active ? primaryGreen : Colors.grey.shade600,
+                    size: 23,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  label,
+                  maxLines: 1,
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: active ? FontWeight.bold : FontWeight.w500,
+                    color: active ? primaryGreen : Colors.grey.shade600,
+                  ),
+                ),
+              ],
             ),
-          );
-        } else {
-          setState(() => _selectedTab = index);
-        }
-      },
-      borderRadius: BorderRadius.circular(14),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _createNavItem() {
+    return Expanded(
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 3),
+        padding: const EdgeInsets.only(bottom: 8),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Container(
-              width: 38,
-              height: 32,
-              decoration: BoxDecoration(
-                color: active ? const Color(0xFFE8F6C8) : Colors.transparent,
-                borderRadius: BorderRadius.circular(11),
-              ),
-              alignment: Alignment.center,
-              child: Icon(
-                active ? activeIcon : icon,
-                color: active ? primaryGreen : Colors.grey.shade600,
-                size: 21,
+            SizedBox(
+              width: 58,
+              height: 58,
+              child: Material(
+                color: accentLime,
+                elevation: 4,
+                shadowColor: Colors.black26,
+                shape: const CircleBorder(),
+                clipBehavior: Clip.antiAlias,
+                child: IconButton(
+                  tooltip: 'Create a booking',
+                  onPressed: _openCreateBooking,
+                  icon: Icon(Icons.add_rounded, color: primaryGreen, size: 32),
+                ),
               ),
             ),
-            const SizedBox(height: 2),
+            const SizedBox(height: 4),
             Text(
-              label,
+              'Create',
               style: TextStyle(
+                color: primaryGreen,
                 fontSize: 11,
-                fontWeight: active ? FontWeight.w700 : FontWeight.w500,
-                color: active ? primaryGreen : Colors.grey.shade600,
+                fontWeight: FontWeight.bold,
               ),
             ),
           ],
