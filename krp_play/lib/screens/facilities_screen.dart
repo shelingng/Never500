@@ -22,7 +22,7 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
   // Navigation step in prototype:
   // 1: Choose your sport
   // 2: Choose your court (select date, time, hours + show court layout)
-  // 3: Review your booking (confirm page showing details)
+  // 3: Review the cart and order total
   // 4: Payment & booking status
   int currentStep = 1;
 
@@ -32,9 +32,10 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
   String selectedSport = 'Badminton';
   String selectedCourt = 'Court 01';
 
-  DateTime selectedDate = DateTime(2026, 11, 14);
+  DateTime selectedDate = DateTime.now();
   String selectedStartTime = '9:00 PM';
   int selectedDurationHours = 1;
+  final List<Booking> cartItems = [];
 
   bool paymentCompleted = false;
   String generatedBookingRef = 'DEMO-KRP-001';
@@ -64,48 +65,59 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
     'MBSB Bank',
   ];
 
-  final List<String> availableStartTimes = [
+  static const List<String> _weekdayStartTimes = [
     '5:00 PM',
-    '5:30 PM',
     '6:00 PM',
-    '6:30 PM',
-    '7:00 PM',
-    '7:30 PM',
-    '8:00 PM',
-    '8:30 PM',
     '9:00 PM',
-    '9:30 PM',
     '10:00 PM',
   ];
 
+  static const List<String> _weekendStartTimes = [
+    '10:00 AM',
+    '11:00 AM',
+    '12:00 PM',
+    '3:00 PM',
+    '4:00 PM',
+    '5:00 PM',
+    '6:00 PM',
+    '9:00 PM',
+    '10:00 PM',
+  ];
+
+  List<String> get availableStartTimes {
+    final isWeekend =
+        selectedDate.weekday == DateTime.saturday ||
+        selectedDate.weekday == DateTime.sunday;
+    return isWeekend ? _weekendStartTimes : _weekdayStartTimes;
+  }
+
   static const List<String> monthNames = [
-    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec',
   ];
 
   String get formattedDate =>
       '${selectedDate.day} ${monthNames[selectedDate.month - 1]} ${selectedDate.year}';
 
-  String get calculatedEndTime {
-    try {
-      final startMin = BookingService.minutesFor(selectedStartTime);
-      final endMin = startMin + (selectedDurationHours * 60);
-      final hour24 = (endMin ~/ 60) % 24;
-      final minute = endMin % 60;
-      final period = hour24 >= 12 ? 'PM' : 'AM';
-      final hour12 = hour24 == 0 ? 12 : (hour24 > 12 ? hour24 - 12 : hour24);
-      final minStr = minute < 10 ? '0$minute' : '$minute';
-      return '$hour12:$minStr $period';
-    } catch (_) {
-      return '10:00 PM';
-    }
-  }
+  String get calculatedEndTime => _formatTime(
+    BookingService.minutesFor(selectedStartTime) + selectedDurationHours * 60,
+  );
 
   String get timeRangeString => '$selectedStartTime–$calculatedEndTime';
 
-  int get ratePerHour {
+  int _rateForSport(String sport) {
     if (widget.category == 'KRP Student') {
-      switch (selectedSport) {
+      switch (sport) {
         case 'Badminton':
           return 6;
         case 'Ping Pong':
@@ -118,7 +130,7 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
           return 6;
       }
     } else {
-      switch (selectedSport) {
+      switch (sport) {
         case 'Badminton':
           return 8;
         case 'Ping Pong':
@@ -133,12 +145,36 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
     }
   }
 
+  int get ratePerHour => _rateForSport(selectedSport);
   int get totalAmount => ratePerHour * selectedDurationHours;
+  int get cartTotal =>
+      cartItems.fold(0, (total, item) => total + item.totalPrice);
+  int get cartTotalHours =>
+      cartItems.fold(0, (total, item) => total + item.timeSlots.length);
+
+  String get _selectedFacilityName {
+    final courtNumber = selectedCourt.replaceAll(RegExp(r'[^0-9]'), '');
+    return switch (selectedSport) {
+      'Badminton' => 'Badminton Court $courtNumber',
+      'Ping Pong' => 'Ping Pong Table $courtNumber',
+      'Snooker' => 'Snooker Table',
+      'Dart' => 'Dart Board',
+      _ => '$selectedSport $selectedCourt',
+    };
+  }
+
+  String _formatTime(int minutes) {
+    final minuteOfDay = minutes % (24 * 60);
+    final hour24 = minuteOfDay ~/ 60;
+    final hour12 = hour24 % 12 == 0 ? 12 : hour24 % 12;
+    final minute = (minuteOfDay % 60).toString().padLeft(2, '0');
+    return '$hour12:$minute ${hour24 < 12 ? 'AM' : 'PM'}';
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF7F9F7),
+      backgroundColor: const Color(0xFFF4F6F4),
       appBar: AppBar(
         backgroundColor: primaryGreen,
         foregroundColor: Colors.white,
@@ -184,6 +220,11 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
           ),
         ),
       ),
+      bottomNavigationBar: currentStep == 3
+          ? _buildCheckoutBar()
+          : cartItems.isNotEmpty && currentStep < 3
+          ? _buildCartBar()
+          : null,
     );
   }
 
@@ -245,46 +286,13 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
                 ),
                 const SizedBox(height: 24),
 
-                // 2x2 Grid of Sport Cards matching mockup
-                Row(
-                  children: [
-                    Expanded(
-                      child: _sportCard(
-                        title: 'Badminton',
-                        subtitle: 'From RM6 / court / hour',
-                        sport: 'Badminton',
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: _sportCard(
-                        title: 'Ping Pong',
-                        subtitle: 'From RM4 / table / hour',
-                        sport: 'Ping Pong',
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                Row(
-                  children: [
-                    Expanded(
-                      child: _sportCard(
-                        title: 'Snooker',
-                        subtitle: 'From RM10 / table / hour',
-                        sport: 'Snooker',
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: _sportCard(
-                        title: 'Dart',
-                        subtitle: 'From RM3 / board / hour',
-                        sport: 'Dart',
-                      ),
-                    ),
-                  ],
-                ),
+                _sportCard(title: 'Badminton', sport: 'Badminton'),
+                const SizedBox(height: 10),
+                _sportCard(title: 'Ping Pong', sport: 'Ping Pong'),
+                const SizedBox(height: 10),
+                _sportCard(title: 'Snooker', sport: 'Snooker'),
+                const SizedBox(height: 10),
+                _sportCard(title: 'Dart', sport: 'Dart'),
 
                 const SizedBox(height: 28),
                 Text(
@@ -299,52 +307,74 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
     );
   }
 
-  Widget _sportCard({
-    required String title,
-    required String subtitle,
-    required String sport,
-  }) {
+  Widget _sportCard({required String title, required String sport}) {
     return InkWell(
       onTap: () {
         setState(() {
           selectedSport = sport;
+          selectedCourt = 'Court 01';
           currentStep = 2; // Move to next page
         });
       },
       borderRadius: BorderRadius.circular(12),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 16),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
         decoration: BoxDecoration(
-          color: const Color(0xFFF8FAF8),
+          color: Colors.white,
           borderRadius: BorderRadius.circular(12),
           border: Border.all(color: const Color(0xFFE5EDE7)),
         ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        child: Row(
           children: [
-            Text(
-              title,
-              style: const TextStyle(
-                fontWeight: FontWeight.bold,
-                fontSize: 16,
-                color: Color(0xFF103B2B),
+            Container(
+              width: 46,
+              height: 46,
+              decoration: BoxDecoration(
+                color: const Color(0xFFEBF5E9),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(_sportIcon(sport), color: primaryGreen),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                      color: Color(0xFF103B2B),
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'RM${_rateForSport(sport)}.00 / hour',
+                    style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
+                  ),
+                ],
               ),
             ),
-            const SizedBox(height: 4),
-            Text(
-              subtitle,
-              style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
-            ),
-            const SizedBox(height: 10),
-            Align(
-              alignment: Alignment.centerRight,
-              child: Icon(Icons.arrow_forward_rounded,
-                  size: 16, color: primaryGreen),
-            ),
+            Icon(Icons.arrow_forward_rounded, size: 20, color: primaryGreen),
           ],
         ),
       ),
     );
+  }
+
+  IconData _sportIcon(String sport) {
+    switch (sport) {
+      case 'Badminton':
+        return Icons.sports_tennis;
+      case 'Ping Pong':
+      case 'Snooker':
+        return Icons.table_restaurant;
+      case 'Dart':
+        return Icons.gps_fixed;
+      default:
+        return Icons.sports;
+    }
   }
 
   // ==========================================
@@ -377,10 +407,13 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 // Breadcrumb & Change Sport
-                Row(
+                Wrap(
+                  spacing: 4,
+                  runSpacing: 4,
+                  crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
                     Text(
-                      '$selectedSport / ',
+                      '$selectedSport /',
                       style: const TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w600,
@@ -388,9 +421,7 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
                       ),
                     ),
                     InkWell(
-                      onTap: () {
-                        setState(() => currentStep = 1);
-                      },
+                      onTap: () => setState(() => currentStep = 1),
                       child: Text(
                         'Change sport',
                         style: TextStyle(
@@ -405,41 +436,40 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
                 ),
                 const SizedBox(height: 16),
 
-                // Controls Row: Date, Start, Duration
-                SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: Row(
-                    children: [
-                      // Date Selector
-                      _pillButton(
-                        label: 'Date: $formattedDate',
-                        onTap: _showDatePickerDialog,
-                      ),
-                      const SizedBox(width: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    // Date Selector
+                    _pillButton(
+                      label: 'Date: $formattedDate',
+                      onTap: _showDatePickerDialog,
+                    ),
 
-                      // Start Time Selector
-                      _pillButton(
-                        label: 'Start: $selectedStartTime',
-                        onTap: _showStartTimeSelectorDialog,
-                      ),
-                      const SizedBox(width: 8),
+                    // Start Time Selector
+                    _pillButton(
+                      label: 'Start: $selectedStartTime',
+                      onTap: _showStartTimeSelectorDialog,
+                    ),
 
-                      // Duration Selector
-                      _pillButton(
-                        label: 'Duration: $selectedDurationHours hour${selectedDurationHours > 1 ? 's' : ''}',
-                        onTap: () {
-                          setState(() {
-                            selectedDurationHours = selectedDurationHours == 1 ? 2 : 1;
-                          });
-                        },
-                      ),
-                    ],
-                  ),
+                    // Duration Selector
+                    _pillButton(
+                      label:
+                          'Duration: $selectedDurationHours hour${selectedDurationHours > 1 ? 's' : ''}',
+                      onTap: () {
+                        setState(() {
+                          selectedDurationHours = selectedDurationHours == 1
+                              ? 2
+                              : 1;
+                        });
+                      },
+                    ),
+                  ],
                 ),
 
                 const SizedBox(height: 12),
                 Text(
-                  '$timeRangeString · RM$ratePerHour.00 per court',
+                  '$timeRangeString · RM$ratePerHour.00 per hour',
                   style: const TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.bold,
@@ -507,7 +537,7 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
 
                 const SizedBox(height: 20),
 
-                // Primary Button: Review booking · RM6.00
+                // Add this selection to the order and return to sport selection.
                 SizedBox(
                   width: double.infinity,
                   height: 48,
@@ -520,11 +550,9 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
                         borderRadius: BorderRadius.circular(10),
                       ),
                     ),
-                    onPressed: () {
-                      setState(() => currentStep = 3);
-                    },
+                    onPressed: _addSelectedToCart,
                     child: Text(
-                      'Review booking · RM$totalAmount.00',
+                      'Add to cart',
                       style: const TextStyle(
                         fontSize: 15,
                         fontWeight: FontWeight.bold,
@@ -592,7 +620,9 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
           : () {
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(
-                  content: Text('$courtName is $statusLabel. Please select Court 01.'),
+                  content: Text(
+                    '$courtName is $statusLabel. Please select Court 01.',
+                  ),
                   duration: const Duration(seconds: 2),
                 ),
               );
@@ -604,7 +634,9 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
           color: Colors.white,
           borderRadius: BorderRadius.circular(10),
           border: Border.all(
-            color: isSelected ? primaryGreen : (isSelected ? primaryGreen : const Color(0xFFE2E8E4)),
+            color: isSelected
+                ? primaryGreen
+                : (isSelected ? primaryGreen : const Color(0xFFE2E8E4)),
             width: isSelected ? 2.5 : 1.0,
           ),
           boxShadow: isSelected
@@ -658,9 +690,7 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
   }
 
   // ==========================================
-  // PANEL 03: 03 Review your booking
-  // (Step 4 in user request)
-  // ==========================================
+  // PANEL 03: Order summary
   Widget _buildStep3ReviewBooking() {
     return Container(
       decoration: BoxDecoration(
@@ -678,105 +708,72 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Step Header
-          _buildPanelHeader('03 Review your booking'),
-
+          _buildPanelHeader('03 Your order'),
           Padding(
-            padding: const EdgeInsets.all(20),
+            padding: const EdgeInsets.all(16),
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _reviewDetailRow('Sport / Facility', '$selectedSport / $selectedCourt'),
-                _divider(),
-                _reviewDetailRow('Date', formattedDate),
-                _divider(),
-                _reviewDetailRow('Start → End', '$selectedStartTime → $calculatedEndTime'),
-                _divider(),
-                _reviewDetailRow('Duration', '$selectedDurationHours hour${selectedDurationHours > 1 ? 's' : ''}'),
-                _divider(),
-                _reviewDetailRow('Student category', widget.category),
-                _divider(),
-                _reviewDetailRow('Rate', 'RM$ratePerHour.00 / court / hour'),
-
-                const SizedBox(height: 20),
-
-                // Total Amount Highlight Box
+                if (cartItems.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 24),
+                    child: Text(
+                      'Your cart is empty. Add a facility to continue.',
+                      style: TextStyle(color: Colors.grey.shade600),
+                    ),
+                  )
+                else
+                  ...cartItems.map(_buildCartItemCard),
+                const SizedBox(height: 8),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFEBF5E9),
-                    borderRadius: BorderRadius.circular(10),
+                    color: const Color(0xFFF7F9F7),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: subtleBorder),
                   ),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  child: Column(
                     children: [
-                      const Text(
-                        'Total amount',
-                        style: TextStyle(
-                          fontSize: 14,
-                          color: Color(0xFF103B2B),
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      Text(
-                        'RM$totalAmount.00',
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                          color: primaryGreen,
-                        ),
+                      _summaryRow('Total items', '${cartItems.length}'),
+                      const SizedBox(height: 10),
+                      _summaryRow('Total hours', '$cartTotalHours'),
+                      const SizedBox(height: 10),
+                      _summaryRow('Student category', widget.category),
+                      const Divider(height: 24),
+                      Row(
+                        children: [
+                          const Expanded(
+                            child: Text(
+                              'Final total',
+                              style: TextStyle(
+                                color: Color(0xFF103B2B),
+                                fontSize: 15,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                          Flexible(
+                            child: FittedBox(
+                              fit: BoxFit.scaleDown,
+                              child: Text(
+                                'RM${cartTotal.toStringAsFixed(2)}',
+                                style: TextStyle(
+                                  color: primaryGreen,
+                                  fontSize: 22,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ],
                   ),
                 ),
-
-                const SizedBox(height: 16),
+                const SizedBox(height: 12),
                 Text(
                   'Availability will be checked again before payment.',
                   style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
-                ),
-                const SizedBox(height: 24),
-
-                // Primary Action Button: Proceed to payment
-                SizedBox(
-                  width: double.infinity,
-                  height: 48,
-                  child: ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: primaryGreen,
-                      foregroundColor: Colors.white,
-                      elevation: 0,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                    ),
-                    onPressed: () {
-                      setState(() => currentStep = 4);
-                    },
-                    child: const Text(
-                      'Proceed to payment',
-                      style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
-                    ),
-                  ),
-                ),
-
-                const SizedBox(height: 12),
-
-                // Secondary Action: Edit selection
-                Center(
-                  child: TextButton(
-                    onPressed: () {
-                      setState(() => currentStep = 2);
-                    },
-                    child: Text(
-                      'Edit selection',
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: Colors.grey.shade700,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
                 ),
               ],
             ),
@@ -786,23 +783,294 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
     );
   }
 
-  Widget _reviewDetailRow(String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
+  Widget _buildCartItemCard(Booking booking) {
+    final sport = _sportForBooking(booking);
+    final court = _courtForBooking(booking);
+    final date = booking.date;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: subtleBorder),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 8,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(label, style: TextStyle(color: Colors.grey.shade600, fontSize: 13)),
-          Text(
-            value,
-            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+          Container(
+            width: 4,
+            height: 76,
+            decoration: BoxDecoration(
+              color: _sportColor(sport),
+              borderRadius: BorderRadius.circular(4),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  sport,
+                  style: const TextStyle(
+                    color: Color(0xFF103B2B),
+                    fontSize: 15,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  '$court · ${date.day} ${monthNames[date.month - 1]} ${date.year}',
+                  style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  _bookingTimeRange(booking),
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Colors.grey.shade700,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'RM${booking.totalPrice.toStringAsFixed(2)}',
+                style: const TextStyle(
+                  color: Color(0xFF103B2B),
+                  fontSize: 14,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              IconButton(
+                tooltip: 'Remove from order',
+                visualDensity: VisualDensity.compact,
+                constraints: const BoxConstraints.tightFor(
+                  width: 36,
+                  height: 36,
+                ),
+                icon: const Icon(Icons.delete_outline, size: 19),
+                color: Colors.grey.shade500,
+                onPressed: () => _removeCartItem(booking),
+              ),
+            ],
           ),
         ],
       ),
     );
   }
 
-  Widget _divider() => Divider(height: 1, thickness: 1, color: const Color(0xFFEFF3F0));
+  Widget _summaryRow(String label, String value) {
+    return Row(
+      children: [
+        Expanded(
+          child: Text(
+            label,
+            style: TextStyle(color: Colors.grey.shade700, fontSize: 13),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Flexible(
+          child: Text(
+            value,
+            textAlign: TextAlign.end,
+            style: const TextStyle(
+              color: Color(0xFF26362D),
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  String _sportForBooking(Booking booking) {
+    if (booking.facilityName.startsWith('Badminton')) return 'Badminton';
+    if (booking.facilityName.startsWith('Ping Pong')) return 'Ping Pong';
+    if (booking.facilityName.startsWith('Snooker')) return 'Snooker';
+    if (booking.facilityName.startsWith('Dart')) return 'Dart';
+    return booking.facilityName;
+  }
+
+  String _courtForBooking(Booking booking) =>
+      booking.facilityName.replaceFirst('${_sportForBooking(booking)} ', '');
+
+  Color _sportColor(String sport) {
+    switch (sport) {
+      case 'Badminton':
+        return const Color(0xFF388E3C);
+      case 'Ping Pong':
+        return const Color(0xFF2878B5);
+      case 'Snooker':
+        return const Color(0xFF7E57C2);
+      case 'Dart':
+        return const Color(0xFFD9A321);
+      default:
+        return primaryGreen;
+    }
+  }
+
+  String _bookingTimeRange(Booking booking) {
+    final start = BookingService.minutesFor(booking.timeSlots.first);
+    final end = _formatTime(start + booking.timeSlots.length * 60);
+    return '${booking.timeSlots.first} - $end';
+  }
+
+  Widget _buildCartBar() {
+    return SafeArea(
+      minimum: const EdgeInsets.only(bottom: 80),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+        decoration: BoxDecoration(
+          color: primaryGreen,
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.12),
+              blurRadius: 12,
+              offset: const Offset(0, -3),
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                '${cartItems.length} ${cartItems.length == 1 ? 'item' : 'items'} · RM${cartTotal.toStringAsFixed(2)}',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 14,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+            ElevatedButton(
+              onPressed: () => setState(() => currentStep = 3),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.white,
+                foregroundColor: primaryGreen,
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(9),
+                ),
+              ),
+              child: const Text(
+                'View my order',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCheckoutBar() {
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+        child: SizedBox(
+          height: 50,
+          width: double.infinity,
+          child: ElevatedButton(
+            onPressed: cartItems.isEmpty
+                ? null
+                : () => setState(() => currentStep = 4),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: primaryGreen,
+              foregroundColor: Colors.white,
+              disabledBackgroundColor: Colors.grey.shade300,
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
+            child: Text(
+              'Pay RM${cartTotal.toStringAsFixed(2)}',
+              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _addSelectedToCart() {
+    final date = DateTime(
+      selectedDate.year,
+      selectedDate.month,
+      selectedDate.day,
+    );
+    final startMinutes = BookingService.minutesFor(selectedStartTime);
+    final timeSlots = List.generate(
+      selectedDurationHours,
+      (index) => _formatTime(startMinutes + index * 60),
+    );
+    final facilityName = _selectedFacilityName;
+    final conflictsWithCart = cartItems.any((item) {
+      final sameDate =
+          item.date.year == date.year &&
+          item.date.month == date.month &&
+          item.date.day == date.day;
+      return item.facilityName == facilityName &&
+          sameDate &&
+          item.timeSlots.any(timeSlots.contains);
+    });
+
+    if (conflictsWithCart ||
+        !BookingService.instance.areAllSlotsAvailable(
+          facilityName: facilityName,
+          date: date,
+          timeSlots: timeSlots,
+        )) {
+      _showMessage(
+        'That facility is no longer available for the selected time.',
+      );
+      return;
+    }
+
+    final booking = Booking(
+      id: 'CART-${DateTime.now().microsecondsSinceEpoch}',
+      userEmail: widget.email,
+      facilityName: facilityName,
+      date: date,
+      timeSlots: timeSlots,
+      pricePerSession: ratePerHour,
+      participants: 1,
+      totalPrice: totalAmount,
+    );
+
+    setState(() {
+      cartItems.add(booking);
+      currentStep = 1;
+    });
+    _showMessage('Added to your order.');
+  }
+
+  void _removeCartItem(Booking booking) {
+    setState(() {
+      cartItems.removeWhere((item) => item.id == booking.id);
+    });
+  }
+
+  void _showMessage(String message) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
+  }
 
   // ==========================================
   // PANEL 04: 04 Payment & booking status
@@ -870,7 +1138,7 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
                           ],
                         ),
                         Text(
-                          'RM$totalAmount.00',
+                          'RM${cartTotal.toStringAsFixed(2)}',
                           style: TextStyle(
                             fontSize: 24,
                             fontWeight: FontWeight.bold,
@@ -1002,7 +1270,11 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
                       children: [
                         const Row(
                           children: [
-                            Icon(Icons.check, size: 20, color: Color(0xFF2E7D32)),
+                            Icon(
+                              Icons.check,
+                              size: 20,
+                              color: Color(0xFF2E7D32),
+                            ),
                             SizedBox(width: 8),
                             Text(
                               'Booking confirmed',
@@ -1016,7 +1288,7 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
                         ),
                         const SizedBox(height: 10),
                         Text(
-                          '$generatedBookingRef · $selectedCourt',
+                          '$generatedBookingRef · ${cartItems.length} ${cartItems.length == 1 ? 'item' : 'items'}',
                           style: const TextStyle(
                             fontWeight: FontWeight.bold,
                             fontSize: 14,
@@ -1024,7 +1296,7 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
                         ),
                         const SizedBox(height: 2),
                         Text(
-                          '$formattedDate · $timeRangeString',
+                          'RM${cartTotal.toStringAsFixed(2)} · ${cartItems.first.date.day} ${monthNames[cartItems.first.date.month - 1]} ${cartItems.first.date.year}',
                           style: TextStyle(
                             fontSize: 13,
                             color: Colors.grey.shade700,
@@ -1042,7 +1314,9 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
                         const SizedBox(height: 12),
                         InkWell(
                           onTap: () {
-                            Navigator.of(context).pop(); // Back to facility info screen
+                            Navigator.of(
+                              context,
+                            ).pop(); // Back to facility info screen
                           },
                           child: Text(
                             'View booking details →',
@@ -1152,24 +1426,44 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
   }
 
   void _processDemoPayment() {
+    final bookingService = BookingService.instance;
+    for (final item in cartItems) {
+      if (!bookingService.areAllSlotsAvailable(
+        facilityName: item.facilityName,
+        date: item.date,
+        timeSlots: item.timeSlots,
+      )) {
+        _showMessage(
+          'An item in your order is no longer available. Please review your order.',
+        );
+        return;
+      }
+    }
+
+    for (final item in cartItems) {
+      final confirmedBooking = Booking(
+        id: item.id,
+        userEmail: item.userEmail,
+        facilityName: item.facilityName,
+        date: item.date,
+        timeSlots: item.timeSlots,
+        pricePerSession: item.pricePerSession,
+        participants: item.participants,
+        totalPrice: item.totalPrice,
+        status: 'Confirmed',
+      );
+      if (!bookingService.addBooking(confirmedBooking)) {
+        _showMessage(
+          'An item in your order could not be confirmed. Please review your order.',
+        );
+        return;
+      }
+    }
+
     setState(() {
+      generatedBookingRef = cartItems.first.id;
       paymentCompleted = true;
     });
-
-    // Keep the mock booking in the in-memory booking service.
-    BookingService.instance.addBooking(
-      Booking(
-        id: generatedBookingRef,
-        userEmail: widget.email,
-        facilityName: 'Badminton Court 01',
-        date: selectedDate,
-        timeSlots: [selectedStartTime],
-        pricePerSession: ratePerHour,
-        participants: 1,
-        totalPrice: totalAmount,
-        status: 'Confirmed',
-      ),
-    );
   }
 
   Widget _buildPanelHeader(String title) {
@@ -1213,50 +1507,81 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
     );
 
     if (picked != null) {
-      setState(() => selectedDate = picked);
+      setState(() {
+        selectedDate = picked;
+        if (!availableStartTimes.contains(selectedStartTime)) {
+          selectedStartTime = availableStartTimes.first;
+        }
+      });
     }
   }
 
   void _showStartTimeSelectorDialog() {
     showModalBottomSheet(
       context: context,
+      isScrollControlled: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (context) {
-        return Container(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'Select start time (:00 or :30)',
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-              ),
-              const SizedBox(height: 12),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: availableStartTimes.map((time) {
-                  final isSelected = selectedStartTime == time;
-                  return ChoiceChip(
-                    label: Text(time),
-                    selected: isSelected,
-                    selectedColor: primaryGreen,
-                    labelStyle: TextStyle(
-                      color: isSelected ? Colors.white : Colors.black87,
-                      fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                    ),
-                    onSelected: (_) {
-                      setState(() => selectedStartTime = time);
-                      Navigator.pop(context);
-                    },
-                  );
-                }).toList(),
-              ),
-              const SizedBox(height: 16),
-            ],
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Select start time',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                ),
+                const SizedBox(height: 12),
+                GridView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 3,
+                    crossAxisSpacing: 8,
+                    mainAxisSpacing: 8,
+                    childAspectRatio: 2.4,
+                  ),
+                  itemCount: availableStartTimes.length,
+                  itemBuilder: (context, index) {
+                    final time = availableStartTimes[index];
+                    final isSelected = selectedStartTime == time;
+                    return OutlinedButton(
+                      onPressed: () {
+                        setState(() => selectedStartTime = time);
+                        Navigator.pop(context);
+                      },
+                      style: OutlinedButton.styleFrom(
+                        backgroundColor: isSelected
+                            ? primaryGreen
+                            : Colors.white,
+                        foregroundColor: isSelected
+                            ? Colors.white
+                            : primaryGreen,
+                        side: BorderSide(
+                          color: isSelected ? primaryGreen : subtleBorder,
+                        ),
+                        padding: EdgeInsets.zero,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(9),
+                        ),
+                      ),
+                      child: Text(
+                        time,
+                        maxLines: 1,
+                        style: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ],
+            ),
           ),
         );
       },
@@ -1282,27 +1607,48 @@ class _PrototypeCourtPainter extends CustomPainter {
 
     // Singles sidelines
     canvas.drawLine(
-        Offset(rect.left + 8, rect.top), Offset(rect.left + 8, rect.bottom), paint);
+      Offset(rect.left + 8, rect.top),
+      Offset(rect.left + 8, rect.bottom),
+      paint,
+    );
     canvas.drawLine(
-        Offset(rect.right - 8, rect.top), Offset(rect.right - 8, rect.bottom), paint);
+      Offset(rect.right - 8, rect.top),
+      Offset(rect.right - 8, rect.bottom),
+      paint,
+    );
 
     // Middle net line
     final midY = rect.top + rect.height / 2;
-    canvas.drawLine(Offset(rect.left - 2, midY), Offset(rect.right + 2, midY),
-        paint..strokeWidth = 1.8);
+    canvas.drawLine(
+      Offset(rect.left - 2, midY),
+      Offset(rect.right + 2, midY),
+      paint..strokeWidth = 1.8,
+    );
     paint.strokeWidth = 1.2;
 
     // Service lines
     canvas.drawLine(
-        Offset(rect.left, midY - 14), Offset(rect.right, midY - 14), paint);
+      Offset(rect.left, midY - 14),
+      Offset(rect.right, midY - 14),
+      paint,
+    );
     canvas.drawLine(
-        Offset(rect.left, midY + 14), Offset(rect.right, midY + 14), paint);
+      Offset(rect.left, midY + 14),
+      Offset(rect.right, midY + 14),
+      paint,
+    );
 
     // Back doubles lines
     canvas.drawLine(
-        Offset(rect.left, rect.top + 6), Offset(rect.right, rect.top + 6), paint);
+      Offset(rect.left, rect.top + 6),
+      Offset(rect.right, rect.top + 6),
+      paint,
+    );
     canvas.drawLine(
-        Offset(rect.left, rect.bottom - 6), Offset(rect.right, rect.bottom - 6), paint);
+      Offset(rect.left, rect.bottom - 6),
+      Offset(rect.right, rect.bottom - 6),
+      paint,
+    );
 
     // Center dividing lines
     final midX = rect.left + rect.width / 2;

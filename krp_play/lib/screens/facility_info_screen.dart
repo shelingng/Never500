@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -28,15 +30,27 @@ class FacilityInfoScreen extends StatefulWidget {
 }
 
 class _FacilityInfoScreenState extends State<FacilityInfoScreen> {
-  final Color primaryGreen = const Color(0xFF103B2B);
-  final Color accentLime = const Color(0xFFD2F865);
-  final Color subtleBorder = const Color(0xFFE9EFEA);
+  static const Color primaryGreen = Color(0xFF1A332C);
+  static const Color cardGreen = Colors.white;
+  static const Color accentLime = Color(0xFFC5F84B);
+  static const Color mutedText = Color(0xFF66756D);
+  static const Color subtleBorder = Color(0xFFE2E9E4);
+  static const Color paleGreen = Color(0xFFEDF4EF);
+  static const Color pageBackground = Color(0xFFF4F6F4);
+  static const Color sidebarMuted = Color(0xFFA0B0A8);
 
   int _selectedTab = 0;
   int _currentCarouselIndex = 0;
   final PageController _pageController = PageController();
+  Timer? _hoursRefreshTimer;
 
   final List<Map<String, dynamic>> carouselItems = [
+    {
+      'title': 'Welcome to Kolej Rahman Putra',
+      'subtitle': 'Your home for sports, fitness and recreation',
+      'icon': Icons.location_on_outlined,
+      'photo': 'assets/facilities/krp_entrance.jpg',
+    },
     {
       'title': 'Badminton Courts 01 & 02',
       'subtitle': 'Indoor badminton facilities at KRP',
@@ -61,13 +75,15 @@ class _FacilityInfoScreenState extends State<FacilityInfoScreen> {
       'icon': Icons.fitness_center,
       'photo': 'assets/facilities/gym.jpg',
     },
-    {
-      'title': 'Welcome to Kolej Rahman Putra',
-      'subtitle': 'KRP entrance landmark',
-      'icon': Icons.location_on_outlined,
-      'photo': 'assets/facilities/krp_entrance.jpg',
-    },
   ];
+
+  @override
+  void initState() {
+    super.initState();
+    _hoursRefreshTimer = Timer.periodic(const Duration(minutes: 1), (_) {
+      if (mounted) setState(() {});
+    });
+  }
 
   static const _mapsUrl =
       'https://maps.google.com/maps?udm&fvr=1&pvq=CgwvZy8xMTl0eXAzcnMiDQoHa3JwIGcwMRACGAM&lqi=CgdrcnAgZzAxSPid6p6ngYCACFoNEAAQASIHa3JwIGcwMZIBFnN0dWRlbnRfaG91c2luZ19jZW50ZXI&vet=10CAAQoqAOahcKEwigk5uS9IOYAxUAAAAAHQAAAAAQBg..i&cs=0&um=1&ie=UTF-8&fb=1&gl=my&sa=X&ftid=0x31da76ac90393b45:0xca01a207fd92c603';
@@ -291,7 +307,7 @@ class _FacilityInfoScreenState extends State<FacilityInfoScreen> {
                         : Icons.radio_button_unchecked,
                     size: 12,
                     color: _currentCarouselIndex == index
-                        ? primaryGreen
+                        ? accentLime
                         : Colors.grey,
                   ),
                 ),
@@ -305,6 +321,7 @@ class _FacilityInfoScreenState extends State<FacilityInfoScreen> {
 
   @override
   void dispose() {
+    _hoursRefreshTimer?.cancel();
     _pageController.dispose();
     super.dispose();
   }
@@ -312,119 +329,173 @@ class _FacilityInfoScreenState extends State<FacilityInfoScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: pageBackground,
       drawer: Drawer(
-        child: ListView(
-          padding: EdgeInsets.zero,
-          children: [
-            DrawerHeader(
-              decoration: BoxDecoration(color: primaryGreen),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  CircleAvatar(
-                    radius: 26,
-                    backgroundColor: accentLime,
-                    child: Text(
-                      widget.studentName.isNotEmpty
-                          ? widget.studentName
-                                .trim()
-                                .split(' ')
-                                .map((w) => w.isNotEmpty ? w[0] : '')
-                                .take(2)
-                                .join()
-                                .toUpperCase()
-                          : 'YX',
-                      style: TextStyle(
-                        color: primaryGreen,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 18,
+        backgroundColor: primaryGreen,
+        child: SafeArea(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              DrawerHeader(
+                decoration: const BoxDecoration(color: Color(0xFF23433A)),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          width: 38,
+                          height: 38,
+                          decoration: BoxDecoration(
+                            color: accentLime,
+                            borderRadius: BorderRadius.circular(11),
+                          ),
+                          child: Icon(
+                            Icons.sports_tennis,
+                            color: primaryGreen,
+                            size: 23,
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        const Text(
+                          'KRP PLAY',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 20,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: 0.5,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    CircleAvatar(
+                      radius: 20,
+                      backgroundColor: accentLime,
+                      child: Text(
+                        widget.studentName.isNotEmpty
+                            ? widget.studentName
+                                  .trim()
+                                  .split(' ')
+                                  .map((w) => w.isNotEmpty ? w[0] : '')
+                                  .take(2)
+                                  .join()
+                                  .toUpperCase()
+                            : 'YX',
+                        style: TextStyle(
+                          color: primaryGreen,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 18,
+                        ),
                       ),
                     ),
-                  ),
-                  const SizedBox(height: 10),
-                  Text(
-                    widget.studentName,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 16,
+                    const SizedBox(height: 10),
+                    Text(
+                      widget.studentName,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                      ),
                     ),
-                  ),
-                  Text(
-                    widget.category,
-                    style: TextStyle(
-                      color: Colors.white.withValues(alpha: 0.8),
-                      fontSize: 12,
+                    Text(
+                      widget.category,
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.8),
+                        fontSize: 12,
+                      ),
                     ),
-                  ),
-                ],
-              ),
-            ),
-            ListTile(
-              leading: const Icon(Icons.info_outline),
-              title: const Text('KRP Sports Complex Info'),
-              selected: _selectedTab == 0,
-              onTap: () {
-                Navigator.pop(context);
-                setState(() => _selectedTab = 0);
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.calendar_month_outlined),
-              title: const Text('Book a Facility'),
-              onTap: () {
-                Navigator.pop(context);
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => FacilitiesScreen(
-                      category: widget.category,
-                      email: widget.email,
-                      studentName: widget.studentName,
-                    ),
-                  ),
-                );
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.receipt_long_outlined),
-              title: const Text('Booking Records'),
-              onTap: () {
-                Navigator.pop(context);
-                setState(() => _selectedTab = 1);
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.person_outline),
-              title: const Text('Profile'),
-              selected: _selectedTab == 3,
-              onTap: () {
-                Navigator.pop(context);
-                setState(() => _selectedTab = 3);
-              },
-            ),
-            if (widget.onLogout != null) ...[
-              const Divider(),
-              ListTile(
-                leading: const Icon(Icons.logout, color: Colors.red),
-                title: const Text(
-                  'Log out',
-                  style: TextStyle(color: Colors.red),
+                  ],
                 ),
-                onTap: () {
-                  Navigator.pop(context);
-                  widget.onLogout!();
-                },
               ),
+              Expanded(
+                child: ListView(
+                  padding: EdgeInsets.zero,
+                  children: [
+                    _drawerItem(
+                      icon: Icons.home_outlined,
+                      title: 'Home',
+                      selected: _selectedTab == 0,
+                      onTap: () {
+                        Navigator.pop(context);
+                        setState(() => _selectedTab = 0);
+                      },
+                    ),
+                    _drawerItem(
+                      icon: Icons.calendar_month_outlined,
+                      title: 'Book a Facility',
+                      onTap: () {
+                        Navigator.pop(context);
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => FacilitiesScreen(
+                              category: widget.category,
+                              email: widget.email,
+                              studentName: widget.studentName,
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                    _drawerItem(
+                      icon: Icons.receipt_long_outlined,
+                      title: 'My Bookings',
+                      selected: _selectedTab == 1,
+                      onTap: () {
+                        Navigator.pop(context);
+                        setState(() => _selectedTab = 1);
+                      },
+                    ),
+                    _drawerItem(
+                      icon: Icons.chat_bubble_outline,
+                      title: 'Reports',
+                      selected: _selectedTab == 2,
+                      onTap: () {
+                        Navigator.pop(context);
+                        setState(() => _selectedTab = 2);
+                      },
+                    ),
+                    _drawerItem(
+                      icon: Icons.person_outline,
+                      title: 'Profile',
+                      selected: _selectedTab == 3,
+                      onTap: () {
+                        Navigator.pop(context);
+                        setState(() => _selectedTab = 3);
+                      },
+                    ),
+                  ],
+                ),
+              ),
+              if (widget.onLogout != null) ...[
+                const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 16),
+                  child: Divider(color: subtleBorder),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                  child: ListTile(
+                    leading: const Icon(Icons.logout, color: Color(0xFFFF6B6B)),
+                    title: const Text(
+                      'Log out',
+                      style: TextStyle(color: Color(0xFFFF6B6B)),
+                    ),
+                    onTap: () {
+                      Navigator.pop(context);
+                      widget.onLogout!();
+                    },
+                  ),
+                ),
+              ],
             ],
-          ],
+          ),
         ),
       ),
       appBar: AppBar(
-        backgroundColor: Colors.white,
-        foregroundColor: primaryGreen,
+        backgroundColor: primaryGreen,
+        foregroundColor: Colors.white,
         elevation: 0,
         leading: Builder(
           builder: (context) {
@@ -451,7 +522,7 @@ class _FacilityInfoScreenState extends State<FacilityInfoScreen> {
           style: TextStyle(
             fontSize: 18,
             fontWeight: FontWeight.bold,
-            color: Color(0xFF103B2B),
+            color: Colors.white,
           ),
         ),
         actions: [
@@ -475,140 +546,130 @@ class _FacilityInfoScreenState extends State<FacilityInfoScreen> {
           ),
         ],
       ),
-      body: IndexedStack(
-        index: _selectedTab,
-        children: [
-          Stack(
-            children: [
-              ListView(
-                padding: const EdgeInsets.only(bottom: 24),
-                children: [
-                  // INFO TAB HEADER (Matching orange layout with green underline)
-                  Container(
-                    decoration: BoxDecoration(
-                      border: Border(bottom: BorderSide(color: subtleBorder)),
-                    ),
-                    child: Row(
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 24,
-                            vertical: 14,
-                          ),
-                          decoration: BoxDecoration(
-                            border: Border(
-                              bottom: BorderSide(color: primaryGreen, width: 3),
-                            ),
-                          ),
-                          child: Text(
-                            'Info',
-                            style: TextStyle(
-                              color: primaryGreen,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 15,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-
-                  const SizedBox(height: 16),
-
-                  _buildFacilityPhotos(),
-                  const SizedBox(height: 16),
-
-                  // VENUE LOCATION & DETAILS CARD
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: Container(
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFF9FAF9),
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: subtleBorder),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    const Text(
-                                      'Kolej Rahman Putra (KRP) Sports Complex',
-                                      style: TextStyle(
-                                        fontSize: 16,
-                                        fontWeight: FontWeight.bold,
-                                        color: Color(0xFF103B2B),
-                                      ),
-                                    ),
-                                    const SizedBox(height: 6),
-                                    Text(
-                                      "G09 (RF), 601, Jalan Meranti 1, 80990 Johor Bahru, Johor Darul Ta’zim",
-                                      style: TextStyle(
-                                        fontSize: 13,
-                                        color: Colors.grey.shade700,
-                                        height: 1.3,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 6),
-                                    Text(
-                                      'Tel: +60 7-553 3333 · KRP Office',
-                                      style: TextStyle(
-                                        fontSize: 12,
-                                        color: Colors.grey.shade600,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              OutlinedButton.icon(
-                                style: OutlinedButton.styleFrom(
-                                  foregroundColor: primaryGreen,
-                                  side: BorderSide(color: primaryGreen),
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(20),
-                                  ),
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 12,
-                                    vertical: 8,
-                                  ),
-                                ),
-                                onPressed: _openMaps,
-                                icon: const Icon(Icons.map_outlined, size: 16),
-                                label: const Text(
-                                  'Open Maps',
-                                  style: TextStyle(fontSize: 12),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-
-                  const SizedBox(height: 12),
-
-                  // EXPANDABLE SECTIONS (Accordion Layout like Orange Reference)
-                  _buildPricingSection(),
-                  _buildOpeningHoursSection(),
-                  _buildAmenitiesSection(),
-                  _buildCentreLayoutSection(),
-                  _buildCentrePolicySection(),
-                ],
-              ),
-            ],
+      body: Theme(
+        data: Theme.of(context).copyWith(
+          brightness: Brightness.light,
+          colorScheme: Theme.of(context).colorScheme.copyWith(
+            brightness: Brightness.light,
+            primary: primaryGreen,
+            secondary: accentLime,
+            surface: Colors.white,
+            onSurface: primaryGreen,
           ),
-          _studentSection('student-bookings', 1),
-          _studentSection('student-reports', 3),
-          _studentSection('student-profile', 0),
-        ],
+          textTheme: Theme.of(context).textTheme.apply(
+            bodyColor: primaryGreen,
+            displayColor: primaryGreen,
+          ),
+          dividerColor: subtleBorder,
+          scaffoldBackgroundColor: pageBackground,
+        ),
+        child: IndexedStack(
+          index: _selectedTab,
+          children: [
+            Stack(
+              children: [
+                ListView(
+                  padding: const EdgeInsets.only(bottom: 24),
+                  children: [
+                    _buildFacilityPhotos(),
+                    const SizedBox(height: 16),
+
+                    // VENUE LOCATION & DETAILS CARD
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: Container(
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: cardGreen,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(color: subtleBorder),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      const Text(
+                                        'Kolej Rahman Putra (KRP) Sports Complex',
+                                        style: TextStyle(
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.bold,
+                                          color: primaryGreen,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 6),
+                                      Text(
+                                        "G09 (RF), 601, Jalan Meranti 1, 80990 Johor Bahru, Johor Darul Ta’zim",
+                                        style: TextStyle(
+                                          fontSize: 13,
+                                          color: mutedText,
+                                          height: 1.3,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 6),
+                                      Text(
+                                        'Tel: +60 7-553 3333 · KRP Office',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color: mutedText,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                FilledButton.icon(
+                                  style: FilledButton.styleFrom(
+                                    backgroundColor: accentLime,
+                                    foregroundColor: primaryGreen,
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(20),
+                                    ),
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 12,
+                                      vertical: 8,
+                                    ),
+                                  ),
+                                  onPressed: _openMaps,
+                                  icon: const Icon(
+                                    Icons.map_outlined,
+                                    size: 16,
+                                  ),
+                                  label: const Text(
+                                    'Open Maps',
+                                    style: TextStyle(fontSize: 12),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+
+                    const SizedBox(height: 12),
+
+                    // EXPANDABLE SECTIONS (Accordion Layout like Orange Reference)
+                    _buildPricingSection(),
+                    _buildOpeningHoursSection(),
+                    _buildAmenitiesSection(),
+                    _buildCentreLayoutSection(),
+                    _buildCentrePolicySection(),
+                  ],
+                ),
+              ],
+            ),
+            _studentSection('student-bookings', 1),
+            _studentSection('student-reports', 3),
+            _studentSection('student-profile', 0),
+          ],
+        ),
       ),
       bottomNavigationBar: Container(
         decoration: BoxDecoration(
@@ -655,7 +716,7 @@ class _FacilityInfoScreenState extends State<FacilityInfoScreen> {
   }
 
   Widget _studentSection(String sectionKey, int initialTab) {
-    return ProfileScreen(
+    final profile = ProfileScreen(
       key: ValueKey(sectionKey),
       email: widget.email,
       fullName: widget.studentName,
@@ -664,6 +725,38 @@ class _FacilityInfoScreenState extends State<FacilityInfoScreen> {
       category: widget.category,
       initialTab: initialTab,
       navigationSection: true,
+    );
+    return profile;
+  }
+
+  Widget _drawerItem({
+    required IconData icon,
+    required String title,
+    required VoidCallback onTap,
+    bool selected = false,
+  }) {
+    final foreground = selected ? primaryGreen : sidebarMuted;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
+      child: Material(
+        color: selected ? accentLime : Colors.transparent,
+        borderRadius: BorderRadius.circular(14),
+        child: ListTile(
+          selected: selected,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+          ),
+          leading: Icon(icon, color: foreground),
+          title: Text(
+            title,
+            style: TextStyle(
+              color: foreground,
+              fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
+            ),
+          ),
+          onTap: onTap,
+        ),
+      ),
     );
   }
 
@@ -705,14 +798,12 @@ class _FacilityInfoScreenState extends State<FacilityInfoScreen> {
                   height: 32,
                   alignment: Alignment.center,
                   decoration: BoxDecoration(
-                    color: active
-                        ? const Color(0xFFE8F6C8)
-                        : Colors.transparent,
+                    color: active ? accentLime : Colors.transparent,
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Icon(
                     active ? activeIcon : icon,
-                    color: active ? primaryGreen : Colors.grey.shade600,
+                    color: active ? primaryGreen : mutedText,
                     size: 23,
                   ),
                 ),
@@ -723,7 +814,7 @@ class _FacilityInfoScreenState extends State<FacilityInfoScreen> {
                   style: TextStyle(
                     fontSize: 10,
                     fontWeight: active ? FontWeight.bold : FontWeight.w500,
-                    color: active ? primaryGreen : Colors.grey.shade600,
+                    color: active ? primaryGreen : mutedText,
                   ),
                 ),
               ],
@@ -784,7 +875,7 @@ class _FacilityInfoScreenState extends State<FacilityInfoScreen> {
           style: TextStyle(
             fontSize: 16,
             fontWeight: FontWeight.bold,
-            color: Color(0xFF103B2B),
+            color: primaryGreen,
           ),
         ),
         childrenPadding: const EdgeInsets.symmetric(
@@ -792,90 +883,30 @@ class _FacilityInfoScreenState extends State<FacilityInfoScreen> {
           vertical: 8,
         ),
         children: [
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: const Color(0xFFF9FAF9),
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: subtleBorder),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'KRP SPORTS & COURT RATES',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 1.2,
-                    color: Color(0xFF103B2B),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                _priceItem(
-                  '🏸 Badminton Court (01 & 02)',
-                  'RM 6/hour',
-                  'RM 8/hour',
-                  'Rubber court mat · high ceiling',
-                ),
-                _priceItem(
-                  '🏓 Ping Pong Table (01 & 02)',
-                  'RM 4/hour',
-                  'RM 6/hour',
-                  'Tournament standard table',
-                ),
-                _priceItem(
-                  '🎱 Snooker Table',
-                  'RM 10/hour',
-                  'RM 12/hour',
-                  'Full size regulation slate table',
-                ),
-                _priceItem(
-                  '🎯 Dart Board',
-                  'RM 3/hour',
-                  'RM 5/hour',
-                  'Professional electronic dartboard',
-                ),
-                _priceItem(
-                  '🏋️ KRP Fitness Gym',
-                  'RM 2/session',
-                  'RM 4/session',
-                  'Cardio & free-weights zone',
-                ),
-                const Divider(height: 20),
-                Row(
-                  children: [
-                    const Icon(Icons.access_time, size: 14, color: Colors.grey),
-                    const SizedBox(width: 6),
-                    Text(
-                      'Non-Peak: Weekdays, 5 PM – 7 PM',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.grey.shade700,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 4),
-                Row(
-                  children: [
-                    const Icon(
-                      Icons.local_fire_department,
-                      size: 14,
-                      color: Colors.deepOrange,
-                    ),
-                    const SizedBox(width: 6),
-                    Text(
-                      'Peak: Weekdays 8 PM – 11 PM, Weekends & Public Holidays',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.grey.shade700,
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
+          _priceItem(
+            Icons.sports_tennis,
+            'Badminton Court (01 & 02)',
+            'RM 6/hour',
+            'RM 8/hour',
+          ),
+          _priceItem(
+            Icons.sports_tennis_outlined,
+            'Ping Pong Table (01 & 02)',
+            'RM 4/hour',
+            'RM 6/hour',
+          ),
+          _priceItem(Icons.sports, 'Snooker Table', 'RM 10/hour', 'RM 12/hour'),
+          _priceItem(
+            Icons.track_changes_outlined,
+            'Dart Board',
+            'RM 3/hour',
+            'RM 5/hour',
+          ),
+          _priceItem(
+            Icons.fitness_center,
+            'KRP Fitness Gym',
+            'RM 2/session',
+            'RM 4/session',
           ),
         ],
       ),
@@ -883,41 +914,96 @@ class _FacilityInfoScreenState extends State<FacilityInfoScreen> {
   }
 
   Widget _priceItem(
+    IconData icon,
     String title,
     String krpRate,
     String nonKrpRate,
-    String note,
   ) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: subtleBorder),
+          boxShadow: const [
+            BoxShadow(
+              color: Color(0x0C173F32),
+              blurRadius: 10,
+              offset: Offset(0, 3),
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(9),
+                  decoration: BoxDecoration(
+                    color: paleGreen,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(icon, color: primaryGreen, size: 20),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    title,
+                    style: const TextStyle(
+                      color: primaryGreen,
+                      fontSize: 15,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 12),
+              child: Divider(height: 1, color: subtleBorder),
+            ),
+            Row(
+              children: [
+                Expanded(child: _rateBlock('KRP Student', krpRate, true)),
+                const SizedBox(width: 12),
+                Expanded(child: _rateBlock('Non-KRP', nonKrpRate, false)),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _rateBlock(String label, String rate, bool highlighted) {
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: highlighted ? accentLime : pageBackground,
+        borderRadius: BorderRadius.circular(10),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            title,
-            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+            label,
+            style: TextStyle(
+              color: primaryGreen.withValues(alpha: 0.75),
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+            ),
           ),
-          const SizedBox(height: 3),
-          Row(
-            children: [
-              Text(
-                '• KRP Student: $krpRate',
-                style: const TextStyle(
-                  fontSize: 13,
-                  color: Color(0xFF103B2B),
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              const SizedBox(width: 14),
-              Text(
-                '• Non-KRP: $nonKrpRate',
-                style: TextStyle(fontSize: 13, color: Colors.grey.shade700),
-              ),
-            ],
-          ),
+          const SizedBox(height: 4),
           Text(
-            note,
-            style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+            rate,
+            style: const TextStyle(
+              color: primaryGreen,
+              fontSize: 14,
+              fontWeight: FontWeight.bold,
+            ),
           ),
         ],
       ),
@@ -926,6 +1012,7 @@ class _FacilityInfoScreenState extends State<FacilityInfoScreen> {
 
   // 2. OPENING HOURS ACCORDION
   Widget _buildOpeningHoursSection() {
+    final isOpen = _isFacilityOpen(DateTime.now());
     return Theme(
       data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
       child: ExpansionTile(
@@ -936,7 +1023,7 @@ class _FacilityInfoScreenState extends State<FacilityInfoScreen> {
           style: TextStyle(
             fontSize: 16,
             fontWeight: FontWeight.bold,
-            color: Color(0xFF103B2B),
+            color: primaryGreen,
           ),
         ),
         childrenPadding: const EdgeInsets.symmetric(
@@ -947,7 +1034,7 @@ class _FacilityInfoScreenState extends State<FacilityInfoScreen> {
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: const Color(0xFFF9FAF9),
+              color: cardGreen,
               borderRadius: BorderRadius.circular(14),
               border: Border.all(color: subtleBorder),
             ),
@@ -955,51 +1042,85 @@ class _FacilityInfoScreenState extends State<FacilityInfoScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    const Text(
-                      'Monday – Friday (Weekdays)',
-                      style: TextStyle(fontWeight: FontWeight.w600),
+                    Container(
+                      width: 9,
+                      height: 9,
+                      decoration: BoxDecoration(
+                        color: isOpen ? accentLime : const Color(0xFFD64545),
+                        shape: BoxShape.circle,
+                      ),
                     ),
+                    const SizedBox(width: 8),
                     Text(
-                      '5:00 PM – 11:00 PM',
+                      isOpen ? 'Open now' : 'Closed',
                       style: TextStyle(
-                        color: primaryGreen,
+                        color: isOpen ? primaryGreen : const Color(0xFFD64545),
                         fontWeight: FontWeight.bold,
                       ),
                     ),
                   ],
                 ),
-                Text(
-                  'Closed 7:00 PM – 8:00 PM for Maghrib prayer break',
-                  style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                const SizedBox(height: 14),
+                _hoursRow(
+                  'Monday - Friday (Weekdays)',
+                  '05:00 PM - 07:00 PM',
+                  '09:00 PM - 11:00 PM',
                 ),
-                const Divider(height: 20),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Text(
-                      'Saturday & Sunday (Weekends)',
-                      style: TextStyle(fontWeight: FontWeight.w600),
-                    ),
-                    Text(
-                      '10:00 AM – 11:00 PM',
-                      style: TextStyle(
-                        color: primaryGreen,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ],
-                ),
-                Text(
-                  'Sessions: 10 AM – 1 PM, 2 PM – 7 PM, 8 PM – 11 PM',
-                  style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                const Divider(height: 24),
+                _hoursRow(
+                  'Saturday - Sunday (Weekends)',
+                  '10:00 AM - 01:00 PM',
+                  '03:00 PM - 07:00 PM',
+                  '09:00 PM - 11:00 PM',
                 ),
               ],
             ),
           ),
         ],
       ),
+    );
+  }
+
+  bool _isFacilityOpen(DateTime now) {
+    final minuteOfDay = now.hour * 60 + now.minute;
+    final sessions =
+        now.weekday >= DateTime.monday && now.weekday <= DateTime.friday
+        ? const [(17 * 60, 19 * 60), (21 * 60, 23 * 60)]
+        : const [(10 * 60, 13 * 60), (15 * 60, 19 * 60), (21 * 60, 23 * 60)];
+    return sessions.any(
+      (session) => minuteOfDay >= session.$1 && minuteOfDay < session.$2,
+    );
+  }
+
+  Widget _hoursRow(String days, String first, String second, [String? third]) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(days, style: const TextStyle(fontWeight: FontWeight.w700)),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [first, second, ?third].map((hours) {
+            return Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+              decoration: BoxDecoration(
+                color: paleGreen,
+                borderRadius: BorderRadius.circular(9),
+              ),
+              child: Text(
+                hours,
+                style: const TextStyle(
+                  color: primaryGreen,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            );
+          }).toList(),
+        ),
+      ],
     );
   }
 
@@ -1011,7 +1132,7 @@ class _FacilityInfoScreenState extends State<FacilityInfoScreen> {
       {'icon': Icons.local_parking, 'label': 'Free Parking'},
       {'icon': Icons.local_drink, 'label': 'Water Dispenser'},
       {'icon': Icons.shower, 'label': 'Shower'},
-      {'icon': Icons.mosque_outlined, 'label': 'Surau'},
+      {'icon': Icons.mosque_outlined, 'label': 'Prayer Room'},
     ];
 
     return Theme(
@@ -1024,7 +1145,7 @@ class _FacilityInfoScreenState extends State<FacilityInfoScreen> {
           style: TextStyle(
             fontSize: 16,
             fontWeight: FontWeight.bold,
-            color: Color(0xFF103B2B),
+            color: primaryGreen,
           ),
         ),
         childrenPadding: const EdgeInsets.symmetric(
@@ -1035,7 +1156,7 @@ class _FacilityInfoScreenState extends State<FacilityInfoScreen> {
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: const Color(0xFFF9FAF9),
+              color: cardGreen,
               borderRadius: BorderRadius.circular(14),
               border: Border.all(color: subtleBorder),
             ),
@@ -1055,7 +1176,7 @@ class _FacilityInfoScreenState extends State<FacilityInfoScreen> {
                         Container(
                           padding: const EdgeInsets.all(10),
                           decoration: BoxDecoration(
-                            color: const Color(0xFFEBF5E9),
+                            color: paleGreen,
                             shape: BoxShape.circle,
                           ),
                           child: Icon(
@@ -1067,7 +1188,10 @@ class _FacilityInfoScreenState extends State<FacilityInfoScreen> {
                         const SizedBox(height: 6),
                         Text(
                           a['label'] as String,
-                          style: const TextStyle(fontSize: 10),
+                          style: const TextStyle(
+                            fontSize: 10,
+                            color: mutedText,
+                          ),
                           textAlign: TextAlign.center,
                         ),
                       ],
@@ -1099,7 +1223,7 @@ class _FacilityInfoScreenState extends State<FacilityInfoScreen> {
                             vertical: 6,
                           ),
                           decoration: BoxDecoration(
-                            color: Colors.white,
+                            color: paleGreen,
                             borderRadius: BorderRadius.circular(20),
                             border: Border.all(color: subtleBorder),
                           ),
@@ -1108,6 +1232,7 @@ class _FacilityInfoScreenState extends State<FacilityInfoScreen> {
                             style: const TextStyle(
                               fontSize: 12,
                               fontWeight: FontWeight.w500,
+                              color: primaryGreen,
                             ),
                           ),
                         );
@@ -1127,13 +1252,13 @@ class _FacilityInfoScreenState extends State<FacilityInfoScreen> {
       data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
       child: ExpansionTile(
         initiallyExpanded: false,
-        leading: Icon(Icons.grid_view_outlined, color: primaryGreen),
+        leading: Icon(Icons.map_outlined, color: primaryGreen),
         title: const Text(
           'Centre Layout',
           style: TextStyle(
             fontSize: 16,
             fontWeight: FontWeight.bold,
-            color: Color(0xFF103B2B),
+            color: primaryGreen,
           ),
         ),
         childrenPadding: const EdgeInsets.symmetric(
@@ -1144,108 +1269,36 @@ class _FacilityInfoScreenState extends State<FacilityInfoScreen> {
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: const Color(0xFFF9FAF9),
+              color: Colors.white,
               borderRadius: BorderRadius.circular(14),
               border: Border.all(color: subtleBorder),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
-                  'KRP Sports Complex Floor Plan',
-                  style: TextStyle(fontWeight: FontWeight.bold),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(10),
+                  child: Image.asset(
+                    'assets/facilities/krp_complex_layout.png',
+                    width: double.infinity,
+                    fit: BoxFit.contain,
+                    semanticLabel:
+                        'Kolej Rahman Putra sports complex layout map',
+                  ),
                 ),
                 const SizedBox(height: 12),
-                Container(
-                  height: 170,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF103B2B),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.all(12),
-                    child: Column(
-                      children: [
-                        Expanded(
-                          child: Row(
-                            children: [
-                              Expanded(
-                                child: _courtDiagramBox(
-                                  'Badminton 01',
-                                  const Color(0xFF1E6347),
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: _courtDiagramBox(
-                                  'Badminton 02',
-                                  const Color(0xFF1E6347),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        Expanded(
-                          child: Row(
-                            children: [
-                              Expanded(
-                                child: _courtDiagramBox(
-                                  'Ping Pong Area',
-                                  const Color(0xFF2B7858),
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: _courtDiagramBox(
-                                  'Snooker & Dart',
-                                  const Color(0xFF235C43),
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: _courtDiagramBox(
-                                  'Gym Room',
-                                  const Color(0xFF3B8A68),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 8),
                 Text(
                   'Both badminton courts are equipped with professional tournament-level LED lighting and rubber surfaces.',
-                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: primaryGreen,
+                    height: 1.4,
+                  ),
                 ),
               ],
             ),
           ),
         ],
-      ),
-    );
-  }
-
-  Widget _courtDiagramBox(String label, Color color) {
-    return Container(
-      decoration: BoxDecoration(
-        color: color,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.3)),
-      ),
-      child: Center(
-        child: Text(
-          label,
-          textAlign: TextAlign.center,
-          style: const TextStyle(
-            color: Colors.white,
-            fontWeight: FontWeight.bold,
-            fontSize: 11,
-          ),
-        ),
       ),
     );
   }
@@ -1262,7 +1315,7 @@ class _FacilityInfoScreenState extends State<FacilityInfoScreen> {
           style: TextStyle(
             fontSize: 16,
             fontWeight: FontWeight.bold,
-            color: Color(0xFF103B2B),
+            color: primaryGreen,
           ),
         ),
         childrenPadding: const EdgeInsets.symmetric(
@@ -1273,7 +1326,7 @@ class _FacilityInfoScreenState extends State<FacilityInfoScreen> {
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: const Color(0xFFF9FAF9),
+              color: cardGreen,
               borderRadius: BorderRadius.circular(14),
               border: Border.all(color: subtleBorder),
             ),
@@ -1282,7 +1335,11 @@ class _FacilityInfoScreenState extends State<FacilityInfoScreen> {
               children: [
                 const Text(
                   'Sports Complex Policy & Booking Guidelines',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 13,
+                    color: primaryGreen,
+                  ),
                 ),
                 const SizedBox(height: 10),
                 _bulletPoint(
@@ -1313,11 +1370,7 @@ class _FacilityInfoScreenState extends State<FacilityInfoScreen> {
       padding: const EdgeInsets.only(bottom: 8),
       child: Text(
         text,
-        style: TextStyle(
-          fontSize: 12,
-          color: Colors.grey.shade700,
-          height: 1.4,
-        ),
+        style: TextStyle(fontSize: 12, color: mutedText, height: 1.4),
       ),
     );
   }

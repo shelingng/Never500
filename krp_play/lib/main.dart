@@ -69,14 +69,14 @@ class _KrpPlayAppState extends State<KrpPlayApp> {
       theme: ThemeData(
         useMaterial3: true,
         colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF103B2B),
-          primary: const Color(0xFF103B2B),
-          secondary: const Color(0xFFD2F865),
+          seedColor: const Color(0xFF1A332C),
+          primary: const Color(0xFF1A332C),
+          secondary: const Color(0xFFC5F84B),
         ),
-        scaffoldBackgroundColor: const Color(0xFFF7F9F7),
+        scaffoldBackgroundColor: const Color(0xFFF4F6F4),
         appBarTheme: const AppBarTheme(
-          backgroundColor: Color(0xFFF7F9F7),
-          foregroundColor: Color(0xFF103B2B),
+          backgroundColor: Color(0xFF1A332C),
+          foregroundColor: Colors.white,
           elevation: 0,
         ),
       ),

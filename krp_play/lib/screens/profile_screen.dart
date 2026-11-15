@@ -9,8 +9,11 @@ import '../services/booking_service.dart';
 
 part 'profile_sections.dart';
 
-const _green = Color(0xFF173F32);
-const _pale = Color(0xFFE7F0E8);
+const _green = Color(0xFF1A332C);
+const _lime = Color(0xFFC5F84B);
+const _pale = _lime;
+const _muted = Color(0xFF66756D);
+const _divider = Color(0xFFE2E9E4);
 
 class ProfileScreen extends StatefulWidget {
   final String email;
@@ -78,64 +81,70 @@ class _ProfileScreenState extends _ProfileSectionsState {
   @override
   Widget build(BuildContext context) {
     if (widget.navigationSection) {
-      return ListView(
-        padding: const EdgeInsets.fromLTRB(18, 16, 18, 28),
-        children: [
-          if (widget.initialTab == 0) ...[
-            _header(),
-            const SizedBox(height: 20),
-            _personalDetails(),
+      return ColoredBox(
+        color: const Color(0xFFF4F6F4),
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(18, 16, 18, 28),
+          children: [
+            if (widget.initialTab == 0) ...[
+              _header(),
+              const SizedBox(height: 20),
+              _personalDetails(),
+            ],
+            if (widget.initialTab == 1) ...[
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: [
+                    _tabButton('Bookings', 1),
+                    _tabButton('Refund status', 2),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 20),
+              if (_tab == 1) _myBookings(),
+              if (_tab == 2) _refundRequests(),
+            ],
+            if (widget.initialTab == 3) _myReports(),
           ],
-          if (widget.initialTab == 1) ...[
-            SingleChildScrollView(
+        ),
+      );
+    }
+    return ColoredBox(
+      color: const Color(0xFFF4F6F4),
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(18, 12, 18, 28),
+        children: [
+          _header(),
+          const SizedBox(height: 18),
+          SizedBox(
+            height: 44,
+            child: SingleChildScrollView(
               scrollDirection: Axis.horizontal,
               child: Row(
                 children: [
-                  _tabButton('Bookings', 1),
+                  _tabButton('Personal details', 0),
+                  _tabButton('My bookings', 1),
                   _tabButton('Refund status', 2),
+                  _tabButton('My reports', 3),
                 ],
               ),
             ),
-            const SizedBox(height: 20),
-            if (_tab == 1) _myBookings(),
-            if (_tab == 2) _refundRequests(),
-          ],
-          if (widget.initialTab == 3) _myReports(),
-        ],
-      );
-    }
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(18, 12, 18, 28),
-      children: [
-        _header(),
-        const SizedBox(height: 18),
-        SizedBox(
-          height: 44,
-          child: SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: [
-                _tabButton('Personal details', 0),
-                _tabButton('My bookings', 1),
-                _tabButton('Refund status', 2),
-                _tabButton('My reports', 3),
-              ],
-            ),
           ),
-        ),
-        const SizedBox(height: 16),
-        if (_tab == 0) _personalDetails(),
-        if (_tab == 1) _myBookings(),
-        if (_tab == 2) _refundRequests(),
-        if (_tab == 3) _myReports(),
-      ],
+          const SizedBox(height: 16),
+          if (_tab == 0) _personalDetails(),
+          if (_tab == 1) _myBookings(),
+          if (_tab == 2) _refundRequests(),
+          if (_tab == 3) _myReports(),
+        ],
+      ),
     );
   }
 
   Widget _header() => Container(
     padding: const EdgeInsets.all(18),
     decoration: BoxDecoration(
-      color: _green,
+      color: const Color(0xFF23433A),
       borderRadius: BorderRadius.circular(16),
     ),
     child: Column(
@@ -144,16 +153,22 @@ class _ProfileScreenState extends _ProfileSectionsState {
         Row(
           children: [
             Container(
-              width: 58,
-              height: 58,
+              width: 64,
+              height: 64,
               alignment: Alignment.center,
               decoration: BoxDecoration(
-                color: const Color(0xFFDCEADF),
-                borderRadius: BorderRadius.circular(14),
+                color: _lime,
+                borderRadius: BorderRadius.circular(12),
               ),
-              child: const Text(
-                'SL',
-                style: TextStyle(
+              child: Text(
+                _name.text
+                    .trim()
+                    .split(RegExp(r'\s+'))
+                    .where((part) => part.isNotEmpty)
+                    .take(2)
+                    .map((part) => part[0].toUpperCase())
+                    .join(),
+                style: const TextStyle(
                   color: _green,
                   fontWeight: FontWeight.bold,
                   fontSize: 20,
@@ -193,10 +208,7 @@ class _ProfileScreenState extends _ProfileSectionsState {
           ),
         ),
         const SizedBox(height: 4),
-        Text(
-          'KRP Student · ${_matric.text.isEmpty ? 'Matric details on file' : _matric.text}',
-          style: const TextStyle(color: Colors.white70),
-        ),
+        Text(_category, style: const TextStyle(color: Colors.white70)),
       ],
     ),
   );
@@ -209,20 +221,17 @@ class _ProfileScreenState extends _ProfileSectionsState {
     child: Container(
       margin: const EdgeInsets.only(right: 20),
       decoration: BoxDecoration(
-        border: Border(
-          bottom: BorderSide(
-            color: _tab == index ? _green : Colors.transparent,
-            width: 2,
-          ),
-        ),
+        color: _tab == index ? _lime : Colors.transparent,
+        borderRadius: BorderRadius.circular(10),
       ),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           Text(
             title,
             style: TextStyle(
-              color: _tab == index ? _green : Colors.black54,
+              color: _tab == index ? _green : _muted,
               fontWeight: _tab == index ? FontWeight.bold : FontWeight.normal,
             ),
           ),
@@ -230,7 +239,7 @@ class _ProfileScreenState extends _ProfileSectionsState {
             const SizedBox(width: 5),
             CircleAvatar(
               radius: 9,
-              backgroundColor: _pale,
+              backgroundColor: const Color(0xFFE8F1EB),
               child: Text(
                 badge,
                 style: const TextStyle(fontSize: 10, color: _green),
@@ -243,6 +252,7 @@ class _ProfileScreenState extends _ProfileSectionsState {
   );
 
   Widget _personalDetails() => _card(
+    color: _editing ? Colors.white : const Color(0xFF23433A),
     child: _editing
         ? Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -312,28 +322,29 @@ class _ProfileScreenState extends _ProfileSectionsState {
               FilledButton(
                 onPressed: _saveProfile,
                 style: FilledButton.styleFrom(
-                  backgroundColor: _green,
+                  backgroundColor: _lime,
+                  foregroundColor: _green,
                   minimumSize: const Size.fromHeight(50),
                 ),
-                child: const Text('Save Changes'),
+                child: const Text('Save profile'),
               ),
             ],
           )
         : Column(
             children: [
-              _info(Icons.person_outline, 'Full name', _name.text),
+              _info(Icons.person_outline, 'Full Name', _name.text),
               _info(
                 Icons.phone_outlined,
-                'Contact number',
+                'Contact',
                 _contact.text.isEmpty ? 'Not provided' : _contact.text,
               ),
               _info(
                 Icons.badge_outlined,
-                'Matric number',
+                'Matric',
                 _matric.text.isEmpty ? 'Not provided' : _matric.text,
               ),
-              _info(Icons.school_outlined, 'Student category', _category),
-              _info(Icons.email_outlined, 'Email address', widget.email),
+              _info(Icons.school_outlined, 'Category', _category),
+              _info(Icons.email_outlined, 'Email', widget.email),
             ],
           ),
   );
@@ -363,9 +374,21 @@ class _ProfileScreenState extends _ProfileSectionsState {
       keyboardType: keyboard,
       decoration: InputDecoration(
         labelText: label,
+        labelStyle: const TextStyle(color: _muted),
+        prefixIconColor: _lime,
+        enabledBorder: const OutlineInputBorder(
+          borderSide: BorderSide(color: _divider),
+        ),
+        focusedBorder: const OutlineInputBorder(
+          borderSide: BorderSide(color: _lime, width: 2),
+        ),
+        hintStyle: const TextStyle(color: _muted),
         prefixIcon: Icon(icon),
-        border: const OutlineInputBorder(),
+        border: const OutlineInputBorder(
+          borderSide: BorderSide(color: _divider),
+        ),
       ),
+      style: const TextStyle(color: _green),
     ),
   );
 

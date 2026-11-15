@@ -10,20 +10,25 @@ class _ReportPhoto {
 class _LocalReport {
   final String id;
   final String category;
-  final String date;
-  final String booking;
+  final String title;
+  final String facility;
+  final String dateTime;
   final String description;
   final List<_ReportPhoto> photos;
+  final String? samplePhotoAsset;
   final String status;
 
   const _LocalReport({
     required this.id,
     required this.category,
-    required this.date,
-    required this.booking,
+    required this.title,
+    required this.facility,
+    required this.dateTime,
     required this.description,
     required this.photos,
-  }) : status = 'Submitted';
+    this.samplePhotoAsset,
+    this.status = 'Submitted',
+  });
 }
 
 abstract class _ProfileSectionsState extends State<ProfileScreen> {
@@ -48,6 +53,57 @@ abstract class _ProfileSectionsState extends State<ProfileScreen> {
   ];
 
   List<Booking> get _bookings;
+
+  @override
+  void initState() {
+    super.initState();
+    final now = DateTime.now();
+    final date = _shortDate(now);
+    final idPrefix = 'DEMO-REPORT-${now.microsecondsSinceEpoch}';
+    _reports.addAll([
+      _LocalReport(
+        id: '$idPrefix-001',
+        category: 'Booking Issue',
+        title: 'Wrong table',
+        facility: 'Ping Pong Table 02',
+        dateTime: '$date · 06:00 PM',
+        description: 'The assigned table was different from the one requested.',
+        photos: const [],
+        samplePhotoAsset: 'assets/facilities/table_tennis.jpg',
+        status: 'Submitted',
+      ),
+      _LocalReport(
+        id: '$idPrefix-002',
+        category: 'Booking Issue',
+        title: 'Damaged table net',
+        facility: 'Ping Pong Table 01',
+        dateTime: '$date · 04:00 PM',
+        description: 'The table net is loose and cannot be tightened properly.',
+        photos: const [],
+        status: 'Under Review',
+      ),
+      _LocalReport(
+        id: '$idPrefix-003',
+        category: 'Facility Problem',
+        title: 'Court lighting issue',
+        facility: 'Badminton Court 01',
+        dateTime: '$date · 02:00 PM',
+        description: 'A light above the court flickers during play.',
+        photos: const [],
+        status: 'Resolved',
+      ),
+      _LocalReport(
+        id: '$idPrefix-004',
+        category: 'Other',
+        title: 'Duplicate request',
+        facility: 'KRP Fitness Gym',
+        dateTime: '$date · 12:00 PM',
+        description: 'This report duplicates an existing facility request.',
+        photos: const [],
+        status: 'Rejected',
+      ),
+    ]);
+  }
 
   @override
   void dispose() {
@@ -517,6 +573,7 @@ abstract class _ProfileSectionsState extends State<ProfileScreen> {
     final related = _bookings.where((item) => item.id == _bookingId);
     final booking = related.isEmpty ? null : related.first;
     final now = DateTime.now();
+    final title = description.split(RegExp(r'[.!?\n]')).first.trim();
     setState(() {
       _reportSequence++;
       _reports.insert(
@@ -524,12 +581,11 @@ abstract class _ProfileSectionsState extends State<ProfileScreen> {
         _LocalReport(
           id: 'LOCAL-${now.microsecondsSinceEpoch}-$_reportSequence',
           category: _reportCategory,
-          date: _shortDate(now),
-          booking: booking == null
-              ? 'No related booking'
-              : '${booking.id} - ${booking.facilityName} - '
-                    '${booking.date.day} ${_month(booking.date.month)} '
-                    '${_bookingTime(booking)}',
+          title: title.isEmpty ? 'Facility report' : title,
+          facility: booking?.facilityName ?? 'General inquiry',
+          dateTime: booking == null
+              ? '${_shortDate(now)} · ${_clockTime(now)}'
+              : '${_shortDate(booking.date)} · ${_bookingTime(booking)}',
           description: description,
           photos: List<_ReportPhoto>.unmodifiable(_draftPhotos),
         ),
@@ -543,54 +599,164 @@ abstract class _ProfileSectionsState extends State<ProfileScreen> {
     _message('Demo report saved with photos locally. Not sent to management.');
   }
 
-  Widget _reportCard(_LocalReport report) => _card(
-    margin: const EdgeInsets.only(bottom: 10),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Wrap(
-          spacing: 12,
-          runSpacing: 8,
+  Widget _reportCard(_LocalReport report) {
+    final hasPhoto =
+        report.photos.isNotEmpty || report.samplePhotoAsset != null;
+
+    return Card(
+      color: Colors.white,
+      margin: const EdgeInsets.only(bottom: 14),
+      elevation: 2,
+      shadowColor: const Color(0x221A332C),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _badge(report.category, _pale, _green),
-            _badge(report.status, _pale, _green),
+            Text(
+              report.title,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: _green,
+                fontSize: 20,
+                fontWeight: FontWeight.w800,
+                height: 1.15,
+              ),
+            ),
+            if (report.description != report.title) ...[
+              const SizedBox(height: 5),
+              Text(
+                report.description,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: Color(0xFF66756D),
+                  fontSize: 13,
+                  height: 1.35,
+                ),
+              ),
+            ],
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                _reportTag(
+                  report.category,
+                  const Color(0xFFEAF0EC),
+                  const Color(0xFF52645A),
+                ),
+                _reportStatusTag(report.status),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                const Icon(
+                  Icons.event_note_outlined,
+                  size: 17,
+                  color: Color(0xFF66756D),
+                ),
+                const SizedBox(width: 7),
+                Expanded(
+                  child: Text(
+                    '${report.facility} · ${report.dateTime}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: _green,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            if (hasPhoto) ...[
+              const SizedBox(height: 12),
+              _reportThumbnails(report),
+            ],
+            const SizedBox(height: 12),
+            Text(
+              'REPORT ID  ${report.id}',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: Color(0xFF9AA59E),
+                fontSize: 9,
+                letterSpacing: 0.3,
+              ),
+            ),
           ],
         ),
-        const SizedBox(height: 8),
-        SelectableText(
-          'Report ID: ${report.id}',
-          style: const TextStyle(fontSize: 11, color: Colors.black54),
+      ),
+    );
+  }
+
+  Widget _reportThumbnails(_LocalReport report) {
+    if (report.photos.isEmpty) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(11),
+        child: SizedBox(
+          width: 96,
+          height: 72,
+          child: Image.asset(report.samplePhotoAsset!, fit: BoxFit.cover),
         ),
-        const SizedBox(height: 6),
-        Text(
-          'Submitted ${report.date}',
-          style: const TextStyle(color: Colors.black54, fontSize: 12),
-        ),
-        const SizedBox(height: 6),
-        Text(
-          report.booking,
-          style: const TextStyle(fontWeight: FontWeight.w600),
-        ),
-        const SizedBox(height: 6),
-        Text(report.description),
-        if (report.photos.isNotEmpty) ...[
-          const SizedBox(height: 14),
-          Text(
-            'Photos (${report.photos.length})',
-            style: const TextStyle(fontWeight: FontWeight.bold),
+      );
+    }
+
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: report.photos.map((photo) {
+        return GestureDetector(
+          onTap: () => _openPhoto(photo),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(11),
+            child: SizedBox(
+              width: 96,
+              height: 72,
+              child: Image.memory(
+                photo.bytes,
+                fit: BoxFit.cover,
+                cacheWidth: 288,
+              ),
+            ),
           ),
-          const SizedBox(height: 8),
-          _photoGrid(report.photos),
-        ] else ...[
-          const SizedBox(height: 8),
-          const Text(
-            'No photos attached.',
-            style: TextStyle(fontSize: 12, color: Colors.black54),
+        );
+      }).toList(),
+    );
+  }
+
+  Widget _reportStatusTag(String status) {
+    final color = switch (status) {
+      'Submitted' => const Color(0xFF946000),
+      'Under Review' => const Color(0xFF2665A6),
+      'Resolved' => const Color(0xFF237346),
+      'Rejected' => const Color(0xFFB13D35),
+      _ => const Color(0xFF66756D),
+    };
+    return _reportTag(status, color.withValues(alpha: 0.12), color);
+  }
+
+  Widget _reportTag(String label, Color background, Color foreground) =>
+      Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: background,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: foreground,
+            fontSize: 11,
+            fontWeight: FontWeight.w700,
           ),
-        ],
-      ],
-    ),
-  );
+        ),
+      );
 
   Widget _contactBox(IconData icon, String title, String value) => Container(
     padding: const EdgeInsets.all(10),
@@ -616,27 +782,38 @@ abstract class _ProfileSectionsState extends State<ProfileScreen> {
     ),
   );
 
-  Widget _info(IconData icon, String title, String value) => Padding(
-    padding: const EdgeInsets.symmetric(vertical: 10),
-    child: Row(
-      children: [
-        Icon(icon, color: _green),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                title,
-                style: const TextStyle(color: Colors.black54, fontSize: 12),
+  Widget _info(IconData icon, String title, String value) => Column(
+    children: [
+      Padding(
+        padding: const EdgeInsets.symmetric(vertical: 14),
+        child: Row(
+          children: [
+            Icon(icon, color: const Color(0xFFC5F84B)),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: const TextStyle(color: Colors.white70, fontSize: 12),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    value,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(height: 2),
-              Text(value, style: const TextStyle(fontWeight: FontWeight.w600)),
-            ],
-          ),
+            ),
+          ],
         ),
-      ],
-    ),
+      ),
+      const Divider(height: 1, color: Color(0xFF45635A)),
+    ],
   );
 
   Widget _labelValue(String label, String value) => Padding(
@@ -700,6 +877,8 @@ abstract class _ProfileSectionsState extends State<ProfileScreen> {
   }) => Card(
     color: color,
     margin: margin,
+    elevation: 2,
+    shadowColor: const Color(0x221A332C),
     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
     child: Padding(padding: const EdgeInsets.all(16), child: child),
   );
@@ -747,4 +926,10 @@ abstract class _ProfileSectionsState extends State<ProfileScreen> {
 
   String _shortDate(DateTime date) =>
       '${date.day} ${_month(date.month)} ${date.year}';
+
+  String _clockTime(DateTime date) {
+    final hour = date.hour % 12 == 0 ? 12 : date.hour % 12;
+    final minute = date.minute.toString().padLeft(2, '0');
+    return '$hour:$minute ${date.hour < 12 ? 'AM' : 'PM'}';
+  }
 }
