@@ -1,4 +1,5 @@
 part of 'profile_screen.dart';
+final Map<String, List<_ReportPhoto>> prototypePhotoCache = {};
 
 class _ReportPhoto {
   final String name;
@@ -36,10 +37,15 @@ abstract class _ProfileSectionsState extends State<ProfileScreen> {
   String _reportCategory = 'Booking Issue';
   String? _bookingId;
   final _description = TextEditingController();
-  final _reports = <_LocalReport>[];
+  
+  // 🌟 Live Supabase Variables
+  final List<_LocalReport> _reports = [];
+  bool _isLoadingReports = true;
+  bool _isSubmittingReport = false;
+  
   final _draftPhotos = <_ReportPhoto>[];
+  final Map<String, List<_ReportPhoto>> _photoCache = {};
   bool _pickingPhoto = false;
-  int _reportSequence = 0;
 
   static const _maxPhotos = 3;
   static const _maxPhotoBytes = 5 * 1024 * 1024;
@@ -57,52 +63,54 @@ abstract class _ProfileSectionsState extends State<ProfileScreen> {
   @override
   void initState() {
     super.initState();
-    final now = DateTime.now();
-    final date = _shortDate(now);
-    final idPrefix = 'DEMO-REPORT-${now.microsecondsSinceEpoch}';
-    _reports.addAll([
-      _LocalReport(
-        id: '$idPrefix-001',
-        category: 'Booking Issue',
-        title: 'Wrong table',
-        facility: 'Ping Pong Table 02',
-        dateTime: '$date · 06:00 PM',
-        description: 'The assigned table was different from the one requested.',
-        photos: const [],
-        samplePhotoAsset: 'assets/facilities/table_tennis.jpg',
-        status: 'Submitted',
-      ),
-      _LocalReport(
-        id: '$idPrefix-002',
-        category: 'Booking Issue',
-        title: 'Damaged table net',
-        facility: 'Ping Pong Table 01',
-        dateTime: '$date · 04:00 PM',
-        description: 'The table net is loose and cannot be tightened properly.',
-        photos: const [],
-        status: 'Under Review',
-      ),
-      _LocalReport(
-        id: '$idPrefix-003',
-        category: 'Facility Problem',
-        title: 'Court lighting issue',
-        facility: 'Badminton Court 01',
-        dateTime: '$date · 02:00 PM',
-        description: 'A light above the court flickers during play.',
-        photos: const [],
-        status: 'Resolved',
-      ),
-      _LocalReport(
-        id: '$idPrefix-004',
-        category: 'Other',
-        title: 'Duplicate request',
-        facility: 'KRP Fitness Gym',
-        dateTime: '$date · 12:00 PM',
-        description: 'This report duplicates an existing facility request.',
-        photos: const [],
-        status: 'Rejected',
-      ),
-    ]);
+    // 🌟 Instantly fetch real reports from Supabase when the screen loads
+    _fetchLiveReports(); 
+  }
+
+  Future<void> _fetchLiveReports() async {
+    try {
+      final results = await BookingService().getUserReports();
+      if (mounted) {
+        setState(() {
+          _reports.clear();
+          for (var row in results) {
+            String facilityName = 'General inquiry';
+            if (row['related_booking_id'] != null) {
+              try {
+                facilityName = _bookings.firstWhere((b) => b.id == row['related_booking_id']).facilityName;
+              } catch (_) {
+                facilityName = 'Linked Booking';
+              }
+            }
+
+            // Map DB constraint string back to UI Format
+            String uiCategory = 'Other';
+            if (row['category'] == 'booking_issue') uiCategory = 'Booking Issue';
+            if (row['category'] == 'payment_issue') uiCategory = 'Payment Issue';
+            if (row['category'] == 'facility_problem') uiCategory = 'Facility Problem';
+            if (row['category'] == 'account_issue') uiCategory = 'Account Issue';
+            
+            final createdAt = row['created_at'] != null ? DateTime.parse(row['created_at']) : DateTime.now();
+
+            _reports.add(_LocalReport(
+              id: row['report_reference'] ?? row['id'].toString().substring(0, 8),
+              category: uiCategory,
+              title: row['subject'] ?? 'Facility report',
+              facility: facilityName,
+              dateTime: '${_shortDate(createdAt)} · ${_clockTime(createdAt)}',
+              description: row['description'] ?? '',
+              photos: const [], 
+              status: row['status'] == 'submitted' ? 'Submitted' :
+                      row['status'] == 'under_review' ? 'Under Review' :
+                      row['status'] == 'resolved' ? 'Resolved' : 'Rejected',
+            ));
+          }
+          _isLoadingReports = false;
+        });
+      }
+    } catch (e) {
+      if(mounted) setState(() => _isLoadingReports = false);
+    }
   }
 
   @override
@@ -241,8 +249,7 @@ abstract class _ProfileSectionsState extends State<ProfileScreen> {
       ),
       const SizedBox(height: 12),
       const Text(
-        'Prototype: reports and photos are stored only in this app session. '
-        'They are not sent to management and reset when the app restarts.',
+        'Reports are now connected to the live database! (Photo uploads require a Supabase storage bucket setup, so they are kept local for now).',
         style: TextStyle(fontSize: 12, color: Colors.black54),
       ),
       const SizedBox(height: 12),
@@ -264,7 +271,14 @@ abstract class _ProfileSectionsState extends State<ProfileScreen> {
         style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
       ),
       const SizedBox(height: 10),
-      if (_reports.isEmpty)
+      
+      // 🌟 Live Supabase Data View
+      if (_isLoadingReports)
+        const Padding(
+          padding: EdgeInsets.all(40),
+          child: Center(child: CircularProgressIndicator(color: _green)),
+        )
+      else if (_reports.isEmpty)
         _empty(
           Icons.description_outlined,
           'No reports submitted',
@@ -289,8 +303,8 @@ abstract class _ProfileSectionsState extends State<ProfileScreen> {
             style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 14),
-          DropdownButtonFormField<String>(
-            initialValue: _reportCategory,
+          DropdownButtonFormField(
+            value: _reportCategory,
             decoration: const InputDecoration(
               labelText: 'Report category',
               border: OutlineInputBorder(),
@@ -301,11 +315,11 @@ abstract class _ProfileSectionsState extends State<ProfileScreen> {
                 )
                 .toList(),
             onChanged: (value) =>
-                setState(() => _reportCategory = value ?? _reportCategory),
+                setState(() => _reportCategory = value?.toString() ?? _reportCategory),
           ),
           const SizedBox(height: 12),
-          DropdownButtonFormField<String>(
-            initialValue: bookingValue,
+          DropdownButtonFormField(
+            value: bookingValue,
             isExpanded: true,
             decoration: const InputDecoration(
               labelText: 'Related booking (optional)',
@@ -314,7 +328,7 @@ abstract class _ProfileSectionsState extends State<ProfileScreen> {
             items: bookings
                 .map(
                   (item) => DropdownMenuItem(
-                    value: item.id,
+                    value: item.id.toString(),
                     child: Text(
                       '${item.id} - ${item.facilityName} - ${item.date.day} ${_month(item.date.month)} ${_bookingTime(item)}',
                       overflow: TextOverflow.ellipsis,
@@ -324,7 +338,7 @@ abstract class _ProfileSectionsState extends State<ProfileScreen> {
                 .toList(),
             onChanged: bookings.isEmpty
                 ? null
-                : (value) => setState(() => _bookingId = value),
+                : (value) => setState(() => _bookingId = value?.toString()),
           ),
           if (bookings.isEmpty)
             const Padding(
@@ -378,12 +392,14 @@ abstract class _ProfileSectionsState extends State<ProfileScreen> {
           ),
           const SizedBox(height: 16),
           FilledButton(
-            onPressed: _pickingPhoto ? null : _submitReport,
+            onPressed: _pickingPhoto || _isSubmittingReport ? null : _submitReport,
             style: FilledButton.styleFrom(
               backgroundColor: _green,
               minimumSize: const Size.fromHeight(48),
             ),
-            child: const Text('Submit demo report'),
+            child: _isSubmittingReport 
+                ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                : const Text('Submit report'),
           ),
         ],
       ),
@@ -395,8 +411,6 @@ abstract class _ProfileSectionsState extends State<ProfileScreen> {
     setState(() => _pickingPhoto = true);
 
     try {
-      // Add one photo at a time so the limit is clear and large batches
-      // are never read into memory together.
       final file = await FilePicker.pickFile(
         type: FileType.custom,
         allowedExtensions: ['jpg', 'jpeg', 'png'],
@@ -431,21 +445,13 @@ abstract class _ProfileSectionsState extends State<ProfileScreen> {
       final png =
           bytes.length >= 8 &&
           listEquals(bytes.sublist(0, 8), [
-            0x89,
-            0x50,
-            0x4E,
-            0x47,
-            0x0D,
-            0x0A,
-            0x1A,
-            0x0A,
+            0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,
           ]);
       if (!jpeg && !png) {
         _message('This file is not a valid JPG or PNG photo.');
         return;
       }
 
-      // Verify the image can be decoded before accepting it.
       final codec = await ui.instantiateImageCodec(
         bytes,
         targetWidth: 1,
@@ -563,45 +569,51 @@ abstract class _ProfileSectionsState extends State<ProfileScreen> {
     );
   }
 
-  void _submitReport() {
-    if (_pickingPhoto) return;
+  // 🌟 2. THIS IS THE FIXED FUNCTION THAT SAVES TO SUPABASE
+  void _submitReport() async {
+    if (_pickingPhoto || _isSubmittingReport) return;
+    
     final description = _description.text.trim();
     if (description.isEmpty) {
       _message('Please describe the problem.');
       return;
     }
-    final related = _bookings.where((item) => item.id == _bookingId);
-    final booking = related.isEmpty ? null : related.first;
-    final now = DateTime.now();
-    final title = description.split(RegExp(r'[.!?\n]')).first.trim();
-    setState(() {
-      _reportSequence++;
-      _reports.insert(
-        0,
-        _LocalReport(
-          id: 'LOCAL-${now.microsecondsSinceEpoch}-$_reportSequence',
-          category: _reportCategory,
-          title: title.isEmpty ? 'Facility report' : title,
-          facility: booking?.facilityName ?? 'General inquiry',
-          dateTime: booking == null
-              ? '${_shortDate(now)} · ${_clockTime(now)}'
-              : '${_shortDate(booking.date)} · ${_bookingTime(booking)}',
-          description: description,
-          photos: List<_ReportPhoto>.unmodifiable(_draftPhotos),
-        ),
+
+    setState(() => _isSubmittingReport = true);
+    _photoCache[description] = List.from(_draftPhotos);
+
+    try {
+      prototypePhotoCache[description] = List.from(_draftPhotos);
+      await BookingService().createReport(
+        category: _reportCategory,
+        bookingId: _bookingId,
+        description: description,
       );
-      _description.clear();
-      _draftPhotos.clear();
-      _bookingId = null;
-      _reportCategory = _categories.first;
-      _showReport = false;
-    });
-    _message('Demo report saved with photos locally. Not sent to management.');
+
+      _message('Report submitted successfully!');
+
+      // Fetch the updated reports from the DB to show the user instantly
+      await _fetchLiveReports();
+
+      setState(() {
+        _description.clear();
+        _draftPhotos.clear();
+        _bookingId = null;
+        _reportCategory = _ProfileSectionsState._categories.first;
+        _showReport = false;
+      });
+
+    } catch (e) {
+      _message('Error submitting report: $e');
+    } finally {
+      if (mounted) setState(() => _isSubmittingReport = false);
+    }
   }
 
   Widget _reportCard(_LocalReport report) {
-    final hasPhoto =
-        report.photos.isNotEmpty || report.samplePhotoAsset != null;
+    // 🌟 Check if there are cached photos for this description
+    final cachedPhotos = prototypePhotoCache[report.description] ?? report.photos;
+    final hasPhoto = cachedPhotos.isNotEmpty || report.samplePhotoAsset != null;
 
     return Card(
       color: Colors.white,
@@ -625,7 +637,7 @@ abstract class _ProfileSectionsState extends State<ProfileScreen> {
                 height: 1.15,
               ),
             ),
-            if (report.description != report.title) ...[
+            if (report.description.isNotEmpty) ...[
               const SizedBox(height: 5),
               Text(
                 report.description,
@@ -674,10 +686,23 @@ abstract class _ProfileSectionsState extends State<ProfileScreen> {
                 ),
               ],
             ),
+            
+            // 🌟 Displays the photo thumbnail right here if it exists!
             if (hasPhoto) ...[
               const SizedBox(height: 12),
-              _reportThumbnails(report),
+              _reportThumbnails(_LocalReport(
+                id: report.id,
+                category: report.category,
+                title: report.title,
+                facility: report.facility,
+                dateTime: report.dateTime,
+                description: report.description,
+                photos: cachedPhotos,
+                samplePhotoAsset: report.samplePhotoAsset,
+                status: report.status,
+              )),
             ],
+
             const SizedBox(height: 12),
             Text(
               'REPORT ID  ${report.id}',
@@ -890,17 +915,22 @@ abstract class _ProfileSectionsState extends State<ProfileScreen> {
       booking.timeSlots.map(_minutes).reduce((a, b) => a < b ? a : b);
 
   String _bookingTime(Booking booking) {
-    final slots = booking.timeSlots.map(_minutes).toList()..sort();
+    if (booking.timeSlots.isEmpty) return 'Time TBD'; 
+    final slots = booking.timeSlots.map((e) => _minutes(e.toString())).toList()..sort();
     return '${_timeLabel(slots.first)} - ${_timeLabel(slots.last + 60)}';
   }
 
   int _minutes(String time) {
-    final parts = time.split(' ');
-    final clock = parts.first.split(':');
-    var hour = int.parse(clock[0]);
-    if (parts.last.toUpperCase() == 'PM' && hour != 12) hour += 12;
-    if (parts.last.toUpperCase() == 'AM' && hour == 12) hour = 0;
-    return hour * 60 + int.parse(clock[1]);
+    try {
+      final parts = time.split(' ');
+      final clock = parts.first.split(':');
+      var hour = int.parse(clock[0]);
+      if (parts.last.toUpperCase() == 'PM' && hour != 12) hour += 12;
+      if (parts.last.toUpperCase() == 'AM' && hour == 12) hour = 0;
+      return hour * 60 + int.parse(clock[1]);
+    } catch (_) {
+      return 0; 
+    }
   }
 
   String _timeLabel(int minutes) {
@@ -910,18 +940,7 @@ abstract class _ProfileSectionsState extends State<ProfileScreen> {
   }
 
   String _month(int month) => const [
-    'JAN',
-    'FEB',
-    'MAR',
-    'APR',
-    'MAY',
-    'JUN',
-    'JUL',
-    'AUG',
-    'SEP',
-    'OCT',
-    'NOV',
-    'DEC',
+    'JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC',
   ][month - 1];
 
   String _shortDate(DateTime date) =>

@@ -41,10 +41,14 @@ class _FacilityInfoScreenState extends State<FacilityInfoScreen> {
 
   int _selectedTab = 0;
   int _currentCarouselIndex = 0;
+  
+  // 🌟 1. Added Refresh Key for Real-Time Updates
+  int _refreshKey = 0; 
+  
   final PageController _pageController = PageController();
   Timer? _hoursRefreshTimer;
 
-  final List<Map<String, dynamic>> carouselItems = [
+  final List carouselItems = [
     {
       'title': 'Welcome to Kolej Rahman Putra',
       'subtitle': 'Your home for sports, fitness and recreation',
@@ -90,16 +94,13 @@ class _FacilityInfoScreenState extends State<FacilityInfoScreen> {
 
   Future<void> _openMaps() async {
     try {
-      // Launch directly from the click; do not await a permission check first.
       final opened = await launchUrl(
         Uri.parse(_mapsUrl),
         mode: LaunchMode.externalApplication,
         webOnlyWindowName: '_blank',
       );
       if (opened) return;
-    } catch (_) {
-      // Offer the link when the device cannot open it.
-    }
+    } catch (_) {}
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -436,7 +437,7 @@ class _FacilityInfoScreenState extends State<FacilityInfoScreen> {
                               studentName: widget.studentName,
                             ),
                           ),
-                        );
+                        ).then((_) => setState(() => _refreshKey++)); // 🌟 强制刷新
                       },
                     ),
                     _drawerItem(
@@ -574,7 +575,6 @@ class _FacilityInfoScreenState extends State<FacilityInfoScreen> {
                     _buildFacilityPhotos(),
                     const SizedBox(height: 16),
 
-                    // VENUE LOCATION & DETAILS CARD
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 16),
                       child: Container(
@@ -654,8 +654,6 @@ class _FacilityInfoScreenState extends State<FacilityInfoScreen> {
                     ),
 
                     const SizedBox(height: 12),
-
-                    // EXPANDABLE SECTIONS (Accordion Layout like Orange Reference)
                     _buildPricingSection(),
                     _buildOpeningHoursSection(),
                     _buildAmenitiesSection(),
@@ -715,9 +713,10 @@ class _FacilityInfoScreenState extends State<FacilityInfoScreen> {
     );
   }
 
+  // 🌟 2. Attach the dynamic refresh key to perfectly refresh real-time data!
   Widget _studentSection(String sectionKey, int initialTab) {
     final profile = ProfileScreen(
-      key: ValueKey(sectionKey),
+      key: ValueKey('$sectionKey-$_refreshKey'), 
       email: widget.email,
       fullName: widget.studentName,
       contact: widget.contact,
@@ -760,6 +759,7 @@ class _FacilityInfoScreenState extends State<FacilityInfoScreen> {
     );
   }
 
+  // 🌟 3. Tell Flutter to instantly refresh data upon returning from checkout
   Future<void> _openCreateBooking() async {
     await Navigator.push<void>(
       context,
@@ -772,7 +772,9 @@ class _FacilityInfoScreenState extends State<FacilityInfoScreen> {
       ),
     );
     if (!mounted) return;
-    setState(() {});
+    setState(() {
+      _refreshKey++; 
+    });
   }
 
   Widget _bottomNavItem({
@@ -863,7 +865,6 @@ class _FacilityInfoScreenState extends State<FacilityInfoScreen> {
     );
   }
 
-  // 1. PRICING ACCORDION
   Widget _buildPricingSection() {
     return Theme(
       data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
@@ -1010,7 +1011,6 @@ class _FacilityInfoScreenState extends State<FacilityInfoScreen> {
     );
   }
 
-  // 2. OPENING HOURS ACCORDION
   Widget _buildOpeningHoursSection() {
     final isOpen = _isFacilityOpen(DateTime.now());
     return Theme(
@@ -1124,7 +1124,6 @@ class _FacilityInfoScreenState extends State<FacilityInfoScreen> {
     );
   }
 
-  // 3. AMENITIES & FACILITIES ACCORDION
   Widget _buildAmenitiesSection() {
     final amenities = [
       {'icon': Icons.wifi, 'label': 'WiFi'},
@@ -1246,7 +1245,6 @@ class _FacilityInfoScreenState extends State<FacilityInfoScreen> {
     );
   }
 
-  // 4. CENTRE LAYOUT ACCORDION
   Widget _buildCentreLayoutSection() {
     return Theme(
       data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
@@ -1303,7 +1301,6 @@ class _FacilityInfoScreenState extends State<FacilityInfoScreen> {
     );
   }
 
-  // 5. CENTRE POLICY ACCORDION
   Widget _buildCentrePolicySection() {
     return Theme(
       data: Theme.of(context).copyWith(dividerColor: Colors.transparent),

@@ -1,23 +1,25 @@
 class Booking {
-  final String id;
-  final String userEmail;
-  final String facilityName;
+  final dynamic id; // Supabase UUID
+  final dynamic reference; // KRP-123456
+  final dynamic userId;
+  final dynamic facilityName;
   final DateTime date;
-  final List<String> timeSlots;
-  final int pricePerSession;
-  final int participants;
-  final int totalPrice;
-  final String status;
+  final dynamic timeSlots; // Array of strings
+  final dynamic pricePerSession;
+  final dynamic participants;
+  final dynamic totalPrice;
+  final dynamic status;
 
-  const Booking({
+  Booking({
     required this.id,
-    required this.userEmail,
+    this.reference = '',
+    required this.userId,
     required this.facilityName,
     required this.date,
     required this.timeSlots,
     required this.pricePerSession,
-    required this.participants,
+    this.participants = 1,
     required this.totalPrice,
-    this.status = 'Pending',
+    this.status = 'Pending Payment',
   });
 }

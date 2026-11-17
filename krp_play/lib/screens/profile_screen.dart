@@ -3,7 +3,7 @@ import 'dart:ui' as ui;
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
-
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/booking.dart';
 import '../services/booking_service.dart';
 
@@ -42,12 +42,15 @@ class ProfileScreen extends StatefulWidget {
 class _ProfileScreenState extends _ProfileSectionsState {
   late int _tab = widget.initialTab;
   bool _editing = false, _verified = false;
+  bool _isLoadingBookings = true;
   String _category = 'KRP Student';
   final _name = TextEditingController();
   final _contact = TextEditingController();
   final _matric = TextEditingController();
   final _password = TextEditingController();
   final _confirm = TextEditingController();
+
+  List<Booking> _cachedBookings = [];
 
   @override
   void initState() {
@@ -56,16 +59,79 @@ class _ProfileScreenState extends _ProfileSectionsState {
     _contact.text = widget.contact ?? '';
     _matric.text = widget.matric ?? '';
     _category = widget.category ?? 'KRP Student';
+    
+    _loadLiveBookings();
+    _loadLiveReports(); // 🌟 Load Supabase Reports
+  }
+
+  _loadLiveBookings() async {
+    final results = await BookingService().getUserBookings();
+    if (mounted) {
+      setState(() {
+        _cachedBookings = List<Booking>.from(results);
+        _cachedBookings.sort((a, b) {
+          final date = a.date.compareTo(b.date);
+          return date == 0 ? _start(a).compareTo(_start(b)) : date;
+        });
+        _isLoadingBookings = false;
+      });
+    }
+  }
+
+  // 🌟 Fetch Live Reports from Supabase and parse for UI
+  void _loadLiveReports() async {
+    try {
+      final results = await BookingService().getUserReports();
+      if (mounted) {
+        setState(() {
+          // 🌟 1. Clear the final list instead of using '='
+          _reports.clear();
+          
+          // 🌟 2. Add all the new live data into it
+          _reports.addAll(results.map((row) {
+            String facilityName = 'General inquiry';
+            if (row['related_booking_id'] != null) {
+              try {
+                facilityName = _bookings.firstWhere((b) => b.id == row['related_booking_id']).facilityName;
+              } catch (_) {
+                facilityName = 'Linked Booking';
+              }
+            }
+
+            // Map DB constraint string back to UI Format
+            String uiCategory = 'Other';
+            if (row['category'] == 'booking_issue') uiCategory = 'Booking Issue';
+            if (row['category'] == 'payment_issue') uiCategory = 'Payment Issue';
+            if (row['category'] == 'facility_problem') uiCategory = 'Facility Problem';
+            if (row['category'] == 'account_issue') uiCategory = 'Account Issue';
+
+            final createdAt = row['created_at'] != null ? DateTime.parse(row['created_at']) : DateTime.now();
+
+            return _LocalReport(
+              id: row['report_reference'] ?? row['id'].toString().substring(0, 8),
+              category: uiCategory,
+              title: row['subject'] ?? 'Facility report',
+              facility: facilityName,
+              dateTime: '${_shortDate(createdAt)} · ${_clockTime(createdAt)}',
+              description: row['description'] ?? '',
+              photos: prototypePhotoCache[row['description']] ?? const [], 
+              status: row['status'] == 'submitted' ? 'Submitted' :
+                      row['status'] == 'under_review' ? 'Under Review' :
+                      row['status'] == 'resolved' ? 'Resolved' : 'Rejected',
+            );
+          }).toList().cast<_LocalReport>());
+          
+          _isLoadingReports = false;
+        });
+      }
+    } catch (e) {
+      if(mounted) setState(() => _isLoadingReports = false);
+    }
   }
 
   @override
   List<Booking> get _bookings {
-    final result = BookingService.instance.getBookingsByEmail(widget.email);
-    result.sort((a, b) {
-      final date = a.date.compareTo(b.date);
-      return date == 0 ? _start(a).compareTo(_start(b)) : date;
-    });
-    return result;
+    return _cachedBookings;
   }
 
   @override
@@ -214,10 +280,20 @@ class _ProfileScreenState extends _ProfileSectionsState {
   );
 
   Widget _tabButton(String title, int index, [String? badge]) => InkWell(
-    onTap: () => setState(() {
-      _tab = index;
-      _editing = false;
-    }),
+    onTap: () {
+      setState(() {
+        _tab = index;
+        _editing = false;
+        if (index == 1) {
+          _isLoadingBookings = true;
+          _loadLiveBookings();
+        }
+        if (index == 3) {
+          _isLoadingReports = true;
+          _loadLiveReports();
+        }
+      });
+    },
     child: Container(
       margin: const EdgeInsets.only(right: 20),
       decoration: BoxDecoration(
@@ -270,26 +346,18 @@ class _ProfileScreenState extends _ProfileSectionsState {
                 keyboard: TextInputType.phone,
               ),
               _input(_matric, 'Matric number', Icons.badge_outlined),
-              DropdownButtonFormField<String>(
+           // 🌟 Replaced Dropdown with a locked, read-only field
+              TextFormField(
                 initialValue: _category,
+                readOnly: true,
+                enabled: false, // Greys it out to show it's fixed
                 decoration: const InputDecoration(
-                  labelText: 'Student category',
+                  labelText: 'Student category (Managed by Admin)',
                   prefixIcon: Icon(Icons.school_outlined),
                   border: OutlineInputBorder(),
                 ),
-                items: const [
-                  DropdownMenuItem(
-                    value: 'KRP Student',
-                    child: Text('KRP Student'),
-                  ),
-                  DropdownMenuItem(
-                    value: 'Non-KRP Student',
-                    child: Text('Non-KRP Student'),
-                  ),
-                ],
-                onChanged: (value) =>
-                    setState(() => _category = value ?? _category),
               ),
+              const SizedBox(height: 12),
               const SizedBox(height: 12),
               TextFormField(
                 initialValue: widget.email,
@@ -349,14 +417,37 @@ class _ProfileScreenState extends _ProfileSectionsState {
           ),
   );
 
-  void _saveProfile() {
+ // 🌟 Updated with 'void' to avoid Future<void>
+void _saveProfile() async {
     if (!_verified) {
       _message('Please confirm your information first.');
+      return;
     } else if (_password.text.isNotEmpty && _password.text != _confirm.text) {
       _message('Passwords do not match.');
-    } else {
+      return;
+    }
+
+    try {
+      final supabase = Supabase.instance.client;
+      final user = supabase.auth.currentUser;
+      
+      if (user == null) {
+        _message('No active user found. Please log in again.');
+        return;
+      }
+
+      // Update public.profiles table in Supabase (Removed 'updated_at')
+      await supabase.from('profiles').update({
+        'full_name': _name.text.trim(),
+        'phone_number': _contact.text.trim(),
+        'matric_number': _matric.text.trim(),
+      }).eq('id', user.id);
+
       setState(() => _editing = false);
-      _message('Profile changes saved.');
+      _message('Profile updated successfully in database!');
+
+    } catch (e) {
+      _message('Error updating profile: $e');
     }
   }
 
@@ -393,6 +484,13 @@ class _ProfileScreenState extends _ProfileSectionsState {
   );
 
   Widget _myBookings() {
+    if (_isLoadingBookings) {
+      return const Padding(
+        padding: EdgeInsets.all(40),
+        child: Center(child: CircularProgressIndicator(color: _green)),
+      );
+    }
+    
     final bookings = _bookings;
     if (bookings.isEmpty) {
       return _empty(

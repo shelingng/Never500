@@ -1,206 +1,162 @@
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/booking.dart';
 
 class BookingService {
-  static final BookingService instance = BookingService._internal();
+  final _supabase = Supabase.instance.client;
 
-  factory BookingService() => instance;
-
-  final List<Booking> _bookings = [];
-  final Set<String> _lockedFacilities = {'Badminton Court 03', 'Ping Pong Table 03'};
-
-  BookingService._internal() {
-    // Seed initial sample booking to reflect active reservation
-    final now = DateTime.now();
-    _bookings.add(
-      Booking(
-        id: 'BKG-2026-001',
-        userEmail: 'student@student.utm.my',
-        facilityName: 'Badminton Court 02',
-        date: DateTime(now.year, now.month, now.day),
-        timeSlots: const ['7:00 PM', '8:00 PM'],
-        pricePerSession: 6,
-        participants: 1,
-        totalPrice: 12,
-        status: 'Confirmed',
-      ),
-    );
+  // 1. Fetch available facilities from public.facilities
+  getFacilities() async {
+    final response = await _supabase.from('facilities').select().eq('is_active', true);
+    return response;
   }
 
-  // Return all bookings without allowing external modification.
-  List<Booking> get bookings => List.unmodifiable(_bookings);
+  // 2. Create a new booking
+  createBooking(Booking booking, String customerCategory) async {
+    final user = _supabase.auth.currentUser;
+    if (user == null) throw Exception('Must be logged in');
 
-  // Check if facility is locked for events/maintenance
-  bool isFacilityLocked(String facilityName) {
-    return _lockedFacilities.contains(facilityName);
+    final ref = 'KRP-${DateTime.now().millisecondsSinceEpoch.toString().substring(5)}';
+    final String bookingDataString = '${booking.facilityName}|${booking.date.toIso8601String()}|${booking.timeSlots.join(",")}';
+
+    // Insert into public.bookings
+    final bookingResponse = await _supabase.from('bookings').insert({
+      'user_id': user.id,
+      'booking_reference': ref,
+      'total_amount': booking.totalPrice,
+      'status': 'Confirmed',
+      'customer_category': customerCategory == 'KRP Student' ? 'krp' : 'non_krp',
+      'booking_source': 'online',
+      'admin_note': bookingDataString, 
+    }).select().single();
+
+    final bookingId = bookingResponse['id'];
+
+    // Insert into public.booking_items 
+    for (var timeSlot in booking.timeSlots) {
+      await _supabase.from('booking_items').insert({
+        'booking_id': bookingId,
+        'price': booking.pricePerSession,
+        'status': 'Confirmed',
+      });
+    }
+
+    return bookingResponse;
   }
 
-  String getLockReason(String facilityName) {
-    if (facilityName.contains('Badminton')) {
-      return 'Locked for KRP Inter-College Tournament';
-    }
-    return 'Locked for collegiate event';
+  // 3. Process payment and update status
+  confirmPayment(String bookingId, num amount, String method) async {
+    await _supabase.from('payments').insert({
+      'booking_id': bookingId,
+      'amount': amount,
+      'payment_method': method == 'E-Wallet' ? 'touch_n_go_ewallet' : 'fpx',
+      'status': 'successful',
+      'paid_at': DateTime.now().toIso8601String(),
+    });
+
+    await _supabase.from('bookings').update({'status': 'Confirmed'}).eq('id', bookingId);
   }
 
-  // Check if multiple slots are all available
-  bool areAllSlotsAvailable({
-    required String facilityName,
-    required DateTime date,
-    required List<String> timeSlots,
-  }) {
-    if (isFacilityLocked(facilityName)) return false;
-    return timeSlots.every((slot) => isSlotAvailable(
-          facilityName: facilityName,
-          date: date,
-          time: slot,
-        ));
+  // 4. Fetch the logged-in user's bookings
+  getUserBookings() async {
+    final user = _supabase.auth.currentUser;
+    if (user == null) return [];
+
+    final response = await _supabase
+        .from('bookings')
+        .select()
+        .eq('user_id', user.id)
+        .order('created_at', ascending: false);
+
+    return _unpackBookings(response);
   }
 
-  // Total available slots count for a specific date across standard facilities
-  int getAvailableSlotsCount(DateTime date) {
-    final isWeekend =
-        date.weekday == DateTime.saturday || date.weekday == DateTime.sunday;
-    final slotsPerFacility = isWeekend ? 11 : 5;
-    const totalFacilities = 7;
-    final totalSlotsPossible = totalFacilities * slotsPerFacility;
+  // 5. Fetch ALL bookings for a specific date to check live availability
+  Future<List<Booking>> getBookingsForDate(DateTime date) async {
+    final response = await _supabase
+        .from('bookings')
+        .select()
+        .neq('status', 'Cancelled')
+        .neq('status', 'Rejected'); // Ignore cancelled bookings
 
-    int bookedSlotsCount = 0;
-    for (final booking in _bookings) {
-      if (booking.status != 'Cancelled' &&
-          booking.status != 'Rejected' &&
-          booking.date.year == date.year &&
-          booking.date.month == date.month &&
-          booking.date.day == date.day) {
-        bookedSlotsCount += booking.timeSlots.length;
-      }
-    }
-
-    final available = totalSlotsPossible - bookedSlotsCount;
-    return available < 0 ? 0 : available;
+    final allBookings = _unpackBookings(response);
+    
+    // Filter to only return bookings that overlap with the selected day
+    return allBookings.where((b) => b.date.year == date.year && b.date.month == date.month && b.date.day == date.day).toList();
   }
 
-  // Convert a time such as "5:00 PM" into minutes after midnight.
-  static int minutesFor(String time) {
-    final parts = time.split(' ');
+  // 🌟 6. Create Report in Database
+  Future<void> createReport({
+    required String category,
+    String? bookingId,
+    required String description,
+  }) async {
+    final user = _supabase.auth.currentUser;
+    if (user == null) throw Exception('Must be logged in');
 
-    if (parts.length != 2) {
-      throw FormatException('Invalid time format: $time');
-    }
+    final title = description.split(RegExp(r'[.!?\n]')).first.trim();
+    final ref = 'REP-${DateTime.now().millisecondsSinceEpoch.toString().substring(5)}';
 
-    final clock = parts[0].split(':');
+    // Map UI Category to Database Strict Format Constraint
+    String dbCategory = 'other';
+    if (category == 'Booking Issue') dbCategory = 'booking_issue';
+    if (category == 'Payment Issue') dbCategory = 'payment_issue';
+    if (category == 'Facility Problem') dbCategory = 'facility_problem';
+    if (category == 'Account Issue') dbCategory = 'account_issue';
 
-    if (clock.length != 2) {
-      throw FormatException('Invalid time format: $time');
-    }
-
-    var hour = int.parse(clock[0]);
-    final minute = int.parse(clock[1]);
-    final period = parts[1].toUpperCase();
-
-    if (period != 'AM' && period != 'PM') {
-      throw FormatException('Invalid time period: $time');
-    }
-
-    if (hour < 1 || hour > 12 || minute < 0 || minute > 59) {
-      throw FormatException('Invalid time: $time');
-    }
-
-    if (period == 'PM' && hour != 12) {
-      hour += 12;
-    }
-
-    if (period == 'AM' && hour == 12) {
-      hour = 0;
-    }
-
-    return hour * 60 + minute;
-  }
-
-  // Check whether two time slots are consecutive (exactly 60 minutes apart).
-  static bool areConsecutive(String time1, String time2) {
-    try {
-      final first = minutesFor(time1);
-      final second = minutesFor(time2);
-      return (first - second).abs() == 60;
-    } catch (_) {
-      return false;
-    }
-  }
-
-  // Check whether the selected sessions follow booking rules.
-  bool _hasValidDuration(List<String> timeSlots) {
-    if (timeSlots.isEmpty || timeSlots.length > 2) {
-      return false;
-    }
-
-    if (timeSlots.toSet().length != timeSlots.length) {
-      return false;
-    }
-
-    if (timeSlots.length == 1) {
-      return true;
-    }
-
-    return areConsecutive(timeSlots[0], timeSlots[1]);
-  }
-
-  // Check whether a particular facility time slot is available.
-  bool isSlotAvailable({
-    required String facilityName,
-    required DateTime date,
-    required String time,
-  }) {
-    return !_bookings.any((booking) {
-      final sameFacility = booking.facilityName == facilityName;
-
-      final sameDate =
-          booking.date.year == date.year &&
-          booking.date.month == date.month &&
-          booking.date.day == date.day;
-
-      final sameTime = booking.timeSlots.contains(time);
-
-      final activeBooking =
-          booking.status != 'Cancelled' && booking.status != 'Rejected';
-
-      return sameFacility && sameDate && sameTime && activeBooking;
+    await _supabase.from('reports').insert({
+      'report_reference': ref,
+      'user_id': user.id,
+      'related_booking_id': bookingId,
+      'category': dbCategory,
+      'subject': title.isEmpty ? 'Facility report' : title,
+      'description': description,
+      'status': 'submitted',
     });
   }
 
-  // Add a booking after checking all booking rules.
-  bool addBooking(Booking booking) {
-    // Check maximum duration and consecutive sessions.
-    if (!_hasValidDuration(booking.timeSlots)) {
-      return false;
-    }
+  // 🌟 7. Fetch Reports from Database
+  Future<List<dynamic>> getUserReports() async {
+    final user = _supabase.auth.currentUser;
+    if (user == null) return [];
+    
+    final response = await _supabase
+        .from('reports')
+        .select()
+        .eq('user_id', user.id)
+        .order('created_at', ascending: false);
+        
+    return response;
+  }
 
-    // Check availability of every selected session.
-    for (final time in booking.timeSlots) {
-      if (!isSlotAvailable(
-        facilityName: booking.facilityName,
-        date: booking.date,
-        time: time,
-      )) {
-        return false;
+  // Helper method to unpack the prototype admin_note data
+  List<Booking> _unpackBookings(List<dynamic> response) {
+    List<Booking> results = [];
+    for (var row in response) {
+      String facility = 'Sports Facility';
+      DateTime date = DateTime.parse(row['created_at']);
+      List<String> times = ['12:00 AM - 1:00 AM'];
+
+      if (row['admin_note'] != null && row['admin_note'].toString().contains('|')) {
+        final parts = row['admin_note'].toString().split('|');
+        if (parts.length >= 3) {
+          facility = parts[0];
+          date = DateTime.parse(parts[1]);
+          times = parts[2].split(',');
+        }
       }
+
+      results.add(Booking(
+        id: row['id'],
+        reference: row['booking_reference'] ?? 'REF-ERR',
+        userId: row['user_id'],
+        facilityName: facility,
+        date: date,
+        timeSlots: times,
+        pricePerSession: 0,
+        totalPrice: row['total_amount'],
+        status: row['status'] == 'Confirmed' ? 'Paid & Confirmed' : row['status'],
+      ));
     }
-
-    // Add booking only when all checks pass.
-    _bookings.add(booking);
-
-    return true;
-  }
-
-  // Find a booking using its ID.
-  Booking? getBookingById(String id) {
-    try {
-      return _bookings.firstWhere((booking) => booking.id == id);
-    } catch (_) {
-      return null;
-    }
-  }
-
-  // Get bookings belonging to a particular student.
-  List<Booking> getBookingsByEmail(String email) {
-    return _bookings.where((booking) => booking.userEmail == email).toList();
+    return results;
   }
 }
