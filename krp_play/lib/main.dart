@@ -1,65 +1,24 @@
 import 'package:flutter/material.dart';
-import 'package:krp_play/screens/admin/admin_dashboard.dart';
-import 'models/student_account.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'screens/login_screen.dart';
 import 'screens/facility_info_screen.dart';
+import 'screens/admin/admin_dashboard.dart';
+import 'services/auth_service.dart';
 
-void main() {
+main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  
+  // Replace with your actual Supabase URL and Anon Key
+  await Supabase.initialize(
+    url: 'https://ckhpsnuiypxetkmigqua.supabase.co',
+    anonKey: 'sb_publishable_jByO0pC0UVwMS5Jr1v5jhQ_VaCx8NV5'
+  );
+
   runApp(const KrpPlayApp());
 }
 
-class KrpPlayApp extends StatefulWidget {
-  final StudentAccount? initialAccount;
-
-  const KrpPlayApp({super.key, this.initialAccount});
-
-  @override
-  State<KrpPlayApp> createState() => _KrpPlayAppState();
-}
-
-class _KrpPlayAppState extends State<KrpPlayApp> {
-  final List<StudentAccount> accounts = [];
-  StudentAccount? currentAccount;
-
-  @override
-  void initState() {
-    super.initState();
-
-    accounts.add(
-      const StudentAccount(
-        fullName: 'System Admin',
-        email: 'admin@gmail.com',  // 测试用的管理员账号
-        contact: '000000000',
-        matric: 'ADMIN',
-        category: 'Admin',         // 权限标识
-        password: 'admin123',         // 测试用的管理员密码
-      ),
-    );
-
-    if (widget.initialAccount != null) {
-      accounts.add(widget.initialAccount!);
-      currentAccount = widget.initialAccount;
-    }
-  }
-
-  void register(StudentAccount account) {
-    setState(() {
-      accounts.add(account);
-      currentAccount = account;
-    });
-  }
-
-  void login(StudentAccount account) {
-    setState(() {
-      currentAccount = account;
-    });
-  }
-
-  void logout() {
-    setState(() {
-      currentAccount = null;
-    });
-  }
+class KrpPlayApp extends StatelessWidget {
+  const KrpPlayApp({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -69,29 +28,65 @@ class _KrpPlayAppState extends State<KrpPlayApp> {
       theme: ThemeData(
         useMaterial3: true,
         colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF1A332C),
-          primary: const Color(0xFF1A332C),
-          secondary: const Color(0xFFC5F84B),
-        ),
-        scaffoldBackgroundColor: const Color(0xFFF4F6F4),
-        appBarTheme: const AppBarTheme(
-          backgroundColor: Color(0xFF1A332C),
-          foregroundColor: Colors.white,
-          elevation: 0,
+          seedColor: const Color(0xFF103B2B),
+          primary: const Color(0xFF103B2B),
+          secondary: const Color(0xFFD2F865),
         ),
       ),
-      home: currentAccount == null
-          ? AuthScreen(accounts: accounts, onRegister: register, onLogin: login)
-          : (currentAccount!.category == 'Admin'
-              ? AdminHomeScreen(onLogout: logout) // 去管理员页面
-              : FacilityInfoScreen(               // 去学生主页
-                  category: currentAccount!.category,
-                  email: currentAccount!.email,
-                  studentName: currentAccount!.fullName,
-                  contact: currentAccount!.contact,
-                  matric: currentAccount!.matric,
-                  onLogout: logout,
-                )),
+      home: const AuthWrapper(),
+    );
+  }
+}
+
+class AuthWrapper extends StatelessWidget {
+  const AuthWrapper({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    // Listen to Supabase authentication state changes
+    return StreamBuilder(
+      stream: Supabase.instance.client.auth.onAuthStateChange,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Scaffold(body: Center(child: CircularProgressIndicator()));
+        }
+
+        // Dynamically get the session to avoid copy-paste bracket issues
+        dynamic data = snapshot.data;
+        final session = data?.session;
+
+        // If no session exists, show Login Screen
+        if (session == null) {
+          return const AuthScreen();
+        }
+
+        // If session exists, fetch profile to determine role
+        return FutureBuilder(
+          future: AuthService().getCurrentProfile(),
+          builder: (context, profileSnapshot) {
+            if (profileSnapshot.connectionState == ConnectionState.waiting) {
+              return const Scaffold(body: Center(child: CircularProgressIndicator()));
+            }
+
+            dynamic profile = profileSnapshot.data;
+            if (profile == null) return const AuthScreen();
+
+            // Route based on role from public.profiles
+            if (profile['role'] == 'admin') {
+              return AdminHomeScreen(onLogout: () => AuthService().signOut());
+            } else {
+              return FacilityInfoScreen(
+                category: profile['student_category'] ?? 'Student',
+                email: profile['email'] ?? '',
+                studentName: profile['full_name'] ?? '',
+                contact: profile['phone_number'] ?? '',
+                matric: profile['matric_number'] ?? '',
+                onLogout: () => AuthService().signOut(),
+              );
+            }
+          },
+        );
+      },
     );
   }
 }
