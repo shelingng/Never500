@@ -12,25 +12,19 @@ class AdminOverviewTab extends StatefulWidget {
 class _AdminOverviewTabState extends State<AdminOverviewTab> {
   String _selectedView = 'Daily';
 
-  // Dynamic stats based on the selected dropdown value
+  // Dynamic stats
   final Map<String, Map<String, String>> _dashboardStats = {
-    'Daily': {
-      'bookings': '2', 'revenue': 'RM 12', 'active': '4', 'reports': '00', 'failed': '00'
-    },
-    'Weekly': {
-      'bookings': '18', 'revenue': 'RM 108', 'active': '12', 'reports': '01', 'failed': '00'
-    },
-    'Monthly': {
-      'bookings': '64', 'revenue': 'RM 384', 'active': '05', 'reports': '04', 'failed': '02'
-    },
+    'Daily': {'bookings': '2', 'revenue': 'RM 12', 'active': '4', 'reports': '00', 'failed': '00'},
+    'Weekly': {'bookings': '18', 'revenue': 'RM 108', 'active': '12', 'reports': '01', 'failed': '00'},
+    'Monthly': {'bookings': '64', 'revenue': 'RM 384', 'active': '05', 'reports': '04', 'failed': '02'},
   };
 
   void _showManualBookingModal() {
     showModalBottomSheet(
       context: context,
-      isScrollControlled: true,
+      isScrollControlled: true, // 🌟 Allows keyboard to push it up
       backgroundColor: Colors.transparent,
-      builder: (context) => _ManualBookingSheet(),
+      builder: (context) => const _ManualBookingSheet(),
     );
   }
 
@@ -39,7 +33,7 @@ class _AdminOverviewTabState extends State<AdminOverviewTab> {
     final currentStats = _dashboardStats[_selectedView]!;
 
     return SingleChildScrollView(
-      padding: const EdgeInsets.all(20.0),
+      padding: const EdgeInsets.all(24.0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -48,60 +42,73 @@ class _AdminOverviewTabState extends State<AdminOverviewTab> {
           const Text('Good afternoon, Aisyah.', style: TextStyle(fontSize: 28, fontWeight: FontWeight.w900, color: Color(0xFF0D211A))),
           const SizedBox(height: 8),
           const Text('Here\'s what\'s happening across the shared KRP Play prototype records.', style: TextStyle(color: Colors.grey, fontSize: 14)),
-          const SizedBox(height: 24),
+          const SizedBox(height: 32),
 
           // View Filter & Manual Booking
-          Row(
-            children: [
-              Expanded(
-                flex: 2,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                  decoration: BoxDecoration(border: Border.all(color: Colors.grey.shade300), borderRadius: BorderRadius.circular(8), color: Colors.white),
-                  child: DropdownButtonHideUnderline(
-                    child: DropdownButton<String>(
-                      value: _selectedView,
-                      isExpanded: true,
-                      items: ['Daily', 'Weekly', 'Monthly'].map((e) => DropdownMenuItem(value: e, child: Text(e))).toList(),
-                      onChanged: (val) {
-                        setState(() {
-                          _selectedView = val!;
-                        });
-                      },
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final isMobile = constraints.maxWidth < 500;
+              return Flex(
+                direction: isMobile ? Axis.vertical : Axis.horizontal,
+                children: [
+                  Container(
+                    width: isMobile ? double.infinity : 200,
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    decoration: BoxDecoration(border: Border.all(color: Colors.grey.shade300), borderRadius: BorderRadius.circular(8), color: Colors.white),
+                    child: DropdownButtonHideUnderline(
+                      child: DropdownButton<String>(
+                        value: _selectedView,
+                        isExpanded: true,
+                        items: ['Daily', 'Weekly', 'Monthly'].map((e) => DropdownMenuItem(value: e, child: Text(e))).toList(),
+                        onChanged: (val) => setState(() => _selectedView = val!),
+                      ),
                     ),
                   ),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                flex: 3,
-                child: ElevatedButton.icon(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF173F32),
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                  ),
-                  onPressed: _showManualBookingModal,
-                  icon: const Icon(Icons.add, color: Colors.white),
-                  label: const Text('Add manual booking', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                ),
-              )
-            ],
+                  SizedBox(height: isMobile ? 12 : 0, width: isMobile ? 0 : 16),
+                  SizedBox(
+                    width: isMobile ? double.infinity : null,
+                    child: ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF173F32),
+                        padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 24),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      ),
+                      onPressed: _showManualBookingModal,
+                      icon: const Icon(Icons.add, color: Colors.white),
+                      label: const Text('Add manual booking', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                    ),
+                  )
+                ],
+              );
+            }
           ),
           const SizedBox(height: 24),
 
-          // Dynamic Stat Cards
-          _buildStatCard(Icons.calendar_today, const Color(0xFFE8F5E9), '$_selectedView BOOKINGS'.toUpperCase(), currentStats['bookings']!, '$_selectedView prototype records'),
-          _buildStatCard(Icons.money, const Color(0xFFE3F2FD), '$_selectedView REVENUE'.toUpperCase(), currentStats['revenue']!, 'Confirmed payments'),
-          _buildStatCard(Icons.people_outline, const Color(0xFFF3E5F5), 'ACTIVE RESERVATIONS', currentStats['active']!, 'Paid and reserved'),
-          _buildStatCard(Icons.info_outline, const Color(0xFFFFF3E0), 'PENDING USER REPORTS', currentStats['reports']!, currentStats['reports'] == '00' ? 'Inbox clear' : 'Needs attention'),
-          _buildStatCard(Icons.schedule, const Color(0xFFFFF3E0), 'FAILED REFUNDS', currentStats['failed']!, currentStats['failed'] == '00' ? 'No failures' : 'Action required'),
+          // 🌟 Responsive Grid for Stat Cards
+          LayoutBuilder(
+            builder: (context, constraints) {
+              int columns = constraints.maxWidth > 800 ? 3 : (constraints.maxWidth > 500 ? 2 : 1);
+              double width = (constraints.maxWidth - ((columns - 1) * 16)) / columns;
+              
+              return Wrap(
+                spacing: 16,
+                runSpacing: 16,
+                children: [
+                  _buildStatCard(width, Icons.calendar_today, const Color(0xFFE8F5E9), '$_selectedView BOOKINGS'.toUpperCase(), currentStats['bookings']!, '$_selectedView prototype records'),
+                  _buildStatCard(width, Icons.money, const Color(0xFFE3F2FD), '$_selectedView REVENUE'.toUpperCase(), currentStats['revenue']!, 'Confirmed payments'),
+                  _buildStatCard(width, Icons.people_outline, const Color(0xFFF3E5F5), 'ACTIVE RESERVATIONS', currentStats['active']!, 'Paid and reserved'),
+                  _buildStatCard(width, Icons.info_outline, const Color(0xFFFFF3E0), 'PENDING USER REPORTS', currentStats['reports']!, currentStats['reports'] == '00' ? 'Inbox clear' : 'Needs attention'),
+                  _buildStatCard(width, Icons.schedule, const Color(0xFFFFF3E0), 'FAILED REFUNDS', currentStats['failed']!, currentStats['failed'] == '00' ? 'No failures' : 'Action required'),
+                ],
+              );
+            },
+          ),
           
           const SizedBox(height: 32),
           
           // Shared System Activity
           Container(
-            padding: const EdgeInsets.all(20),
+            padding: const EdgeInsets.all(24),
             decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.grey.shade200)),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -116,12 +123,18 @@ class _AdminOverviewTabState extends State<AdminOverviewTab> {
                   ],
                 ),
                 const SizedBox(height: 16),
-                Row(
-                  children: [
-                    Expanded(child: _buildActivityCard(Icons.calendar_today, 'New booking received', '#KRP-1842')),
-                    const SizedBox(width: 8),
-                    Expanded(child: _buildActivityCard(Icons.payment, 'Payment confirmed', 'RM 6.00')),
-                  ],
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    bool isMobile = constraints.maxWidth < 400;
+                    return Flex(
+                      direction: isMobile ? Axis.vertical : Axis.horizontal,
+                      children: [
+                        Expanded(flex: isMobile ? 0 : 1, child: _buildActivityCard(Icons.calendar_today, 'New booking received', '#KRP-1842')),
+                        SizedBox(width: isMobile ? 0 : 12, height: isMobile ? 12 : 0),
+                        Expanded(flex: isMobile ? 0 : 1, child: _buildActivityCard(Icons.payment, 'Payment confirmed', 'RM 6.00')),
+                      ],
+                    );
+                  }
                 )
               ],
             ),
@@ -162,9 +175,9 @@ class _AdminOverviewTabState extends State<AdminOverviewTab> {
     );
   }
 
-  Widget _buildStatCard(IconData icon, Color iconBgColor, String title, String value, String subtitle) {
+  Widget _buildStatCard(double width, IconData icon, Color iconBgColor, String title, String value, String subtitle) {
     return Container(
-      margin: const EdgeInsets.only(bottom: 12),
+      width: width,
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.grey.shade200)),
       child: Row(
@@ -191,18 +204,18 @@ class _AdminOverviewTabState extends State<AdminOverviewTab> {
 
   Widget _buildActivityCard(IconData icon, String title, String subtitle) {
     return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(color: Colors.grey[100], borderRadius: BorderRadius.circular(8)),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(color: Colors.grey[50], borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.grey.shade200)),
       child: Row(
         children: [
-          Icon(icon, size: 16, color: Colors.grey[700]),
-          const SizedBox(width: 8),
+          Icon(icon, size: 20, color: Colors.grey[700]),
+          const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(title, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                Text(subtitle, style: TextStyle(fontSize: 11, color: Colors.grey[600])),
+                Text(title, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+                Text(subtitle, style: TextStyle(fontSize: 12, color: Colors.grey[600])),
               ],
             ),
           )
@@ -240,31 +253,47 @@ class _AdminOverviewTabState extends State<AdminOverviewTab> {
   }
 }
 
-// Interactive bottom sheet for manual booking
+// 🌟 Upgraded Interactive Bottom Sheet
 class _ManualBookingSheet extends StatefulWidget {
+  const _ManualBookingSheet();
   @override
   State<_ManualBookingSheet> createState() => _ManualBookingSheetState();
 }
 
 class _ManualBookingSheetState extends State<_ManualBookingSheet> {
-  final TextEditingController _nameController = TextEditingController(text: 'Walk-in Student');
-  final TextEditingController _matricController = TextEditingController(text: 'A24CS0000');
-  final TextEditingController _contactController = TextEditingController(text: '012-000 0000');
-  final TextEditingController _dateController = TextEditingController(text: '12/11/2026');
+  final _nameController = TextEditingController(text: 'Walk-in Student');
+  final _matricController = TextEditingController(text: 'A24CS0000');
+  final _contactController = TextEditingController(text: '012-000 0000');
+  final _dateController = TextEditingController(text: '12/11/2026');
 
   String _selectedCategory = 'KRP Student';
   String _selectedFacility = 'Badminton Court 01';
   String _selectedSlot = '5:00 PM – 6:00 PM';
 
+  // Smart price calculation logic matching Student UI
+  int get _calculatedPrice {
+    bool isKRP = _selectedCategory == 'KRP Student';
+    if (_selectedFacility.contains('Badminton')) return isKRP ? 6 : 8;
+    if (_selectedFacility.contains('Ping Pong')) return isKRP ? 4 : 6;
+    if (_selectedFacility.contains('Snooker')) return isKRP ? 10 : 12;
+    if (_selectedFacility.contains('Dart')) return isKRP ? 3 : 5;
+    return 6; 
+  }
+
   @override
   Widget build(BuildContext context) {
+    // 🌟 This padding pushes the sheet up when the keyboard opens
+    final bottomPadding = MediaQuery.of(context).viewInsets.bottom;
+
     return Container(
-      height: MediaQuery.of(context).size.height * 0.85,
+      constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.9),
+      padding: EdgeInsets.only(bottom: bottomPadding), // Keyboard padding
       decoration: const BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
           // Header
           Padding(
@@ -272,25 +301,22 @@ class _ManualBookingSheetState extends State<_ManualBookingSheet> {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Column(
+                const Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('Add manual booking', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
-                    const SizedBox(height: 4),
-                    const Text('Create a reservation for a walk-in or assisted student.', style: TextStyle(color: Colors.grey, fontSize: 12)),
+                    Text('Add manual booking', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+                    SizedBox(height: 4),
+                    Text('Create a reservation for a walk-in or assisted student.', style: TextStyle(color: Colors.grey, fontSize: 12)),
                   ],
                 ),
-                IconButton(
-                  icon: const Icon(Icons.close),
-                  onPressed: () => Navigator.pop(context),
-                )
+                IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(context))
               ],
             ),
           ),
           const Divider(height: 1),
           
           // Scrollable Form
-          Expanded(
+          Flexible(
             child: SingleChildScrollView(
               padding: const EdgeInsets.all(20.0),
               child: Column(
@@ -319,7 +345,7 @@ class _ManualBookingSheetState extends State<_ManualBookingSheet> {
                   _buildLabel('Facility'),
                   _buildDropdown(
                     _selectedFacility,
-                    ['Badminton Court 01', 'Badminton Court 02', 'Ping Pong Table 01'],
+                    ['Badminton Court 01', 'Badminton Court 02', 'Ping Pong Table 01', 'Snooker Table', 'Dart Board'],
                     (val) => setState(() => _selectedFacility = val!),
                   ),
                   const SizedBox(height: 16),
@@ -354,12 +380,13 @@ class _ManualBookingSheetState extends State<_ManualBookingSheet> {
               boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, -5))],
             ),
             child: Column(
+              mainAxisSize: MainAxisSize.min, // Hug content
               children: [
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text('Official $_selectedCategory price · RM 6/court/hour', style: const TextStyle(fontSize: 12, color: Colors.grey)),
-                    const Text('RM 6.00', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+                    Text('Official $_selectedCategory price · RM $_calculatedPrice/hour', style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                    Text('RM $_calculatedPrice.00', style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
                   ],
                 ),
                 const SizedBox(height: 16),
@@ -386,22 +413,18 @@ class _ManualBookingSheetState extends State<_ManualBookingSheet> {
     );
   }
 
-  Widget _buildLabel(String text) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8.0),
-      child: Text(text, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.black87)),
-    );
-  }
+  Widget _buildLabel(String text) => Padding(
+    padding: const EdgeInsets.only(bottom: 8.0),
+    child: Text(text, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.black87)),
+  );
 
-  Widget _buildTextField(TextEditingController controller) {
-    return TextField(
-      controller: controller,
-      decoration: InputDecoration(
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-      ),
-    );
-  }
+  Widget _buildTextField(TextEditingController controller) => TextField(
+    controller: controller,
+    decoration: InputDecoration(
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+    ),
+  );
 
   Widget _buildDropdown(String value, List<String> items, ValueChanged<String?> onChanged) {
     return DropdownButtonFormField<String>(

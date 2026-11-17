@@ -49,6 +49,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
   void initState() {
     super.initState();
 
+    // 🌟 Keeps the "View All" button on the Overview tab working
     _pages = [
       AdminOverviewTab(onViewAllBookings: () => _selectPage(2)),
       const AdminSlotsTab(),
@@ -156,6 +157,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
 
   Widget _buildDrawer() {
     final screenWidth = MediaQuery.sizeOf(context).width;
+    // Cap the drawer width for extremely wide monitors
     final drawerWidth = screenWidth < 400 ? screenWidth * 0.88 : 340.0;
 
     return Drawer(
@@ -215,6 +217,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
       backgroundColor: const Color(0xFFF7F9F7),
       drawer: _buildDrawer(),
       drawerScrimColor: Colors.black.withAlpha(105),
+      
       appBar: AppBar(
         backgroundColor: Colors.white,
         foregroundColor: _green,
@@ -232,6 +235,11 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
         ),
         actions: [
           IconButton(
+            tooltip: 'Notifications',
+            icon: const Icon(Icons.notifications_none, color: Colors.black87),
+            onPressed: () {},
+          ),
+          IconButton(
             tooltip: 'Admin profile',
             icon: const Icon(Icons.account_circle_outlined),
             onPressed: () => _selectPage(5),
@@ -243,7 +251,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
       // Retains each tab's local state when navigating between sections.
       body: IndexedStack(index: _currentIndex, children: _pages),
 
-      // Retained to match the bottom navigation in your prototype.
+      // 🌟 Restored the BottomNavigationBar for ALL screen sizes
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _currentIndex,
         type: BottomNavigationBarType.fixed,

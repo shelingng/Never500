@@ -16,7 +16,7 @@ class _AdminBookingsTabState extends State<AdminBookingsTab> {
   String _selectedStatus = 'All Statuses';
 
   // Fictional UI examples only.
-  final List<Map<String, String>> _bookings = [
+  final _bookings = [
     {
       'ref': 'DEMO-1842',
       'payId': 'DEMO-PAY-1842',
@@ -75,17 +75,15 @@ class _AdminBookingsTabState extends State<AdminBookingsTab> {
     },
   ];
 
-  List<Map<String, String>> get _filteredBookings {
+   get _filteredBookings {
     final query = _searchController.text.trim().toLowerCase();
 
     return _bookings.where((booking) {
       final matchesCategory =
-          _selectedCategory == 'All Categories' ||
-          booking['category'] == _selectedCategory;
+          _selectedCategory == 'All Categories' || booking['category'] == _selectedCategory;
 
       final matchesStatus =
-          _selectedStatus == 'All Statuses' ||
-          booking['status'] == _selectedStatus;
+          _selectedStatus == 'All Statuses' || booking['status'] == _selectedStatus;
 
       final searchableText = [
         booking['ref'] ?? '',
@@ -133,20 +131,16 @@ class _AdminBookingsTabState extends State<AdminBookingsTab> {
 
   Widget _statusBadge(String status) {
     final color = _statusColor(status);
-
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
         color: color.withAlpha(22),
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(6),
       ),
       child: Text(
         status,
-        style: TextStyle(
-          color: color,
-          fontSize: 12,
-          fontWeight: FontWeight.w700,
-        ),
+        style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.bold),
+        overflow: TextOverflow.ellipsis,
       ),
     );
   }
@@ -186,20 +180,14 @@ class _AdminBookingsTabState extends State<AdminBookingsTab> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
-                  'Student information',
-                  style: TextStyle(fontWeight: FontWeight.bold),
-                ),
+                const Text('Student information', style: TextStyle(fontWeight: FontWeight.bold)),
                 const Divider(height: 24),
                 _detailRow('Student', booking['name']!),
                 _detailRow('Matric number', booking['matric']!),
                 _detailRow('Contact', booking['contact']!),
                 _detailRow('Category', booking['category']!),
                 const Divider(height: 24),
-                const Text(
-                  'Reservation information',
-                  style: TextStyle(fontWeight: FontWeight.bold),
-                ),
+                const Text('Reservation information', style: TextStyle(fontWeight: FontWeight.bold)),
                 const SizedBox(height: 8),
                 _detailRow('Facility', booking['facility']!),
                 _detailRow('Date', booking['date']!),
@@ -207,10 +195,7 @@ class _AdminBookingsTabState extends State<AdminBookingsTab> {
                 _detailRow('Amount', booking['price']!),
                 _detailRow('Booking status', booking['status']!),
                 const Divider(height: 24),
-                const Text(
-                  'Payment information',
-                  style: TextStyle(fontWeight: FontWeight.bold),
-                ),
+                const Text('Payment information', style: TextStyle(fontWeight: FontWeight.bold)),
                 const SizedBox(height: 8),
                 _detailRow('Payment status', booking['paymentStatus']!),
                 _detailRow('Payment reference', booking['payId']!),
@@ -222,9 +207,8 @@ class _AdminBookingsTabState extends State<AdminBookingsTab> {
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child: const Text(
-                    'Refund requests and decisions are handled '
-                    'in Refund Management. These demo records '
-                    'are not yet synchronised between pages.',
+                    'Refund requests and decisions are handled in Refund Management. '
+                    'These demo records are not yet synchronised between pages.',
                     style: TextStyle(fontSize: 12, color: _green),
                   ),
                 ),
@@ -242,268 +226,359 @@ class _AdminBookingsTabState extends State<AdminBookingsTab> {
     );
   }
 
-  Widget _filter({
-    required String label,
-    required String value,
-    required List<String> options,
-    required ValueChanged<String> onChanged,
-  }) {
-    return SizedBox(
-      width: 220,
-      child: DropdownButtonFormField<String>(
-        key: ValueKey('$label:$value'),
-        initialValue: value,
-        isExpanded: true,
-        decoration: InputDecoration(
-          labelText: label,
-          border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-        ),
-        items: options
-            .map(
-              (option) =>
-                  DropdownMenuItem<String>(value: option, child: Text(option)),
-            )
-            .toList(),
-        onChanged: (selected) {
-          if (selected != null) {
-            onChanged(selected);
-          }
-        },
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final bookings = _filteredBookings;
 
     return SingleChildScrollView(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(24),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
             'ADMIN BOOKING RECORDS',
-            style: TextStyle(
-              color: _green,
-              fontWeight: FontWeight.bold,
-              fontSize: 12,
-              letterSpacing: 1.5,
-            ),
+            style: TextStyle(color: _green, fontWeight: FontWeight.bold, fontSize: 12, letterSpacing: 1.5),
           ),
           const SizedBox(height: 8),
           const Text(
             'Reservations',
-            style: TextStyle(
-              fontSize: 28,
-              fontWeight: FontWeight.w800,
-              color: _green,
-            ),
+            style: TextStyle(fontSize: 28, fontWeight: FontWeight.w900, color: _green),
           ),
           const SizedBox(height: 8),
           const Text(
-            'Search reservations and view booking '
-            'and payment information.',
-            style: TextStyle(color: Colors.grey),
+            'Search reservations and view booking and payment information.',
+            style: TextStyle(color: Colors.grey, fontSize: 14),
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 24),
+          
           Container(
             width: double.infinity,
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: const Color(0xFFFFF4D6),
-              borderRadius: BorderRadius.circular(12),
-            ),
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(color: const Color(0xFFFFF4D6), borderRadius: BorderRadius.circular(12)),
             child: const Text(
-              'Demo data — these records are not connected '
-              'to student bookings or Supabase.',
+              'Demo data — these records are not connected to student bookings or Supabase.',
               style: TextStyle(color: Color(0xFF705500)),
             ),
           ),
-          const SizedBox(height: 20),
-          Container(
-            padding: const EdgeInsets.all(18),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: const Color(0xFFE2E8E3)),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                TextField(
-                  controller: _searchController,
-                  decoration: InputDecoration(
-                    labelText: 'Search bookings',
-                    hintText: 'Reference, student, matric or facility',
-                    prefixIcon: const Icon(Icons.search),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                  ),
-                  onChanged: (_) => setState(() {}),
-                ),
-                const SizedBox(height: 16),
-                Wrap(
-                  spacing: 12,
-                  runSpacing: 12,
-                  crossAxisAlignment: WrapCrossAlignment.center,
+          const SizedBox(height: 24),
+          
+          // Responsive Search & Filter Block
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final isMobile = constraints.maxWidth < 800;
+              
+              if (isMobile) {
+                return Column(
                   children: [
-                    _filter(
-                      label: 'Student category',
-                      value: _selectedCategory,
-                      options: const [
-                        'All Categories',
-                        'KRP Student',
-                        'Non-KRP Student',
-                      ],
-                      onChanged: (value) {
-                        setState(() => _selectedCategory = value);
-                      },
+                    TextField(
+                      controller: _searchController,
+                      decoration: InputDecoration(
+                        labelText: 'Search bookings',
+                        hintText: 'Reference, student...',
+                        prefixIcon: const Icon(Icons.search),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                      ),
+                      onChanged: (_) => setState(() {}),
                     ),
-                    _filter(
-                      label: 'Booking status',
-                      value: _selectedStatus,
-                      options: const [
-                        'All Statuses',
-                        'Pending Payment',
-                        'Confirmed',
-                        'Cancelled',
-                        'Expired',
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: DropdownButtonFormField<String>(
+                            value: _selectedCategory,
+                            decoration: InputDecoration(labelText: 'Category', border: OutlineInputBorder(borderRadius: BorderRadius.circular(10))),
+                            items: ['All Categories', 'KRP Student', 'Non-KRP Student'].map((c) => DropdownMenuItem(value: c, child: Text(c, overflow: TextOverflow.ellipsis))).toList(),
+                            onChanged: (val) { if (val != null) setState(() => _selectedCategory = val); },
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: DropdownButtonFormField<String>(
+                            value: _selectedStatus,
+                            decoration: InputDecoration(labelText: 'Status', border: OutlineInputBorder(borderRadius: BorderRadius.circular(10))),
+                            items: ['All Statuses', 'Pending Payment', 'Confirmed', 'Cancelled', 'Expired'].map((s) => DropdownMenuItem(value: s, child: Text(s, overflow: TextOverflow.ellipsis))).toList(),
+                            onChanged: (val) { if (val != null) setState(() => _selectedStatus = val); },
+                          ),
+                        ),
                       ],
-                      onChanged: (value) {
-                        setState(() => _selectedStatus = value);
-                      },
                     ),
-                    TextButton.icon(
-                      onPressed: _clearFilters,
-                      icon: const Icon(Icons.filter_alt_off_outlined),
-                      label: const Text('Clear filters'),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: TextButton.icon(onPressed: _clearFilters, icon: const Icon(Icons.clear, size: 18), label: const Text('Clear')),
+                    )
+                  ],
+                );
+              } else {
+                return Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      flex: 4,
+                      child: TextField(
+                        controller: _searchController,
+                        decoration: InputDecoration(
+                          labelText: 'Search bookings',
+                          hintText: 'Reference, student, matric or facility',
+                          prefixIcon: const Icon(Icons.search),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                        ),
+                        onChanged: (_) => setState(() {}),
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      flex: 2,
+                      child: DropdownButtonFormField<String>(
+                        value: _selectedCategory,
+                        decoration: InputDecoration(labelText: 'Category', border: OutlineInputBorder(borderRadius: BorderRadius.circular(10))),
+                        items: ['All Categories', 'KRP Student', 'Non-KRP Student'].map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(),
+                        onChanged: (val) { if (val != null) setState(() => _selectedCategory = val); },
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      flex: 2,
+                      child: DropdownButtonFormField<String>(
+                        value: _selectedStatus,
+                        decoration: InputDecoration(labelText: 'Status', border: OutlineInputBorder(borderRadius: BorderRadius.circular(10))),
+                        items: ['All Statuses', 'Pending Payment', 'Confirmed', 'Cancelled', 'Expired'].map((s) => DropdownMenuItem(value: s, child: Text(s))).toList(),
+                        onChanged: (val) { if (val != null) setState(() => _selectedStatus = val); },
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8.0),
+                      child: TextButton.icon(
+                        onPressed: _clearFilters,
+                        style: TextButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16)),
+                        icon: const Icon(Icons.filter_alt_off_outlined),
+                        label: const Text('Clear filters', style: TextStyle(fontWeight: FontWeight.bold)),
+                      ),
                     ),
                   ],
-                ),
-              ],
-            ),
+                );
+              }
+            }
           ),
-          const SizedBox(height: 18),
-          Text(
-            '${bookings.length} reservation(s)',
-            style: const TextStyle(
-              fontWeight: FontWeight.w600,
-              color: Colors.grey,
-            ),
-          ),
-          const SizedBox(height: 12),
+          
+          const SizedBox(height: 24),
+          Text('${bookings.length} reservation(s)', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.grey)),
+          const SizedBox(height: 16),
+          
           if (bookings.isEmpty)
             Container(
               width: double.infinity,
-              padding: const EdgeInsets.all(32),
+              padding: const EdgeInsets.all(40),
+              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.grey.shade200)),
               child: Column(
                 children: [
                   const Icon(Icons.search_off, size: 44, color: Colors.grey),
                   const SizedBox(height: 12),
-                  const Text(
-                    'No bookings match your search and filters.',
-                    textAlign: TextAlign.center,
-                  ),
+                  const Text('No bookings match your search and filters.', textAlign: TextAlign.center, style: TextStyle(fontSize: 16, color: Colors.grey)),
                   const SizedBox(height: 8),
-                  TextButton(
-                    onPressed: _clearFilters,
-                    child: const Text('Clear filters'),
-                  ),
+                  TextButton(onPressed: _clearFilters, child: const Text('Clear filters')),
                 ],
               ),
             )
           else
-            Container(
-              width: double.infinity,
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: const Color(0xFFE2E8E3)),
-              ),
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: DataTable(
-                  headingRowHeight: 52,
-                  dataRowMinHeight: 88,
-                  dataRowMaxHeight: 110,
-                  columnSpacing: 24,
-                  columns: const [
-                    DataColumn(label: Text('Reference')),
-                    DataColumn(label: Text('Student')),
-                    DataColumn(label: Text('Facility / Schedule')),
-                    DataColumn(label: Text('Amount')),
-                    DataColumn(label: Text('Booking')),
-                    DataColumn(label: Text('Payment')),
-                    DataColumn(label: Text('Action')),
-                  ],
-                  rows: bookings.map((booking) {
-                    return DataRow(
-                      cells: [
-                        DataCell(
-                          Text(
-                            booking['ref']!,
-                            style: const TextStyle(fontWeight: FontWeight.bold),
-                          ),
-                        ),
-                        DataCell(
-                          Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(booking['name']!),
-                              Text(
-                                booking['matric']!,
-                                style: const TextStyle(
-                                  color: Colors.grey,
-                                  fontSize: 12,
-                                ),
-                              ),
-                              Text(
-                                booking['category']!,
-                                style: const TextStyle(fontSize: 12),
-                              ),
-                            ],
-                          ),
-                        ),
-                        DataCell(
-                          Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(booking['facility']!),
-                              Text(booking['date']!),
-                              Text(
-                                booking['time']!,
-                                style: const TextStyle(
-                                  color: Colors.grey,
-                                  fontSize: 12,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        DataCell(Text(booking['price']!)),
-                        DataCell(_statusBadge(booking['status']!)),
-                        DataCell(_statusBadge(booking['paymentStatus']!)),
-                        DataCell(
-                          TextButton.icon(
-                            onPressed: () => _showDetails(booking),
-                            icon: const Icon(
-                              Icons.visibility_outlined,
-                              size: 18,
-                            ),
-                            label: const Text('Details'),
-                          ),
-                        ),
-                      ],
-                    );
-                  }).toList(),
-                ),
-              ),
+            // 🌟 Responsive Layout: Mobile Cards vs Desktop Table
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final isMobile = constraints.maxWidth < 800;
+
+                if (isMobile) {
+                  return _buildMobileCardList(bookings);
+                } else {
+                  return _buildDesktopTable(bookings);
+                }
+              },
             ),
-          const SizedBox(height: 20),
+            
+          const SizedBox(height: 40),
+        ],
+      ),
+    );
+  }
+
+  // 🌟 Mobile-Friendly Stacked Cards View
+  Widget _buildMobileCardList(List bookings) {
+    return Column(
+      children: bookings.map((booking) {
+        return Card(
+          margin: const EdgeInsets.only(bottom: 16),
+          elevation: 0,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+            side: BorderSide(color: Colors.grey.shade300),
+          ),
+          color: Colors.white,
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(booking['ref']!, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                        Text(booking['payId']!, style: TextStyle(color: Colors.grey.shade500, fontSize: 11)),
+                      ],
+                    ),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        _statusBadge(booking['status']!),
+                        const SizedBox(height: 4),
+                        _statusBadge(booking['paymentStatus']!),
+                      ],
+                    )
+                  ],
+                ),
+                const Divider(height: 24),
+                Text(booking['name']!, style: const TextStyle(fontWeight: FontWeight.bold)),
+                Text('${booking['matric']} · ${booking['category']}', style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
+                const SizedBox(height: 12),
+                Text(booking['facility']!, style: const TextStyle(fontWeight: FontWeight.bold)),
+                Text('${booking['date']} · ${booking['time']}', style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
+                const SizedBox(height: 12),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text('Amount', style: TextStyle(color: Colors.grey, fontSize: 12)),
+                    Text(booking['price']!, style: const TextStyle(fontWeight: FontWeight.bold, color: _green, fontSize: 16)),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: () => _showDetails(booking),
+                    icon: const Icon(Icons.visibility_outlined, size: 18, color: Colors.black87),
+                    label: const Text('View Details', style: TextStyle(color: Colors.black87)),
+                    style: OutlinedButton.styleFrom(
+                      side: const BorderSide(color: Colors.grey),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    ),
+                  ),
+                )
+              ],
+            ),
+          ),
+        );
+      }).toList(),
+    );
+  }
+
+  // 🌟 Desktop-Friendly Stretch Table View
+  Widget _buildDesktopTable(List bookings) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFE2E8E3)),
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 10, offset: const Offset(0, 4))],
+      ),
+      child: Column(
+        children: [
+          // Table Header
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+            decoration: const BoxDecoration(
+              color: Color(0xFFF9FAF9),
+              borderRadius: BorderRadius.vertical(top: Radius.circular(14)),
+              border: Border(bottom: BorderSide(color: Color(0xFFE2E8E3))),
+            ),
+            child: const Row(
+              children: [
+                Expanded(flex: 2, child: Text('REFERENCE', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.grey, letterSpacing: 0.5))),
+                Expanded(flex: 3, child: Text('STUDENT', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.grey, letterSpacing: 0.5))),
+                Expanded(flex: 3, child: Text('FACILITY / SCHEDULE', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.grey, letterSpacing: 0.5))),
+                Expanded(flex: 2, child: Text('AMOUNT', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.grey, letterSpacing: 0.5))),
+                Expanded(flex: 3, child: Text('STATUS', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.grey, letterSpacing: 0.5))),
+                Expanded(flex: 2, child: Text('ACTION', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.grey, letterSpacing: 0.5))),
+              ],
+            ),
+          ),
+          
+          // Table Rows
+          ...bookings.map((booking) {
+            return Container(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+              decoration: const BoxDecoration(
+                border: Border(bottom: BorderSide(color: Color(0xFFE2E8E3))),
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    flex: 2,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(booking['ref']!, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                        Text(booking['payId']!, style: TextStyle(color: Colors.grey.shade500, fontSize: 11)),
+                      ],
+                    ),
+                  ),
+                  Expanded(
+                    flex: 3,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(booking['name']!, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                        Text(booking['matric']!, style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
+                        Text(booking['category']!, style: TextStyle(color: Colors.grey.shade500, fontSize: 11)),
+                      ],
+                    ),
+                  ),
+                  Expanded(
+                    flex: 3,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(booking['facility']!, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                        Text(booking['date']!, style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
+                        Text(booking['time']!, style: TextStyle(color: Colors.grey.shade500, fontSize: 11)),
+                      ],
+                    ),
+                  ),
+                  Expanded(
+                    flex: 2,
+                    child: Text(booking['price']!, style: const TextStyle(fontWeight: FontWeight.bold, color: _green)),
+                  ),
+                  Expanded(
+                    flex: 3,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _statusBadge(booking['status']!),
+                        const SizedBox(height: 4),
+                        _statusBadge(booking['paymentStatus']!),
+                      ],
+                    ),
+                  ),
+                  Expanded(
+                    flex: 2,
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: OutlinedButton.icon(
+                        onPressed: () => _showDetails(booking),
+                        icon: const Icon(Icons.visibility_outlined, size: 16, color: Colors.black87),
+                        label: const Text('Details', style: TextStyle(fontSize: 12, color: Colors.black87)),
+                        style: OutlinedButton.styleFrom(
+                          side: const BorderSide(color: Colors.grey),
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }),
         ],
       ),
     );
