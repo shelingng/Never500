@@ -30,9 +30,12 @@ class AuthService {
     }
     final text = error.toString();
     final lower = text.toLowerCase();
-    if (lower.contains('socketexception') || lower.contains('clientexception') ||
-        lower.contains('failed to fetch') || lower.contains('network') ||
-        lower.contains('connection') || lower.contains('timed out') ||
+    if (lower.contains('socketexception') ||
+        lower.contains('clientexception') ||
+        lower.contains('failed to fetch') ||
+        lower.contains('network') ||
+        lower.contains('connection') ||
+        lower.contains('timed out') ||
         lower.contains('timeoutexception')) {
       return 'Unable to connect. Check your internet connection and try again.';
     }
@@ -43,7 +46,8 @@ class AuthService {
       'Sign in to complete registration.',
     ];
     final clean = text.replaceFirst('Exception: ', '');
-    if (formMessages.contains(clean) || clean.startsWith('Check your email to confirm registration')) {
+    if (formMessages.contains(clean) ||
+        clean.startsWith('Check your email to confirm registration')) {
       return clean;
     }
     return 'We couldn’t complete your request. Please try again.';
@@ -73,7 +77,8 @@ class AuthService {
 
     // A signed-in account without a profile must complete registration.
     // Verify the password before writing any profile for an existing account.
-    if (_supabase.auth.currentUser?.email?.toLowerCase() == email.toLowerCase()) {
+    if (_supabase.auth.currentUser?.email?.toLowerCase() ==
+        email.toLowerCase()) {
       await signIn(email: email, password: password);
     } else {
       try {
@@ -83,8 +88,10 @@ class AuthService {
           data: details,
         );
         if (response.session == null) {
-          throw Exception('Check your email to confirm registration, then sign in. '
-              'If this account already exists, sign in to complete its profile.');
+          throw Exception(
+            'Check your email to confirm registration, then sign in. '
+            'If this account already exists, sign in to complete its profile.',
+          );
         }
       } on AuthException catch (error) {
         if (error.code != 'user_already_exists') rethrow;
@@ -110,10 +117,7 @@ class AuthService {
 
   // Sign In
   signIn({required String email, required String password}) async {
-    await _supabase.auth.signInWithPassword(
-      email: email,
-      password: password,
-    );
+    await _supabase.auth.signInWithPassword(email: email, password: password);
   }
 
   // Sign Out
@@ -131,7 +135,7 @@ class AuthService {
         .select()
         .eq('id', user.id)
         .maybeSingle();
-    
+
     return data;
   }
 }
