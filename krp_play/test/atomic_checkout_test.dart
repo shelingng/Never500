@@ -27,9 +27,10 @@ class CheckoutFake extends BookingService {
   }
 
   @override
-  Future<Map<String, dynamic>> reserveCart(
+  Future<Map<String, dynamic>> demoPayCart(
     List<Booking> cart, {
     required String requestId,
+    required String method,
   }) async {
     keys.add(requestId);
     if (error != null) throw error!;
@@ -38,7 +39,8 @@ class CheckoutFake extends BookingService {
           'id': 'test-order',
           'reference': 'KRP-test',
           'total_amount': 6,
-          'status': 'pending_payment',
+          'status': 'confirmed',
+          'is_demo': true,
           'payment_deadline': DateTime.now()
               .add(const Duration(minutes: 10))
               .toIso8601String(),
@@ -82,14 +84,14 @@ Future<void> openPayment(WidgetTester tester, CheckoutFake fake) async {
 
 void main() {
   testWidgets(
-    'Pay creates a pending reservation and never claims payment success',
+    'Pay confirms a clearly labelled demo booking',
     (tester) async {
       final fake = CheckoutFake();
       await openPayment(tester, fake);
       await tapText(tester, 'Pay Now');
       expect(fake.keys, hasLength(1));
-      expect(find.text('Reserved - awaiting payment'), findsOneWidget);
-      expect(find.textContaining('No payment has been taken'), findsOneWidget);
+      expect(find.text('Demo payment successful - booking confirmed'), findsOneWidget);
+      expect(find.text('Demo only. No money was charged.'), findsOneWidget);
       expect(find.text('Booking confirmed'), findsNothing);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());
@@ -107,7 +109,7 @@ void main() {
     await tester.tap(pay);
     await tester.pump();
     expect(fake.keys, hasLength(1));
-    expect(find.text('Reserving...'), findsOneWidget);
+    expect(find.text('Processing...'), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
     fake.pending!.complete({
       'reference': 'ignored-after-dispose',
@@ -126,7 +128,7 @@ void main() {
     await tapText(tester, 'Pay Now');
     expect(fake.keys, hasLength(2));
     expect(fake.keys[0], fake.keys[1]);
-    expect(find.text('Reserved - awaiting payment'), findsOneWidget);
+    expect(find.text('Demo payment successful - booking confirmed'), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
   });
 
@@ -142,7 +144,7 @@ void main() {
     await tapText(tester, 'Pay Now');
     expect(find.text('02 Choose your court'), findsOneWidget);
     expect(find.textContaining('reserved or booked'), findsOneWidget);
-    expect(find.text('Reserved - awaiting payment'), findsNothing);
+    expect(find.text('Demo payment successful - booking confirmed'), findsNothing);
     expect(tester.takeException(), isNull);
   });
 

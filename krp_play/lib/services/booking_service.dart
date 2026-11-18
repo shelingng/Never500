@@ -31,6 +31,21 @@ class BookingService {
     List<Booking> cart, {
     required String requestId,
   }) async {
+    return _checkout(cart, requestId: requestId);
+  }
+
+  // Explicit prototype payment: never used as evidence of real funds.
+  Future<Map<String, dynamic>> demoPayCart(
+    List<Booking> cart, {
+    required String requestId,
+    required String method,
+  }) => _checkout(cart, requestId: requestId, demoMethod: method);
+
+  Future<Map<String, dynamic>> _checkout(
+    List<Booking> cart, {
+    required String requestId,
+    String? demoMethod,
+  }) async {
     if (_supabase.auth.currentUser == null) {
       throw StateError('Sign in to reserve a slot.');
     }
@@ -46,9 +61,10 @@ class BookingService {
         )
         .toList();
     final result = await _supabase.rpc(
-      'reserve_cart',
+      demoMethod == null ? 'reserve_cart' : 'demo_pay_cart',
       params: {
         'p_request_id': requestId,
+        if (demoMethod != null) 'p_method': demoMethod,
         'p_items': items,
         'p_expected_total': cart.fold<num>(
           0,
@@ -187,7 +203,8 @@ class BookingService {
         status = 'expired';
       }
       final label = switch (status) {
-        'confirmed' => 'Paid & Confirmed',
+        'confirmed' => row['is_demo'] == true
+            ? 'Demo paid & confirmed' : 'Paid & Confirmed',
         'pending_payment' => 'Reserved - awaiting payment',
         'expired' => 'Expired - unpaid',
         _ => status,
