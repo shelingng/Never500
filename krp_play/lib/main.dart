@@ -69,7 +69,17 @@ class AuthWrapper extends StatelessWidget {
             }
 
             dynamic profile = profileSnapshot.data;
-            if (profile == null) return const AuthScreen();
+            if (profileSnapshot.hasError) {
+              return Scaffold(body: Center(child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text('We couldn’t load your profile. Please sign in again to retry.'),
+                  TextButton(onPressed: () => AuthService().signOut(),
+                    child: const Text('Sign out')),
+                ],
+              )));
+            }
+            if (profile == null) return const AuthScreen(completeProfile: true);
 
             // Route based on role from public.profiles
             if (profile['role'] == 'admin') {

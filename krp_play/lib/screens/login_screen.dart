@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 import '../services/auth_service.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 class AuthScreen extends StatefulWidget {
-  const AuthScreen({super.key});
+  const AuthScreen({super.key, this.completeProfile = false});
+
+  final bool completeProfile;
 
   @override
   State<AuthScreen> createState() => _AuthScreenState();
@@ -28,6 +31,16 @@ class _AuthScreenState extends State<AuthScreen> {
   String message = '';
 
   final Color primaryGreen = const Color(0xFF103B2B);
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.completeProfile) {
+      isSignup = true;
+      emailController.text = Supabase.instance.client.auth.currentUser?.email ?? '';
+      message = 'Your account exists, but your profile is incomplete. Please fill in your details and enter your existing password to continue.';
+    }
+  }
 
   @override
   void dispose() {
@@ -67,6 +80,12 @@ class _AuthScreenState extends State<AuthScreen> {
           contactNumber: contactController.text.trim(),
           studentCategory: category,
         );
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(widget.completeProfile
+              ? 'Profile saved successfully!'
+              : 'Account ready! You are now signed in.'),
+        ));
       } else {
         await _authService.signIn(
           email: emailController.text.trim(),
@@ -74,8 +93,9 @@ class _AuthScreenState extends State<AuthScreen> {
         );
       }
     } catch (e) {
+      if (!mounted) return;
       setState(() {
-        message = e.toString().replaceAll('Exception: ', '').replaceAll('AuthException(message: ', '').split(',')[0];
+        message = AuthService.messageForError(e);
       });
     } finally {
       if (mounted) {
@@ -181,7 +201,7 @@ class _AuthScreenState extends State<AuthScreen> {
                         onPressed: isLoading ? null : () => submit(),
                         child: isLoading 
                             ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                            : Text(isSignup ? 'Create account' : 'Sign in', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                            : Text(widget.completeProfile && isSignup ? 'Save profile' : isSignup ? 'Create account' : 'Sign in', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                       ),
                       const SizedBox(height: 16),
                       TextButton(
