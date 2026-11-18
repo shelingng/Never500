@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -27,8 +25,6 @@ class FacilitiesScreen extends StatefulWidget {
 class _FacilitiesScreenState extends State<FacilitiesScreen> {
   late final BookingService _bookingService =
       widget.bookingService ?? BookingService();
-  Timer? _holdTimer;
-  bool _holdExpired = false;
   List<Map<String, dynamic>> _facilities = [];
   bool _loadingPrices = true;
   bool _priceLoadFailed = false;
@@ -62,12 +58,6 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
     }
   }
 
-  @override
-  void dispose() {
-    _holdTimer?.cancel();
-    super.dispose();
-  }
-
   int currentStep = 1;
 
   final Color primaryGreen = const Color(0xFF103B2B);
@@ -84,7 +74,6 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
   bool reservationCreated = false;
   bool _isReserving = false;
   String? _checkoutRequestId;
-  DateTime? _holdDeadline;
   num? _reservedTotal;
   String? _availabilityError;
   int _availabilityRequest = 0;
@@ -1194,6 +1183,8 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
                     ),
                   ),
                   const SizedBox(height: 20),
+                  const Text('Prototype demo: Pay Now simulates payment. No money is charged.'),
+                  const SizedBox(height: 12),
                   const Text(
                     'Select payment method',
                     style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
@@ -1271,7 +1262,7 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
                           ? _reserveSelectedCart
                           : null,
                       child: Text(
-                        _isReserving ? 'Reserving...' : 'Pay Now',
+                        _isReserving ? 'Processing...' : 'Pay Now',
                         style: TextStyle(
                           fontSize: 15,
                           fontWeight: FontWeight.bold,
@@ -1295,13 +1286,13 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
                         const Row(
                           children: [
                             Icon(
-                              Icons.schedule,
+                              Icons.check_circle_outline,
                               size: 20,
                               color: Color(0xFF2E7D32),
                             ),
                             SizedBox(width: 8),
                             Text(
-                              'Reservation status',
+                              'Payment successful',
                               style: TextStyle(
                                 fontSize: 16,
                                 fontWeight: FontWeight.bold,
@@ -1311,11 +1302,7 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
                           ],
                         ),
                         const SizedBox(height: 10),
-                        Text(
-                          _holdExpired
-                              ? 'Expired - unpaid'
-                              : 'Reserved - awaiting payment',
-                        ),
+                        const Text('Demo payment successful - booking confirmed'),
                         Text(
                           '$generatedBookingRef · ${cartItems.length} items',
                           style: const TextStyle(
@@ -1332,13 +1319,7 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
                           ),
                         ),
                         const SizedBox(height: 8),
-                        Text(
-                          'Hold expires: ${_holdDeadline?.toLocal().toString() ?? "See My Bookings"}',
-                        ),
-                        const SizedBox(height: 8),
-                        const Text(
-                          'Payments are temporarily unavailable. No payment has been taken. Your unpaid reservation expires automatically.',
-                        ),
+                        const Text('Demo only. No money was charged.'),
                         const SizedBox(height: 12),
                         InkWell(
                           onTap: () => Navigator.of(context).pop(),
@@ -1449,21 +1430,19 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
     // Keep this key on network errors: the server might have committed already.
     final key = _checkoutRequestId ??= BookingService.newCheckoutRequestId();
     try {
-      final response = await _bookingService.reserveCart(
+      final response = await _bookingService.demoPayCart(
         cartItems,
         requestId: key,
+        method: selectedPaymentMethod == 'E-Wallet' ? 'touch_n_go_ewallet' : 'fpx',
       );
       if (!mounted) return;
+      if (response['status'] != 'confirmed' || response['is_demo'] != true) {
+        throw StateError('Demo payment was not confirmed by the server.');
+      }
       setState(() {
         generatedBookingRef = response['reference'].toString();
-        _holdDeadline = DateTime.parse(response['payment_deadline'].toString());
         _reservedTotal = response['total_amount'] as num;
         reservationCreated = true;
-      });
-      _holdTimer?.cancel();
-      final remaining = _holdDeadline!.difference(DateTime.now());
-      _holdTimer = Timer(remaining.isNegative ? Duration.zero : remaining, () {
-        if (mounted) setState(() => _holdExpired = true);
       });
     } on PostgrestException catch (e) {
       if (!mounted) return;
