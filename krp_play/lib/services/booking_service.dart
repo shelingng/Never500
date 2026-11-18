@@ -1,88 +1,132 @@
+import 'dart:math';
+
 import 'package:supabase_flutter/supabase_flutter.dart';
+
 import '../models/booking.dart';
 
 class BookingService {
-  final _supabase = Supabase.instance.client;
+  SupabaseClient get _supabase => Supabase.instance.client;
 
   // 1. Fetch available facilities from public.facilities
   getFacilities() async {
-    final response = await _supabase.from('facilities').select().eq('is_active', true);
+    final response = await _supabase
+        .from('facilities')
+        .select()
+        .eq('is_active', true);
     return response;
   }
 
-  // 2. Create a new booking
-  createBooking(Booking booking, String customerCategory) async {
-    final user = _supabase.auth.currentUser;
-    if (user == null) throw Exception('Must be logged in');
+  // A retry of the same checkout must reuse the same request ID.
+  static String newCheckoutRequestId() {
+    final random = Random.secure();
+    final bytes = List<int>.generate(16, (_) => random.nextInt(256));
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    final hex = bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+    return '${hex.substring(0, 8)}-${hex.substring(8, 12)}-'
+        '${hex.substring(12, 16)}-${hex.substring(16, 20)}-${hex.substring(20)}';
+  }
 
-    final ref = 'KRP-${DateTime.now().millisecondsSinceEpoch.toString().substring(5)}';
-    final String bookingDataString = '${booking.facilityName}|${booking.date.toIso8601String()}|${booking.timeSlots.join(",")}';
-
-    // Insert into public.bookings
-    final bookingResponse = await _supabase.from('bookings').insert({
-      'user_id': user.id,
-      'booking_reference': ref,
-      'total_amount': booking.totalPrice,
-      'status': 'Confirmed',
-      'customer_category': customerCategory == 'KRP Student' ? 'krp' : 'non_krp',
-      'booking_source': 'online',
-      'admin_note': bookingDataString, 
-    }).select().single();
-
-    final bookingId = bookingResponse['id'];
-
-    // Insert into public.booking_items 
-    for (var timeSlot in booking.timeSlots) {
-      await _supabase.from('booking_items').insert({
-        'booking_id': bookingId,
-        'price': booking.pricePerSession,
-        'status': 'Confirmed',
-      });
+  Future<Map<String, dynamic>> reserveCart(
+    List<Booking> cart, {
+    required String requestId,
+  }) async {
+    if (_supabase.auth.currentUser == null) {
+      throw StateError('Sign in to reserve a slot.');
     }
-
-    return bookingResponse;
+    final items = cart
+        .map(
+          (b) => {
+            'facility_name': b.facilityName.toString(),
+            'date': _date(b.date),
+            'start_times': List<String>.from(b.timeSlots as List)
+                .map(_databaseTime)
+                .toList(),
+          },
+        )
+        .toList();
+    final result = await _supabase.rpc(
+      'reserve_cart',
+      params: {
+        'p_request_id': requestId,
+        'p_items': items,
+        'p_expected_total': cart.fold<num>(
+          0,
+          (sum, b) => sum + (b.totalPrice as num),
+        ),
+      },
+    );
+    return Map<String, dynamic>.from(result as Map);
   }
 
-  // 3. Process payment and update status
-  confirmPayment(String bookingId, num amount, String method) async {
-    await _supabase.from('payments').insert({
-      'booking_id': bookingId,
-      'amount': amount,
-      'payment_method': method == 'E-Wallet' ? 'touch_n_go_ewallet' : 'fpx',
-      'status': 'successful',
-      'paid_at': DateTime.now().toIso8601String(),
-    });
-
-    await _supabase.from('bookings').update({'status': 'Confirmed'}).eq('id', bookingId);
+  // Kept fail-closed for older screens: clients cannot attest that money arrived.
+  Future<void> confirmPayment(
+    String bookingId,
+    num amount,
+    String method,
+  ) async {
+    throw StateError(
+      'Payment confirmation requires the verified server gateway.',
+    );
   }
 
-  // 4. Fetch the logged-in user's bookings
-  getUserBookings() async {
+  Future<List<Booking>> getUserBookings() async {
     final user = _supabase.auth.currentUser;
     if (user == null) return [];
-
     final response = await _supabase
         .from('bookings')
-        .select()
+        .select(
+          '*, booking_items(price,status,time_slots(slot_date,start_time,facilities(name)))',
+        )
         .eq('user_id', user.id)
         .order('created_at', ascending: false);
-
     return _unpackBookings(response);
   }
 
-  // 5. Fetch ALL bookings for a specific date to check live availability
+  // No other user's order, identity or payment details are fetched for browsing.
   Future<List<Booking>> getBookingsForDate(DateTime date) async {
-    final response = await _supabase
-        .from('bookings')
-        .select()
-        .neq('status', 'Cancelled')
-        .neq('status', 'Rejected'); // Ignore cancelled bookings
-
-    final allBookings = _unpackBookings(response);
-    
-    // Filter to only return bookings that overlap with the selected day
-    return allBookings.where((b) => b.date.year == date.year && b.date.month == date.month && b.date.day == date.day).toList();
+    final response = await _supabase.rpc(
+      'slot_availability',
+      params: {'p_date': _date(date)},
+    );
+    return (response as List)
+        .where((r) => r['status'] != 'available')
+        .map(
+          (r) => Booking(
+            id: '${r['facility_name']}:${r['start_time']}',
+            userId: '',
+            facilityName: _displayFacility(r['facility_name'].toString()),
+            date: DateTime.parse(r['slot_date'].toString()),
+            timeSlots: [_displayTime(r['start_time'].toString())],
+            pricePerSession: 0,
+            totalPrice: 0,
+            status: r['status'],
+          ),
+        )
+        .toList();
   }
+
+  static String _date(DateTime date) =>
+      '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+
+  static String _databaseTime(String value) {
+    final match = RegExp(r'^(\d{1,2}):(\d{2}) (AM|PM)$')
+        .firstMatch(value.trim());
+    if (match == null) throw FormatException('Invalid start time', value);
+    final hour = int.parse(match[1]!) % 12 + (match[3] == 'PM' ? 12 : 0);
+    return '${hour.toString().padLeft(2, '0')}:${match[2]}:00';
+  }
+
+  static String _displayTime(String value) {
+    final parts = value.split(':');
+    final hour = int.parse(parts.first);
+    return '${hour % 12 == 0 ? 12 : hour % 12}:${parts[1]} ${hour < 12 ? 'AM' : 'PM'}';
+  }
+
+  static String _displayFacility(String value) => value.replaceFirstMapped(
+    RegExp(r' (\d+)$'),
+    (m) => ' ${m[1]!.padLeft(2, '0')}',
+  );
 
   // 🌟 6. Create Report in Database
   Future<void> createReport({
@@ -94,7 +138,8 @@ class BookingService {
     if (user == null) throw Exception('Must be logged in');
 
     final title = description.split(RegExp(r'[.!?\n]')).first.trim();
-    final ref = 'REP-${DateTime.now().millisecondsSinceEpoch.toString().substring(5)}';
+    final ref =
+        'REP-${DateTime.now().millisecondsSinceEpoch.toString().substring(5)}';
 
     // Map UI Category to Database Strict Format Constraint
     String dbCategory = 'other';
@@ -118,44 +163,92 @@ class BookingService {
   Future<List<dynamic>> getUserReports() async {
     final user = _supabase.auth.currentUser;
     if (user == null) return [];
-    
+
     final response = await _supabase
         .from('reports')
         .select()
         .eq('user_id', user.id)
         .order('created_at', ascending: false);
-        
+
     return response;
   }
 
-  // Helper method to unpack the prototype admin_note data
+  // New orders use real slot joins. Legacy notes are read-only compatibility.
   List<Booking> _unpackBookings(List<dynamic> response) {
-    List<Booking> results = [];
-    for (var row in response) {
-      String facility = 'Sports Facility';
-      DateTime date = DateTime.parse(row['created_at']);
-      List<String> times = ['12:00 AM - 1:00 AM'];
-
-      if (row['admin_note'] != null && row['admin_note'].toString().contains('|')) {
-        final parts = row['admin_note'].toString().split('|');
-        if (parts.length >= 3) {
-          facility = parts[0];
-          date = DateTime.parse(parts[1]);
-          times = parts[2].split(',');
-        }
+    final results = <Booking>[];
+    for (final row in response) {
+      var status = row['status'].toString().toLowerCase();
+      final deadline = DateTime.tryParse(
+        row['payment_deadline']?.toString() ?? '',
+      );
+      if (status == 'pending_payment' &&
+          deadline != null &&
+          !deadline.isAfter(DateTime.now())) {
+        status = 'expired';
       }
-
-      results.add(Booking(
-        id: row['id'],
-        reference: row['booking_reference'] ?? 'REF-ERR',
-        userId: row['user_id'],
-        facilityName: facility,
-        date: date,
-        timeSlots: times,
-        pricePerSession: 0,
-        totalPrice: row['total_amount'],
-        status: row['status'] == 'Confirmed' ? 'Paid & Confirmed' : row['status'],
-      ));
+      final label = switch (status) {
+        'confirmed' => 'Paid & Confirmed',
+        'pending_payment' => 'Reserved - awaiting payment',
+        'expired' => 'Expired - unpaid',
+        _ => status,
+      };
+      final groups = <String, List<Map<String, dynamic>>>{};
+      for (final raw in (row['booking_items'] as List? ?? [])) {
+        final item = Map<String, dynamic>.from(raw as Map);
+        final slot = item['time_slots'] as Map?;
+        if (slot == null) continue;
+        final facility =
+            (slot['facilities'] as Map?)?['name']?.toString() ??
+            'Sports Facility';
+        final key = '$facility|${slot['slot_date']}';
+        groups.putIfAbsent(key, () => []).add(item);
+      }
+      for (final entry in groups.entries) {
+        final first = entry.value.first['time_slots'] as Map;
+        final times =
+            entry.value
+                .map((i) => (i['time_slots'] as Map)['start_time'].toString())
+                .toList()
+              ..sort();
+        results.add(
+          Booking(
+            id: row['id'],
+            reference: row['booking_reference'],
+            userId: row['user_id'],
+            facilityName: _displayFacility(
+              (first['facilities'] as Map)['name'].toString(),
+            ),
+            date: DateTime.parse(first['slot_date'].toString()),
+            timeSlots: times.map(_displayTime).toList(),
+            pricePerSession: entry.value.first['price'],
+            totalPrice: entry.value.fold<num>(
+              0,
+              (sum, i) => sum + (i['price'] as num),
+            ),
+            status: label,
+          ),
+        );
+      }
+      if (groups.isEmpty) {
+        final parts = row['admin_note']?.toString().split('|') ?? <String>[];
+        results.add(
+          Booking(
+            id: row['id'],
+            reference: row['booking_reference'],
+            userId: row['user_id'],
+            facilityName: parts.length >= 3
+                ? parts[0]
+                : 'Legacy booking - review required',
+            date: parts.length >= 3
+                ? DateTime.parse(parts[1])
+                : DateTime.parse(row['created_at'].toString()),
+            timeSlots: parts.length >= 3 ? parts[2].split(',') : <String>[],
+            pricePerSession: 0,
+            totalPrice: row['total_amount'],
+            status: label,
+          ),
+        );
+      }
     }
     return results;
   }

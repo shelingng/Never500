@@ -1,0 +1,7 @@
+{
+  "name": "never500-checkout-tests",
+  "private": true,
+  "type": "module",
+  "scripts": { "test": "node checkout.test.mjs" },
+  "devDependencies": { "pg": "8.23.1" }
+}
