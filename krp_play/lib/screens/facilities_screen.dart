@@ -1,4 +1,8 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+
 import '../models/booking.dart';
 import '../services/booking_service.dart';
 
@@ -6,12 +10,14 @@ class FacilitiesScreen extends StatefulWidget {
   final String category;
   final String email;
   final String studentName;
+  final BookingService? bookingService;
 
   const FacilitiesScreen({
     super.key,
     required this.category,
     required this.email,
     this.studentName = 'Yu Xiang',
+    this.bookingService,
   });
 
   @override
@@ -19,6 +25,49 @@ class FacilitiesScreen extends StatefulWidget {
 }
 
 class _FacilitiesScreenState extends State<FacilitiesScreen> {
+  late final BookingService _bookingService =
+      widget.bookingService ?? BookingService();
+  Timer? _holdTimer;
+  bool _holdExpired = false;
+  List<Map<String, dynamic>> _facilities = [];
+  bool _loadingPrices = true;
+  bool _priceLoadFailed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadPrices();
+  }
+
+  Future<void> _loadPrices() async {
+    setState(() {
+      _loadingPrices = true;
+      _priceLoadFailed = false;
+    });
+    try {
+      final rows = await _bookingService.getFacilities();
+      if (!mounted) return;
+      setState(() {
+        _facilities = (rows as List)
+            .map((r) => Map<String, dynamic>.from(r as Map))
+            .toList();
+        _loadingPrices = false;
+      });
+    } catch (_) {
+      if (mounted)
+        setState(() {
+          _loadingPrices = false;
+          _priceLoadFailed = true;
+        });
+    }
+  }
+
+  @override
+  void dispose() {
+    _holdTimer?.cancel();
+    super.dispose();
+  }
+
   int currentStep = 1;
 
   final Color primaryGreen = const Color(0xFF103B2B);
@@ -32,8 +81,14 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
   int selectedDurationHours = 1;
   final List<Booking> cartItems = [];
 
-  bool paymentCompleted = false;
-  String generatedBookingRef = 'DEMO-KRP-001';
+  bool reservationCreated = false;
+  bool _isReserving = false;
+  String? _checkoutRequestId;
+  DateTime? _holdDeadline;
+  num? _reservedTotal;
+  String? _availabilityError;
+  int _availabilityRequest = 0;
+  String generatedBookingRef = '';
   String selectedPaymentMethod = '';
   String? selectedBank;
 
@@ -129,45 +184,50 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
     if (cartItems.any(
       (item) =>
           item.facilityName == facilityName &&
-          item.date.day == selectedDate.day &&
+          DateUtils.isSameDay(item.date, selectedDate) &&
           item.timeSlots.any((slot) => requestedSlots.contains(slot)),
     )) {
       return 'In Cart';
     }
 
-    // 2. Is it actively booked in Supabase?
-    if (_dayBookings.any(
-      (booking) =>
-          booking.facilityName == facilityName &&
-          booking.timeSlots.any((slot) => requestedSlots.contains(slot)),
-    )) {
-      return 'Booked';
+    if (_availabilityError != null) return 'Unavailable';
+    for (final booking in _dayBookings) {
+      if (booking.facilityName == facilityName &&
+          booking.timeSlots.any((slot) => requestedSlots.contains(slot))) {
+        return switch (booking.status) {
+          'reserved' => 'Reserved',
+          'closed' => 'Closed by management',
+          'past' => 'Session ended',
+          _ => 'Booked',
+        };
+      }
     }
-
-    // 3. Simulated Management Lock (For Demo purposes: Badminton Court 02 on Weekends at 10AM is locked by Admin)
-    if (facilityName == 'Badminton Court 02' &&
-        requestedSlots.contains('10:00 AM') &&
-        availableStartTimes == _weekendStartTimes) {
-      return 'Management lock';
-    }
-
     return 'Available';
   }
 
   // 🌟 Fetch Live Bookings From Supabase
   Future<void> _fetchAvailability() async {
-    setState(() => _isLoadingAvailability = true);
+    final request = ++_availabilityRequest;
+    final date = selectedDate;
+    setState(() {
+      _isLoadingAvailability = true;
+      _availabilityError = null;
+    });
     try {
-      final bookings = await BookingService().getBookingsForDate(selectedDate);
-      if (mounted) {
-        setState(() {
-          _dayBookings = bookings;
-          _isLoadingAvailability = false;
-          _autoSelectFirstAvailableCourt();
-        });
-      }
-    } catch (e) {
-      if (mounted) setState(() => _isLoadingAvailability = false);
+      final bookings = await _bookingService.getBookingsForDate(date);
+      if (!mounted || request != _availabilityRequest) return;
+      setState(() {
+        _dayBookings = bookings;
+        _isLoadingAvailability = false;
+        _autoSelectFirstAvailableCourt();
+      });
+    } catch (_) {
+      if (!mounted || request != _availabilityRequest) return;
+      setState(() {
+        _isLoadingAvailability = false;
+        _availabilityError = 'Availability could not be loaded. Please retry.';
+        _dayBookings = [];
+      });
     }
   }
 
@@ -208,23 +268,31 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
     return hour * 60 + minute;
   }
 
-  int _rateForSport(String sport) {
-    if (widget.category == 'KRP Student') {
-      if (sport == 'Badminton') return 6;
-      if (sport == 'Ping Pong') return 4;
-      if (sport == 'Snooker') return 10;
-      if (sport == 'Dart') return 3;
-      return 6;
-    } else {
-      if (sport == 'Badminton') return 8;
-      if (sport == 'Ping Pong') return 6;
-      if (sport == 'Snooker') return 12;
-      if (sport == 'Dart') return 5;
-      return 8;
-    }
+  num _rateForSport(String sport) {
+    final rows = _facilities.where(
+      (f) => f['name'].toString().startsWith('$sport '),
+    );
+    if (rows.isEmpty) return 0;
+    return _priceFor(rows.first);
   }
 
-  num get ratePerHour => _rateForSport(selectedSport);
+  num _priceFor(Map<String, dynamic> facility) {
+    final category = widget.category.trim().toLowerCase();
+    return facility[category == 'krp' || category == 'krp student'
+            ? 'krp_price'
+            : 'non_krp_price']
+        as num;
+  }
+
+  num get ratePerHour {
+    final name = _selectedFacilityName.replaceFirstMapped(
+      RegExp(r' 0+(\d+)$'),
+      (m) => ' ${m[1]}',
+    );
+    final rows = _facilities.where((f) => f['name'] == name);
+    return rows.isEmpty ? _rateForSport(selectedSport) : _priceFor(rows.first);
+  }
+
   num get totalAmount => ratePerHour * selectedDurationHours;
   num get cartTotal =>
       cartItems.fold(0.0, (total, item) => total + (item.totalPrice as num));
@@ -254,7 +322,8 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_ios_new, size: 18),
           onPressed: () {
-            if (currentStep > 1 && !paymentCompleted) {
+            if (_isReserving) return;
+            if (currentStep > 1 && !reservationCreated) {
               setState(() => currentStep -= 1);
             } else {
               Navigator.of(context).pop();
@@ -344,6 +413,12 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
                   style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
                 ),
                 const SizedBox(height: 24),
+                if (_loadingPrices) const LinearProgressIndicator(),
+                if (_priceLoadFailed)
+                  TextButton(
+                    onPressed: _loadPrices,
+                    child: const Text('Prices could not be loaded. Retry'),
+                  ),
                 _sportCard(title: 'Badminton', sport: 'Badminton'),
                 const SizedBox(height: 10),
                 _sportCard(title: 'Ping Pong', sport: 'Ping Pong'),
@@ -366,14 +441,21 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
 
   Widget _sportCard({required String title, required String sport}) {
     return InkWell(
-      onTap: () {
-        setState(() {
-          selectedSport = sport;
-          selectedCourt = _currentCourts.first;
-          currentStep = 2;
-        });
-        _fetchAvailability(); // 🌟 Fetch live DB bookings for this day
-      },
+      onTap:
+          _loadingPrices ||
+              _priceLoadFailed ||
+              !_facilities.any(
+                (f) => f['name'].toString().startsWith('$sport '),
+              )
+          ? null
+          : () {
+              setState(() {
+                selectedSport = sport;
+                selectedCourt = _currentCourts.first;
+                currentStep = 2;
+              });
+              _fetchAvailability(); // 🌟 Fetch live DB bookings for this day
+            },
       borderRadius: BorderRadius.circular(12),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
@@ -408,7 +490,7 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    'RM${_rateForSport(sport)}.00 / hour',
+                    'RM${_rateForSport(sport).toStringAsFixed(2)} / hour',
                     style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
                   ),
                 ],
@@ -512,7 +594,7 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
                 ),
                 const SizedBox(height: 12),
                 Text(
-                  '$timeRangeString · RM$ratePerHour.00 per hour',
+                  '$timeRangeString · RM${ratePerHour.toStringAsFixed(2)} per hour',
                   style: const TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.bold,
@@ -521,7 +603,14 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
                 ),
                 const SizedBox(height: 20),
 
-                // 🌟 DYNAMIC COURTS ROW
+                if (_availabilityError != null)
+                  TextButton.icon(
+                    onPressed: _fetchAvailability,
+                    icon: const Icon(Icons.refresh),
+                    label: Text(_availabilityError!),
+                  ),
+                // Availability is advisory; the server rechecks on Pay.
+
                 if (_isLoadingAvailability)
                   const Padding(
                     padding: EdgeInsets.all(32.0),
@@ -553,7 +642,9 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
                           statusColor = const Color(0xFF2E7D32);
                           surfaceTint = const Color(0xFFF3FAF5);
                           isSelectable = true;
-                        } else if (status == 'Booked' || status == 'In Cart') {
+                        } else if (status == 'Booked' ||
+                            status == 'Reserved' ||
+                            status == 'In Cart') {
                           statusColor = const Color(0xFFD32F2F);
                           surfaceTint = const Color(0xFFFDF2F2);
                         } else {
@@ -607,7 +698,16 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
                         borderRadius: BorderRadius.circular(10),
                       ),
                     ),
-                    onPressed: _addSelectedToCart,
+                    onPressed:
+                        _isLoadingAvailability ||
+                            _availabilityError != null ||
+                            _getCourtStatus(
+                                  _selectedFacilityName,
+                                  requestedTimeSlots,
+                                ) !=
+                                'Available'
+                        ? null
+                        : _addSelectedToCart,
                     child: const Text(
                       'Add to cart',
                       style: TextStyle(
@@ -1010,6 +1110,7 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
     );
 
     setState(() {
+      _checkoutRequestId = null;
       cartItems.add(booking);
       currentStep = 1;
     });
@@ -1017,7 +1118,10 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
   }
 
   void _removeCartItem(Booking booking) {
-    setState(() => cartItems.removeWhere((item) => item.id == booking.id));
+    setState(() {
+      _checkoutRequestId = null;
+      cartItems.removeWhere((item) => item.id == booking.id);
+    });
   }
 
   void _showMessage(String message) {
@@ -1042,7 +1146,7 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                if (!paymentCompleted) ...[
+                if (!reservationCreated) ...[
                   Container(
                     width: double.infinity,
                     padding: const EdgeInsets.symmetric(
@@ -1163,9 +1267,11 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
                           borderRadius: BorderRadius.circular(10),
                         ),
                       ),
-                      onPressed: _canSubmitPayment ? _processDemoPayment : null,
-                      child: const Text(
-                        'Pay Now',
+                      onPressed: _canSubmitPayment && !_isReserving
+                          ? _reserveSelectedCart
+                          : null,
+                      child: Text(
+                        _isReserving ? 'Reserving...' : 'Pay Now',
                         style: TextStyle(
                           fontSize: 15,
                           fontWeight: FontWeight.bold,
@@ -1174,7 +1280,7 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
                     ),
                   ),
                 ],
-                if (paymentCompleted) ...[
+                if (reservationCreated) ...[
                   Container(
                     width: double.infinity,
                     padding: const EdgeInsets.all(16),
@@ -1189,13 +1295,13 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
                         const Row(
                           children: [
                             Icon(
-                              Icons.check,
+                              Icons.schedule,
                               size: 20,
                               color: Color(0xFF2E7D32),
                             ),
                             SizedBox(width: 8),
                             Text(
-                              'Booking confirmed',
+                              'Reservation status',
                               style: TextStyle(
                                 fontSize: 16,
                                 fontWeight: FontWeight.bold,
@@ -1206,6 +1312,11 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
                         ),
                         const SizedBox(height: 10),
                         Text(
+                          _holdExpired
+                              ? 'Expired - unpaid'
+                              : 'Reserved - awaiting payment',
+                        ),
+                        Text(
                           '$generatedBookingRef · ${cartItems.length} items',
                           style: const TextStyle(
                             fontWeight: FontWeight.bold,
@@ -1214,11 +1325,19 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
                         ),
                         const SizedBox(height: 2),
                         Text(
-                          'RM${cartTotal.toStringAsFixed(2)} · ${cartItems.first.date.day} ${monthNames[cartItems.first.date.month - 1]} ${cartItems.first.date.year}',
+                          'RM${(_reservedTotal ?? cartTotal).toStringAsFixed(2)}',
                           style: TextStyle(
                             fontSize: 13,
                             color: Colors.grey.shade700,
                           ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Hold expires: ${_holdDeadline?.toLocal().toString() ?? "See My Bookings"}',
+                        ),
+                        const SizedBox(height: 8),
+                        const Text(
+                          'Payments are temporarily unavailable. No payment has been taken. Your unpaid reservation expires automatically.',
                         ),
                         const SizedBox(height: 12),
                         InkWell(
@@ -1324,37 +1443,73 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
     );
   }
 
-  void _processDemoPayment() async {
-    final bookingService = BookingService();
+  Future<void> _reserveSelectedCart() async {
+    if (_isReserving || cartItems.isEmpty || reservationCreated) return;
+    setState(() => _isReserving = true);
+    // Keep this key on network errors: the server might have committed already.
+    final key = _checkoutRequestId ??= BookingService.newCheckoutRequestId();
     try {
-      for (final item in cartItems) {
-        final confirmedBooking = Booking(
-          id: item.id,
-          userId: item.userId,
-          facilityName: item.facilityName,
-          date: item.date,
-          timeSlots: item.timeSlots,
-          pricePerSession: item.pricePerSession,
-          participants: item.participants,
-          totalPrice: item.totalPrice,
-          status: 'Confirmed',
+      final response = await _bookingService.reserveCart(
+        cartItems,
+        requestId: key,
+      );
+      if (!mounted) return;
+      setState(() {
+        generatedBookingRef = response['reference'].toString();
+        _holdDeadline = DateTime.parse(response['payment_deadline'].toString());
+        _reservedTotal = response['total_amount'] as num;
+        reservationCreated = true;
+      });
+      _holdTimer?.cancel();
+      final remaining = _holdDeadline!.difference(DateTime.now());
+      _holdTimer = Timer(remaining.isNegative ? Duration.zero : remaining, () {
+        if (mounted) setState(() => _holdExpired = true);
+      });
+    } on PostgrestException catch (e) {
+      if (!mounted) return;
+      final conflict =
+          e.code == '23505' || e.message.contains('SLOT_UNAVAILABLE');
+      if (conflict) {
+        _checkoutRequestId = null;
+        _showMessage(
+          'A selected slot is reserved or booked. No payment was taken. Choose another time.',
         );
-        final response = await bookingService.createBooking(
-          confirmedBooking,
-          widget.category,
+        setState(() => currentStep = 2);
+        await _fetchAvailability();
+      } else if (e.message.contains('HOLD_EXPIRED')) {
+        _checkoutRequestId = null;
+        _showMessage(
+          'Your hold expired. Review availability before trying again.',
         );
-        await bookingService.confirmPayment(
-          response['id'],
-          confirmedBooking.totalPrice,
-          selectedPaymentMethod,
+        setState(() => currentStep = 2);
+        await _fetchAvailability();
+      } else if (e.message.contains('PRICE_CHANGED')) {
+        _checkoutRequestId = null;
+        await _loadPrices();
+        if (!mounted) return;
+        setState(() {
+          cartItems.clear();
+          currentStep = 1;
+        });
+        _showMessage(
+          'Prices have changed. Rebuild your cart with the updated prices before paying.',
+        );
+      } else if (e.code == 'PGRST202') {
+        _showMessage(
+          'Checkout is not configured yet. The reviewed database script must be deployed first.',
+        );
+      } else {
+        _showMessage(
+          'Could not reserve this cart. Check the session times and account category.',
         );
       }
-      setState(() {
-        generatedBookingRef = 'KRP-CONFIRMED';
-        paymentCompleted = true;
-      });
-    } catch (e) {
-      _showMessage('Error processing booking: $e');
+    } catch (_) {
+      if (mounted)
+        _showMessage(
+          'Connection interrupted. Retry Pay with the same cart to recover your reservation.',
+        );
+    } finally {
+      if (mounted) setState(() => _isReserving = false);
     }
   }
 
@@ -1502,12 +1657,12 @@ class _PrototypeCourtPainter extends CustomPainter {
     switch (sport) {
       case 'Ping Pong':
         // Table outline and centre markings.
-        const table = Rect.fromLTWH(35, 15, 170, 100);
+        const pingTable = Rect.fromLTWH(35, 15, 170, 100);
         canvas.drawRRect(
-          RRect.fromRectAndRadius(table, const Radius.circular(4)),
+          RRect.fromRectAndRadius(pingTable, const Radius.circular(4)),
           pen,
         );
-        canvas.drawRect(table.deflate(5), pen);
+        canvas.drawRect(pingTable.deflate(5), pen);
         canvas.drawLine(const Offset(40, 65), const Offset(200, 65), pen);
 
         // Net across the middle of the table.
@@ -1533,13 +1688,13 @@ class _PrototypeCourtPainter extends CustomPainter {
         break;
 
       case 'Snooker':
-        const table = Rect.fromLTWH(22, 16, 196, 98);
+        const snookerTable = Rect.fromLTWH(22, 16, 196, 98);
         canvas.drawRRect(
-          RRect.fromRectAndRadius(table, const Radius.circular(12)),
+          RRect.fromRectAndRadius(snookerTable, const Radius.circular(12)),
           pen..strokeWidth = 5,
         );
         pen.strokeWidth = 1.5;
-        canvas.drawRect(table.deflate(8), pen);
+        canvas.drawRect(snookerTable.deflate(8), pen);
 
         // Six pockets.
         for (final point in const [
@@ -1603,37 +1758,20 @@ class _PrototypeCourtPainter extends CustomPainter {
         break;
 
       default:
-        // Badminton court.
-        // Horizontal badminton court.
+        // Proportioned horizontal court with a vertical centre net.
         pen
           ..strokeWidth = 1.4
           ..strokeCap = StrokeCap.butt;
-
         const court = Rect.fromLTWH(18, 18, 204, 94);
-
-        // Outer boundary.
         canvas.drawRect(court, pen);
-
-        // Singles sidelines.
         for (final y in [25.0, 105.0]) {
           canvas.drawLine(Offset(18, y), Offset(222, y), pen);
         }
-
-        // Doubles long service lines.
-        for (final x in [29.0, 211.0]) {
+        for (final x in [29.0, 211.0, 90.0, 150.0]) {
           canvas.drawLine(Offset(x, 18), Offset(x, 112), pen);
         }
-
-        // Short service lines on either side of the net.
-        for (final x in [90.0, 150.0]) {
-          canvas.drawLine(Offset(x, 18), Offset(x, 112), pen);
-        }
-
-        // Centre service lines.
         canvas.drawLine(const Offset(18, 65), const Offset(90, 65), pen);
         canvas.drawLine(const Offset(150, 65), const Offset(222, 65), pen);
-
-        // Centre net and small posts.
         canvas.drawLine(
           const Offset(120, 15),
           const Offset(120, 115),

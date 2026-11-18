@@ -13,6 +13,13 @@ app.use(express.urlencoded({ extended: true }));
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 
+// Checkout reservation is implemented in database/atomic_checkout.sql.
+// This draft gateway trusted client amounts and unsigned callbacks. Until a
+// verified adapter is integrated, do not create bills or mark orders paid.
+app.use(['/api/create-payment', '/api/webhook'], (_req, res) => {
+    res.status(503).json({ error: 'Verified payment integration is not configured. No payment was processed.' });
+});
+
 // SCRUM-17: Generate Payment Link and Insert into DB
 app.post('/api/create-payment', async (req, res) => {
     try {
