@@ -41,10 +41,10 @@ class _FacilityInfoScreenState extends State<FacilityInfoScreen> {
 
   int _selectedTab = 0;
   int _currentCarouselIndex = 0;
-  
+
   // 🌟 1. Added Refresh Key for Real-Time Updates
-  int _refreshKey = 0; 
-  
+  int _refreshKey = 0;
+
   final PageController _pageController = PageController();
   Timer? _hoursRefreshTimer;
 
@@ -337,11 +337,12 @@ class _FacilityInfoScreenState extends State<FacilityInfoScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              DrawerHeader(
+              Container(
+                padding: const EdgeInsets.all(16),
                 decoration: const BoxDecoration(color: Color(0xFF23433A)),
                 child: Column(
+                  mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisAlignment: MainAxisAlignment.end,
                   children: [
                     Row(
                       children: [
@@ -716,7 +717,7 @@ class _FacilityInfoScreenState extends State<FacilityInfoScreen> {
   // 🌟 2. Attach the dynamic refresh key to perfectly refresh real-time data!
   Widget _studentSection(String sectionKey, int initialTab) {
     final profile = ProfileScreen(
-      key: ValueKey('$sectionKey-$_refreshKey'), 
+      key: ValueKey('$sectionKey-$_refreshKey'),
       email: widget.email,
       fullName: widget.studentName,
       contact: widget.contact,
@@ -773,7 +774,7 @@ class _FacilityInfoScreenState extends State<FacilityInfoScreen> {
     );
     if (!mounted) return;
     setState(() {
-      _refreshKey++; 
+      _refreshKey++;
     });
   }
 
