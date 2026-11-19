@@ -7,7 +7,18 @@
       "type": "dart",
       "cwd": "krp_play",
       "program": "krp_play/lib/main.dart"
+    },
+    {
+      "name": "KRP PLAY - Chrome + Billplz",
+      "request": "launch",
+      "type": "dart",
+      "cwd": "krp_play",
+      "program": "krp_play/lib/main.dart",
+      "deviceId": "chrome",
+      "args": [
+        "--no-web-resources-cdn",
+        "--dart-define=PAYMENT_BACKEND_URL=http://localhost:3000"
+      ]
     }
   ]
 }
-

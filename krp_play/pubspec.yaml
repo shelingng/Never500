@@ -37,6 +37,7 @@ dependencies:
   supabase_flutter: ^2.18.3
   file_picker: 13.3.2
   url_launcher: ^6.3.3
+  http: ^1.6.0
 
 dev_dependencies:
   flutter_test:

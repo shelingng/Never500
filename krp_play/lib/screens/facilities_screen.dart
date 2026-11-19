@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../models/booking.dart';
 import '../services/booking_service.dart';
@@ -75,6 +76,11 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
   bool _isReserving = false;
   String? _checkoutRequestId;
   num? _reservedTotal;
+  // Billplz flow: set once the bill exists and the user must pay on Billplz.
+  String? _pendingBookingId;
+  String? _paymentUrl;
+  bool _checkingPayment = false;
+  bool _paidViaBillplz = false;
   String? _availabilityError;
   int _availabilityRequest = 0;
   String generatedBookingRef = '';
@@ -312,7 +318,7 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
           icon: const Icon(Icons.arrow_back_ios_new, size: 18),
           onPressed: () {
             if (_isReserving) return;
-            if (currentStep > 1 && !reservationCreated) {
+            if (currentStep > 1 && !reservationCreated && _paymentUrl == null) {
               setState(() => currentStep -= 1);
             } else {
               Navigator.of(context).pop();
@@ -1147,10 +1153,14 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
                       borderRadius: BorderRadius.circular(12),
                       border: Border.all(color: subtleBorder),
                     ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    child: Wrap(
+                      alignment: WrapAlignment.spaceBetween,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      spacing: 12,
+                      runSpacing: 6,
                       children: [
                         Column(
+                          mainAxisSize: MainAxisSize.min,
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
@@ -1183,6 +1193,15 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
                     ),
                   ),
                   const SizedBox(height: 20),
+                  if (_bookingService.usesRealPayment && _paymentUrl != null)
+                    _buildAwaitingPaymentPanel()
+                  else if (_bookingService.usesRealPayment) ...[
+                    const Text(
+                      'You will be taken to Billplz to pay securely with FPX online banking or an e-wallet.',
+                    ),
+                    const SizedBox(height: 20),
+                    _buildPayNowButton(),
+                  ] else ...[
                   const Text('Prototype demo: Pay Now simulates payment. No money is charged.'),
                   const SizedBox(height: 12),
                   const Text(
@@ -1247,29 +1266,8 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
                     ),
                   ),
                   const SizedBox(height: 20),
-                  SizedBox(
-                    width: double.infinity,
-                    height: 50,
-                    child: ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: primaryGreen,
-                        foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                      ),
-                      onPressed: _canSubmitPayment && !_isReserving
-                          ? _reserveSelectedCart
-                          : null,
-                      child: Text(
-                        _isReserving ? 'Processing...' : 'Pay Now',
-                        style: TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                  ),
+                  _buildPayNowButton(),
+                  ],
                 ],
                 if (reservationCreated) ...[
                   Container(
@@ -1302,7 +1300,11 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
                           ],
                         ),
                         const SizedBox(height: 10),
-                        const Text('Demo payment successful - booking confirmed'),
+                        Text(
+                          _paidViaBillplz
+                              ? 'Payment received - booking confirmed'
+                              : 'Demo payment successful - booking confirmed',
+                        ),
                         Text(
                           '$generatedBookingRef · ${cartItems.length} items',
                           style: const TextStyle(
@@ -1319,7 +1321,11 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
                           ),
                         ),
                         const SizedBox(height: 8),
-                        const Text('Demo only. No money was charged.'),
+                        Text(
+                          _paidViaBillplz
+                              ? 'Paid via Billplz.'
+                              : 'Demo only. No money was charged.',
+                        ),
                         const SizedBox(height: 12),
                         InkWell(
                           onTap: () => Navigator.of(context).pop(),
@@ -1344,9 +1350,152 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
     );
   }
 
+  // With Billplz, the bank or e-wallet is chosen on the Billplz page.
   bool get _canSubmitPayment =>
+      _bookingService.usesRealPayment ||
       selectedPaymentMethod == 'E-Wallet' ||
       (selectedPaymentMethod == 'FPX' && selectedBank != null);
+
+  Widget _buildPayNowButton() {
+    return SizedBox(
+      width: double.infinity,
+      height: 50,
+      child: ElevatedButton(
+        style: ElevatedButton.styleFrom(
+          backgroundColor: primaryGreen,
+          foregroundColor: Colors.white,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+          ),
+        ),
+        onPressed: _canSubmitPayment && !_isReserving
+            ? _reserveSelectedCart
+            : null,
+        child: Text(
+          _isReserving ? 'Processing...' : 'Pay Now',
+          style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAwaitingPaymentPanel() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFF8E6),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFF1D48A)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Slots reserved - complete your payment',
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            '$generatedBookingRef · RM${(_reservedTotal ?? cartTotal).toStringAsFixed(2)}',
+            style: const TextStyle(fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            'Pay on the Billplz page within 10 minutes, then come back here and check the status.',
+          ),
+          const SizedBox(height: 14),
+          SizedBox(
+            width: double.infinity,
+            height: 46,
+            child: ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: primaryGreen,
+                foregroundColor: Colors.white,
+              ),
+              icon: const Icon(Icons.open_in_new, size: 18),
+              label: const Text('Open Billplz payment page'),
+              onPressed: _openPaymentPage,
+            ),
+          ),
+          const SizedBox(height: 8),
+          SizedBox(
+            width: double.infinity,
+            height: 46,
+            child: OutlinedButton(
+              onPressed: _checkingPayment ? null : _checkPaymentStatus,
+              child: Text(
+                _checkingPayment ? 'Checking...' : "I've paid - check status",
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Opened from a button tap so the browser does not block the new tab.
+  Future<void> _openPaymentPage() async {
+    final url = _paymentUrl;
+    if (url == null) return;
+    final opened = await launchUrl(
+      Uri.parse(url),
+      mode: LaunchMode.externalApplication,
+      webOnlyWindowName: '_blank',
+    );
+    if (!opened && mounted) {
+      _showMessage('Could not open the payment page. Allow pop-ups and try again.');
+    }
+  }
+
+  Future<void> _checkPaymentStatus() async {
+    final bookingId = _pendingBookingId;
+    if (bookingId == null || _checkingPayment) return;
+    setState(() => _checkingPayment = true);
+    try {
+      final result = await _bookingService.getPaymentStatus(bookingId);
+      if (!mounted) return;
+      final status = result['bookingStatus'];
+      final lastAttempt = result['lastAttempt'];
+      final deadline = DateTime.tryParse(
+        result['paymentDeadline']?.toString() ?? '',
+      );
+      final holdExpired =
+          deadline != null && !deadline.isAfter(DateTime.now());
+
+      if (status == 'confirmed') {
+        setState(() {
+          _paidViaBillplz = true;
+          reservationCreated = true;
+          _paymentUrl = null;
+        });
+      } else if (status == 'expired' || holdExpired) {
+        _showMessage(
+          lastAttempt == 'completed'
+              ? 'Payment arrived after your hold expired. Submit a Payment Issue report for a refund.'
+              : 'Your 10-minute hold expired. Go back and book again.',
+        );
+      } else if (lastAttempt == 'failed') {
+        _showMessage(
+          'Payment failed. No money was taken. Tap "Open Billplz payment page" to try again.',
+        );
+      } else if (lastAttempt == 'completed') {
+        _showMessage(
+          'Payment received. Confirming your booking - check again in a few seconds.',
+        );
+      } else {
+        _showMessage(
+          'Payment not received yet. Complete it on the Billplz page, then check again.',
+        );
+      }
+    } on PaymentException catch (e) {
+      if (mounted) _showMessage(e.message);
+    } catch (_) {
+      if (mounted) _showMessage('Could not check the payment status. Try again.');
+    } finally {
+      if (mounted) setState(() => _checkingPayment = false);
+    }
+  }
 
   Widget _buildPaymentMethodOption({
     required String title,
@@ -1430,6 +1579,33 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
     // Keep this key on network errors: the server might have committed already.
     final key = _checkoutRequestId ??= BookingService.newCheckoutRequestId();
     try {
+      if (_bookingService.usesRealPayment) {
+        // 1. Hold the slots (pending_payment, 10 minutes). Same key = same booking.
+        final booking = await _bookingService.reserveCart(
+          cartItems,
+          requestId: key,
+        );
+        if (!mounted) return;
+        setState(() {
+          _pendingBookingId = booking['id'].toString();
+          generatedBookingRef = booking['reference'].toString();
+          _reservedTotal = booking['total_amount'] as num;
+        });
+        if (booking['status'] == 'confirmed') {
+          setState(() {
+            _paidViaBillplz = true;
+            reservationCreated = true;
+          });
+          return;
+        }
+        // 2. The backend creates the Billplz bill using the database amount.
+        final url = await _bookingService.createBillplzPayment(
+          _pendingBookingId!,
+        );
+        if (!mounted) return;
+        setState(() => _paymentUrl = url);
+        return;
+      }
       final response = await _bookingService.demoPayCart(
         cartItems,
         requestId: key,
@@ -1482,6 +1658,9 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
           'Could not reserve this cart. Check the session times and account category.',
         );
       }
+    } on PaymentException catch (e) {
+      // Slots stay reserved; retrying reuses the same booking and bill.
+      if (mounted) _showMessage(e.message);
     } catch (_) {
       if (mounted)
         _showMessage(
