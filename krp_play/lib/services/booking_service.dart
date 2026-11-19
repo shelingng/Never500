@@ -1,11 +1,103 @@
+import 'dart:convert';
 import 'dart:math';
 
+import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/booking.dart';
 
+class PaymentException implements Exception {
+  final String message;
+  const PaymentException(this.message);
+  @override
+  String toString() => message;
+}
+
 class BookingService {
   SupabaseClient get _supabase => Supabase.instance.client;
+
+  // Payment backend (krp_play/backend). Set at run time, e.g.
+  // flutter run -d chrome --dart-define=PAYMENT_BACKEND_URL=https://xxxx-3000.asse.devtunnels.ms
+  // When empty, checkout falls back to the clearly labelled demo payment.
+  static const String paymentBackendUrl = String.fromEnvironment(
+    'PAYMENT_BACKEND_URL',
+  );
+
+  bool get usesRealPayment => paymentBackendUrl.isNotEmpty;
+
+  // Asks the backend to create (or reuse) a Billplz bill for a reserved booking.
+  // The amount is taken from the database on the server, never from this app.
+  Future<String> createBillplzPayment(String bookingId) async {
+    final session = _supabase.auth.currentSession;
+    if (session == null) throw const PaymentException('Sign in to pay.');
+
+    final base = paymentBackendUrl.replaceFirst(RegExp(r'/+$'), '');
+    final http.Response response;
+    try {
+      response = await http
+          .post(
+            Uri.parse('$base/api/create-payment'),
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer ${session.accessToken}',
+            },
+            body: jsonEncode({'bookingId': bookingId}),
+          )
+          .timeout(const Duration(seconds: 30));
+    } catch (_) {
+      throw const PaymentException(
+        'Could not reach the payment server. Check that the backend and tunnel are running.',
+      );
+    }
+
+    Map<String, dynamic> body = {};
+    try {
+      body = Map<String, dynamic>.from(jsonDecode(response.body) as Map);
+    } catch (_) {}
+
+    if (response.statusCode != 200 || body['paymentUrl'] == null) {
+      throw PaymentException(
+        body['error']?.toString() ??
+            'Payment server error (${response.statusCode}).',
+      );
+    }
+    return body['paymentUrl'].toString();
+  }
+
+  // Returns {bookingStatus, paymentDeadline, lastAttempt}. bookingStatus is
+  // written by the verified webhook; lastAttempt is Billplz's latest attempt
+  // ('completed', 'failed', 'pending' or null if the user has not tried yet).
+  Future<Map<String, dynamic>> getPaymentStatus(String bookingId) async {
+    final session = _supabase.auth.currentSession;
+    if (session == null) throw const PaymentException('Sign in to pay.');
+
+    final base = paymentBackendUrl.replaceFirst(RegExp(r'/+$'), '');
+    final http.Response response;
+    try {
+      response = await http
+          .get(
+            Uri.parse('$base/api/payment-status/$bookingId'),
+            headers: {'Authorization': 'Bearer ${session.accessToken}'},
+          )
+          .timeout(const Duration(seconds: 30));
+    } catch (_) {
+      throw const PaymentException(
+        'Could not reach the payment server. Check that the backend is running.',
+      );
+    }
+
+    Map<String, dynamic> body = {};
+    try {
+      body = Map<String, dynamic>.from(jsonDecode(response.body) as Map);
+    } catch (_) {}
+    if (response.statusCode != 200) {
+      throw PaymentException(
+        body['error']?.toString() ??
+            'Payment server error (${response.statusCode}).',
+      );
+    }
+    return body;
+  }
 
   // 1. Fetch available facilities from public.facilities
   getFacilities() async {
