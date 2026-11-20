@@ -1,0 +1,56 @@
+name: Flutter checks
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: flutter-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  flutter-checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: krp_play
+        shell: bash
+    steps:
+      - name: Download repository
+        uses: actions/checkout@v4
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Record SDK versions
+        run: |
+          mkdir -p ci-results
+          flutter --version | tee ci-results/flutter-version.txt
+      - name: Install dependencies
+        run: flutter pub get
+      - name: Analyze code
+        id: analyze
+        run: |
+          set -o pipefail
+          flutter analyze --no-fatal-infos 2>&1 | tee ci-results/analyze.log
+      - name: Run full test suite
+        if: ${{ !cancelled() && steps.analyze.outcome != 'skipped' }}
+        run: |
+          set -o pipefail
+          flutter test --reporter expanded 2>&1 | tee ci-results/tests.log
+      - name: Save check results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: flutter-check-results
+          path: krp_play/ci-results/
+          if-no-files-found: warn
+          retention-days: 30
