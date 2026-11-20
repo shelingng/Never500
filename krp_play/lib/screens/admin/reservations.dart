@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 class AdminBookingsTab extends StatefulWidget {
   const AdminBookingsTab({super.key});
@@ -9,88 +10,79 @@ class AdminBookingsTab extends StatefulWidget {
 
 class _AdminBookingsTabState extends State<AdminBookingsTab> {
   static const _green = Color(0xFF173F32);
+  final supabase = Supabase.instance.client;
 
   final _searchController = TextEditingController();
-
   String _selectedCategory = 'All Categories';
   String _selectedStatus = 'All Statuses';
 
-  // Fictional UI examples only.
-  final _bookings = [
-    {
-      'ref': 'DEMO-1842',
-      'payId': 'DEMO-PAY-1842',
-      'name': 'Sample Student A',
-      'matric': 'DEMO-001',
-      'contact': 'Not provided',
-      'category': 'KRP Student',
-      'facility': 'Badminton Court 01',
-      'date': '14 Nov 2026',
-      'time': '8:00 PM–9:00 PM',
-      'price': 'RM 6.00',
-      'status': 'Confirmed',
-      'paymentStatus': 'Paid',
-    },
-    {
-      'ref': 'DEMO-1841',
-      'payId': 'DEMO-PAY-1841',
-      'name': 'Sample Student B',
-      'matric': 'DEMO-002',
-      'contact': 'Not provided',
-      'category': 'Non-KRP Student',
-      'facility': 'Ping Pong Table 02',
-      'date': '14 Nov 2026',
-      'time': '6:00 PM–7:00 PM',
-      'price': 'RM 6.00',
-      'status': 'Confirmed',
-      'paymentStatus': 'Paid',
-    },
-    {
-      'ref': 'DEMO-1840',
-      'payId': 'Not available',
-      'name': 'Sample Student C',
-      'matric': 'DEMO-003',
-      'contact': 'Not provided',
-      'category': 'KRP Student',
-      'facility': 'Snooker Table',
-      'date': '15 Nov 2026',
-      'time': '5:00 PM–6:00 PM',
-      'price': 'RM 10.00',
-      'status': 'Pending Payment',
-      'paymentStatus': 'Pending',
-    },
-    {
-      'ref': 'DEMO-1839',
-      'payId': 'DEMO-PAY-1839',
-      'name': 'Sample Student D',
-      'matric': 'DEMO-004',
-      'contact': 'Not provided',
-      'category': 'KRP Student',
-      'facility': 'Dart Board',
-      'date': '15 Nov 2026',
-      'time': '10:00 PM–11:00 PM',
-      'price': 'RM 3.00',
-      'status': 'Cancelled',
-      'paymentStatus': 'Refunded',
-    },
-  ];
+  bool _isLoading = true;
+  List _bookings = [];
 
-   get _filteredBookings {
+  @override
+  void initState() {
+    super.initState();
+    _fetchBookings();
+  }
+
+  Future<void> _fetchBookings() async {
+    setState(() => _isLoading = true);
+    try {
+      final response = await supabase
+    .from('bookings')
+    .select('*, profiles!booking_user_id_fkey(full_name, matric_number, phone_number, student_category)')
+    .order('created_at', ascending: false);
+
+      final mappedBookings = response.map((b) {
+        final p = b['profiles'] ?? {};
+        
+        // Robust amount formatting
+        final rawAmount = b['amount'];
+        int amount = 0;
+        if (rawAmount is num) amount = rawAmount.toInt();
+        else if (rawAmount is String) amount = double.tryParse(rawAmount)?.toInt() ?? 0;
+
+        return {
+          'id': b['id'],
+          'ref': '#KRP-${b['id'].toString().padLeft(4, '0')}',
+          'payId': 'PAY-${b['id']}', // Placeholder until a payments table exists
+          'name': p['full_name'] ?? 'Walk-in / Unknown',
+          'matric': p['matric_number'] ?? 'N/A',
+          'contact': p['phone_number'] ?? 'Not provided',
+          'category': p['student_category'] ?? 'Public',
+          'facility': b['facility_name'] ?? 'Unknown Facility',
+          'date': b['booking_date'] ?? '',
+          'time': b['start_time'] ?? '',
+          'price': 'RM $amount.00',
+          'status': b['status'] ?? 'Pending',
+          'paymentStatus': (b['status']?.toString().toLowerCase() == 'paid' || b['status']?.toString().toLowerCase() == 'confirmed') ? 'Paid' : 'Pending',
+        };
+      }).toList();
+
+      if (mounted) setState(() => _bookings = mappedBookings);
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error loading bookings: $e')));
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  get _filteredBookings {
     final query = _searchController.text.trim().toLowerCase();
 
     return _bookings.where((booking) {
-      final matchesCategory =
-          _selectedCategory == 'All Categories' || booking['category'] == _selectedCategory;
-
-      final matchesStatus =
-          _selectedStatus == 'All Statuses' || booking['status'] == _selectedStatus;
+      final matchesCategory = _selectedCategory == 'All Categories' || booking['category'] == _selectedCategory;
+      // Handle slight text variations between DB and UI filter
+      final statusMap = {'Paid': 'Confirmed', 'Pending': 'Pending Payment'};
+      final normalizedStatus = statusMap[booking['status']] ?? booking['status'];
+      final matchesStatus = _selectedStatus == 'All Statuses' || normalizedStatus == _selectedStatus || booking['status'] == _selectedStatus;
 
       final searchableText = [
-        booking['ref'] ?? '',
-        booking['payId'] ?? '',
-        booking['name'] ?? '',
-        booking['matric'] ?? '',
-        booking['facility'] ?? '',
+        booking['ref'],
+        booking['payId'],
+        booking['name'],
+        booking['matric'],
+        booking['facility'],
       ].join(' ').toLowerCase();
 
       return matchesCategory && matchesStatus && searchableText.contains(query);
@@ -112,36 +104,20 @@ class _AdminBookingsTabState extends State<AdminBookingsTab> {
   }
 
   Color _statusColor(String status) {
-    switch (status) {
-      case 'Confirmed':
-      case 'Paid':
-        return const Color(0xFF237346);
-      case 'Pending Payment':
-      case 'Pending':
-        return const Color(0xFF946000);
-      case 'Cancelled':
-      case 'Failed':
-        return const Color(0xFFB13D35);
-      case 'Refunded':
-        return const Color(0xFF6350A1);
-      default:
-        return Colors.blueGrey;
-    }
+    final s = status.toLowerCase();
+    if (s == 'confirmed' || s == 'paid') return const Color(0xFF237346);
+    if (s == 'pending payment' || s == 'pending') return const Color(0xFF946000);
+    if (s == 'cancelled' || s == 'failed') return const Color(0xFFB13D35);
+    if (s == 'refunded') return const Color(0xFF6350A1);
+    return Colors.blueGrey;
   }
 
   Widget _statusBadge(String status) {
     final color = _statusColor(status);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: color.withAlpha(22),
-        borderRadius: BorderRadius.circular(6),
-      ),
-      child: Text(
-        status,
-        style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.bold),
-        overflow: TextOverflow.ellipsis,
-      ),
+      decoration: BoxDecoration(color: color.withAlpha(22), borderRadius: BorderRadius.circular(6)),
+      child: Text(status, style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis),
     );
   }
 
@@ -151,24 +127,15 @@ class _AdminBookingsTabState extends State<AdminBookingsTab> {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Expanded(
-            flex: 2,
-            child: Text(label, style: const TextStyle(color: Colors.grey)),
-          ),
+          Expanded(flex: 2, child: Text(label, style: const TextStyle(color: Colors.grey))),
           const SizedBox(width: 12),
-          Expanded(
-            flex: 3,
-            child: Text(
-              value,
-              style: const TextStyle(fontWeight: FontWeight.w600),
-            ),
-          ),
+          Expanded(flex: 3, child: Text(value, style: const TextStyle(fontWeight: FontWeight.w600))),
         ],
       ),
     );
   }
 
-  void _showDetails(Map<String, String> booking) {
+  void _showDetails(Map<String, dynamic> booking) {
     showDialog<void>(
       context: context,
       builder: (dialogContext) => AlertDialog(
@@ -199,28 +166,12 @@ class _AdminBookingsTabState extends State<AdminBookingsTab> {
                 const SizedBox(height: 8),
                 _detailRow('Payment status', booking['paymentStatus']!),
                 _detailRow('Payment reference', booking['payId']!),
-                const SizedBox(height: 16),
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFF0F4F1),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: const Text(
-                    'Refund requests and decisions are handled in Refund Management. '
-                    'These demo records are not yet synchronised between pages.',
-                    style: TextStyle(fontSize: 12, color: _green),
-                  ),
-                ),
               ],
             ),
           ),
         ),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Close'),
-          ),
+          TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Close')),
         ],
       ),
     );
@@ -235,49 +186,37 @@ class _AdminBookingsTabState extends State<AdminBookingsTab> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'ADMIN BOOKING RECORDS',
-            style: TextStyle(color: _green, fontWeight: FontWeight.bold, fontSize: 12, letterSpacing: 1.5),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: const [
+                  Text('ADMIN BOOKING RECORDS', style: TextStyle(color: _green, fontWeight: FontWeight.bold, fontSize: 12, letterSpacing: 1.5)),
+                  SizedBox(height: 8),
+                  Text('Reservations', style: TextStyle(fontSize: 28, fontWeight: FontWeight.w900, color: _green)),
+                ],
+              ),
+              IconButton(
+                icon: const Icon(Icons.refresh, color: _green),
+                onPressed: _fetchBookings,
+                tooltip: 'Refresh database',
+              )
+            ],
           ),
           const SizedBox(height: 8),
-          const Text(
-            'Reservations',
-            style: TextStyle(fontSize: 28, fontWeight: FontWeight.w900, color: _green),
-          ),
-          const SizedBox(height: 8),
-          const Text(
-            'Search reservations and view booking and payment information.',
-            style: TextStyle(color: Colors.grey, fontSize: 14),
-          ),
+          const Text('Search reservations and view live booking and payment information.', style: TextStyle(color: Colors.grey, fontSize: 14)),
           const SizedBox(height: 24),
           
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(color: const Color(0xFFFFF4D6), borderRadius: BorderRadius.circular(12)),
-            child: const Text(
-              'Demo data — these records are not connected to student bookings or Supabase.',
-              style: TextStyle(color: Color(0xFF705500)),
-            ),
-          ),
-          const SizedBox(height: 24),
-          
-          // Responsive Search & Filter Block
           LayoutBuilder(
             builder: (context, constraints) {
               final isMobile = constraints.maxWidth < 800;
-              
               if (isMobile) {
                 return Column(
                   children: [
                     TextField(
                       controller: _searchController,
-                      decoration: InputDecoration(
-                        labelText: 'Search bookings',
-                        hintText: 'Reference, student...',
-                        prefixIcon: const Icon(Icons.search),
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                      ),
+                      decoration: InputDecoration(labelText: 'Search bookings', prefixIcon: const Icon(Icons.search), border: OutlineInputBorder(borderRadius: BorderRadius.circular(10))),
                       onChanged: (_) => setState(() {}),
                     ),
                     const SizedBox(height: 12),
@@ -302,10 +241,7 @@ class _AdminBookingsTabState extends State<AdminBookingsTab> {
                         ),
                       ],
                     ),
-                    Align(
-                      alignment: Alignment.centerRight,
-                      child: TextButton.icon(onPressed: _clearFilters, icon: const Icon(Icons.clear, size: 18), label: const Text('Clear')),
-                    )
+                    Align(alignment: Alignment.centerRight, child: TextButton.icon(onPressed: _clearFilters, icon: const Icon(Icons.clear, size: 18), label: const Text('Clear')))
                   ],
                 );
               } else {
@@ -316,12 +252,7 @@ class _AdminBookingsTabState extends State<AdminBookingsTab> {
                       flex: 4,
                       child: TextField(
                         controller: _searchController,
-                        decoration: InputDecoration(
-                          labelText: 'Search bookings',
-                          hintText: 'Reference, student, matric or facility',
-                          prefixIcon: const Icon(Icons.search),
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                        ),
+                        decoration: InputDecoration(labelText: 'Search bookings', prefixIcon: const Icon(Icons.search), border: OutlineInputBorder(borderRadius: BorderRadius.circular(10))),
                         onChanged: (_) => setState(() {}),
                       ),
                     ),
@@ -348,12 +279,7 @@ class _AdminBookingsTabState extends State<AdminBookingsTab> {
                     const SizedBox(width: 12),
                     Padding(
                       padding: const EdgeInsets.only(top: 8.0),
-                      child: TextButton.icon(
-                        onPressed: _clearFilters,
-                        style: TextButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16)),
-                        icon: const Icon(Icons.filter_alt_off_outlined),
-                        label: const Text('Clear filters', style: TextStyle(fontWeight: FontWeight.bold)),
-                      ),
+                      child: TextButton.icon(onPressed: _clearFilters, icon: const Icon(Icons.filter_alt_off_outlined), label: const Text('Clear filters')),
                     ),
                   ],
                 );
@@ -365,7 +291,9 @@ class _AdminBookingsTabState extends State<AdminBookingsTab> {
           Text('${bookings.length} reservation(s)', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.grey)),
           const SizedBox(height: 16),
           
-          if (bookings.isEmpty)
+          if (_isLoading)
+            const Center(child: Padding(padding: EdgeInsets.all(40), child: CircularProgressIndicator(color: _green)))
+          else if (bookings.isEmpty)
             Container(
               width: double.infinity,
               padding: const EdgeInsets.all(40),
@@ -375,42 +303,27 @@ class _AdminBookingsTabState extends State<AdminBookingsTab> {
                   const Icon(Icons.search_off, size: 44, color: Colors.grey),
                   const SizedBox(height: 12),
                   const Text('No bookings match your search and filters.', textAlign: TextAlign.center, style: TextStyle(fontSize: 16, color: Colors.grey)),
-                  const SizedBox(height: 8),
-                  TextButton(onPressed: _clearFilters, child: const Text('Clear filters')),
                 ],
               ),
             )
           else
-            // 🌟 Responsive Layout: Mobile Cards vs Desktop Table
             LayoutBuilder(
               builder: (context, constraints) {
-                final isMobile = constraints.maxWidth < 800;
-
-                if (isMobile) {
-                  return _buildMobileCardList(bookings);
-                } else {
-                  return _buildDesktopTable(bookings);
-                }
+                return constraints.maxWidth < 800 ? _buildMobileCardList(bookings) : _buildDesktopTable(bookings);
               },
             ),
-            
-          const SizedBox(height: 40),
         ],
       ),
     );
   }
 
-  // 🌟 Mobile-Friendly Stacked Cards View
-  Widget _buildMobileCardList(List bookings) {
+  Widget _buildMobileCardList( List bookings) {
     return Column(
       children: bookings.map((booking) {
         return Card(
           margin: const EdgeInsets.only(bottom: 16),
           elevation: 0,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-            side: BorderSide(color: Colors.grey.shade300),
-          ),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: BorderSide(color: Colors.grey.shade300)),
           color: Colors.white,
           child: Padding(
             padding: const EdgeInsets.all(16),
@@ -423,34 +336,26 @@ class _AdminBookingsTabState extends State<AdminBookingsTab> {
                     Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(booking['ref']!, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                        Text(booking['payId']!, style: TextStyle(color: Colors.grey.shade500, fontSize: 11)),
+                        Text(booking['ref'], style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                        Text(booking['payId'], style: TextStyle(color: Colors.grey.shade500, fontSize: 11)),
                       ],
                     ),
                     Column(
                       crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
-                        _statusBadge(booking['status']!),
+                        _statusBadge(booking['status']),
                         const SizedBox(height: 4),
-                        _statusBadge(booking['paymentStatus']!),
+                        _statusBadge(booking['paymentStatus']),
                       ],
                     )
                   ],
                 ),
                 const Divider(height: 24),
-                Text(booking['name']!, style: const TextStyle(fontWeight: FontWeight.bold)),
+                Text(booking['name'], style: const TextStyle(fontWeight: FontWeight.bold)),
                 Text('${booking['matric']} · ${booking['category']}', style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
                 const SizedBox(height: 12),
-                Text(booking['facility']!, style: const TextStyle(fontWeight: FontWeight.bold)),
+                Text(booking['facility'], style: const TextStyle(fontWeight: FontWeight.bold)),
                 Text('${booking['date']} · ${booking['time']}', style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
-                const SizedBox(height: 12),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Text('Amount', style: TextStyle(color: Colors.grey, fontSize: 12)),
-                    Text(booking['price']!, style: const TextStyle(fontWeight: FontWeight.bold, color: _green, fontSize: 16)),
-                  ],
-                ),
                 const SizedBox(height: 16),
                 SizedBox(
                   width: double.infinity,
@@ -458,11 +363,6 @@ class _AdminBookingsTabState extends State<AdminBookingsTab> {
                     onPressed: () => _showDetails(booking),
                     icon: const Icon(Icons.visibility_outlined, size: 18, color: Colors.black87),
                     label: const Text('View Details', style: TextStyle(color: Colors.black87)),
-                    style: OutlinedButton.styleFrom(
-                      side: const BorderSide(color: Colors.grey),
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                    ),
                   ),
                 )
               ],
@@ -473,108 +373,37 @@ class _AdminBookingsTabState extends State<AdminBookingsTab> {
     );
   }
 
-  // 🌟 Desktop-Friendly Stretch Table View
-  Widget _buildDesktopTable(List bookings) {
+  Widget _buildDesktopTable( List bookings) {
     return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: const Color(0xFFE2E8E3)),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 10, offset: const Offset(0, 4))],
-      ),
+      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14), border: Border.all(color: const Color(0xFFE2E8E3))),
       child: Column(
         children: [
-          // Table Header
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-            decoration: const BoxDecoration(
-              color: Color(0xFFF9FAF9),
-              borderRadius: BorderRadius.vertical(top: Radius.circular(14)),
-              border: Border(bottom: BorderSide(color: Color(0xFFE2E8E3))),
-            ),
+            decoration: const BoxDecoration(color: Color(0xFFF9FAF9), borderRadius: BorderRadius.vertical(top: Radius.circular(14)), border: Border(bottom: BorderSide(color: Color(0xFFE2E8E3)))),
             child: const Row(
               children: [
-                Expanded(flex: 2, child: Text('REFERENCE', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.grey, letterSpacing: 0.5))),
-                Expanded(flex: 3, child: Text('STUDENT', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.grey, letterSpacing: 0.5))),
-                Expanded(flex: 3, child: Text('FACILITY / SCHEDULE', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.grey, letterSpacing: 0.5))),
-                Expanded(flex: 2, child: Text('AMOUNT', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.grey, letterSpacing: 0.5))),
-                Expanded(flex: 3, child: Text('STATUS', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.grey, letterSpacing: 0.5))),
-                Expanded(flex: 2, child: Text('ACTION', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.grey, letterSpacing: 0.5))),
+                Expanded(flex: 2, child: Text('REFERENCE', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.grey))),
+                Expanded(flex: 3, child: Text('STUDENT', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.grey))),
+                Expanded(flex: 3, child: Text('FACILITY / SCHEDULE', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.grey))),
+                Expanded(flex: 2, child: Text('AMOUNT', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.grey))),
+                Expanded(flex: 3, child: Text('STATUS', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.grey))),
+                Expanded(flex: 2, child: Text('ACTION', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.grey))),
               ],
             ),
           ),
-          
-          // Table Rows
           ...bookings.map((booking) {
             return Container(
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-              decoration: const BoxDecoration(
-                border: Border(bottom: BorderSide(color: Color(0xFFE2E8E3))),
-              ),
+              decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: Color(0xFFE2E8E3)))),
               child: Row(
                 children: [
-                  Expanded(
-                    flex: 2,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(booking['ref']!, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                        Text(booking['payId']!, style: TextStyle(color: Colors.grey.shade500, fontSize: 11)),
-                      ],
-                    ),
-                  ),
-                  Expanded(
-                    flex: 3,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(booking['name']!, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
-                        Text(booking['matric']!, style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
-                        Text(booking['category']!, style: TextStyle(color: Colors.grey.shade500, fontSize: 11)),
-                      ],
-                    ),
-                  ),
-                  Expanded(
-                    flex: 3,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(booking['facility']!, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
-                        Text(booking['date']!, style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
-                        Text(booking['time']!, style: TextStyle(color: Colors.grey.shade500, fontSize: 11)),
-                      ],
-                    ),
-                  ),
-                  Expanded(
-                    flex: 2,
-                    child: Text(booking['price']!, style: const TextStyle(fontWeight: FontWeight.bold, color: _green)),
-                  ),
-                  Expanded(
-                    flex: 3,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        _statusBadge(booking['status']!),
-                        const SizedBox(height: 4),
-                        _statusBadge(booking['paymentStatus']!),
-                      ],
-                    ),
-                  ),
-                  Expanded(
-                    flex: 2,
-                    child: Align(
-                      alignment: Alignment.centerLeft,
-                      child: OutlinedButton.icon(
-                        onPressed: () => _showDetails(booking),
-                        icon: const Icon(Icons.visibility_outlined, size: 16, color: Colors.black87),
-                        label: const Text('Details', style: TextStyle(fontSize: 12, color: Colors.black87)),
-                        style: OutlinedButton.styleFrom(
-                          side: const BorderSide(color: Colors.grey),
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                        ),
-                      ),
-                    ),
-                  ),
+                  Expanded(flex: 2, child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(booking['ref'], style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)), Text(booking['payId'], style: TextStyle(color: Colors.grey.shade500, fontSize: 11))])),
+                  Expanded(flex: 3, child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(booking['name'], style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)), Text(booking['matric'], style: TextStyle(color: Colors.grey.shade600, fontSize: 12))])),
+                  Expanded(flex: 3, child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(booking['facility'], style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)), Text('${booking['date']} · ${booking['time']}', style: TextStyle(color: Colors.grey.shade600, fontSize: 11))])),
+                  Expanded(flex: 2, child: Text(booking['price'], style: const TextStyle(fontWeight: FontWeight.bold, color: _green))),
+                  Expanded(flex: 3, child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [_statusBadge(booking['status']), const SizedBox(height: 4), _statusBadge(booking['paymentStatus'])])),
+                  Expanded(flex: 2, child: Align(alignment: Alignment.centerLeft, child: OutlinedButton.icon(onPressed: () => _showDetails(booking), icon: const Icon(Icons.visibility_outlined, size: 16, color: Colors.black87), label: const Text('Details', style: TextStyle(fontSize: 12, color: Colors.black87))))),
                 ],
               ),
             );
