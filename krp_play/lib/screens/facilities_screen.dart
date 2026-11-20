@@ -1602,12 +1602,17 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
         final date = DateUtils.dateOnly(item.date);
         final bookings = dates[date] ??=
             await _bookingService.getBookingsForDate(date);
-        final blocked = bookings.any((booking) =>
-            booking.facilityName == item.facilityName &&
-            booking.timeSlots.any((slot) => item.timeSlots.contains(slot)));
+        final requestedSlots = List<String>.from(item.timeSlots as List);
+        final blocked = bookings.any((booking) {
+          if (booking.facilityName != item.facilityName) return false;
+          final occupiedSlots = List<String>.from(booking.timeSlots as List);
+          return occupiedSlots.any(requestedSlots.contains);
+        });
         if (blocked) unavailable.add(item);
       }
-    } catch (_) {
+    } catch (error, stackTrace) {
+      debugPrint('Cart conflict cleanup failed: $error');
+      debugPrintStack(stackTrace: stackTrace);
       // Retain the existing availability failure behaviour.
       if (!mounted) return;
       _showMessage(
