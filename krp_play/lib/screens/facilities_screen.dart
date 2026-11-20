@@ -26,7 +26,7 @@ class FacilitiesScreen extends StatefulWidget {
 class _FacilitiesScreenState extends State<FacilitiesScreen> {
   late final BookingService _bookingService =
       widget.bookingService ?? BookingService();
-  List<Map<String, dynamic>> _facilities = [];
+  List _facilities = [];
   bool _loadingPrices = true;
   bool _priceLoadFailed = false;
 
@@ -76,7 +76,6 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
   bool _isReserving = false;
   String? _checkoutRequestId;
   num? _reservedTotal;
-  // Billplz flow: set once the bill exists and the user must pay on Billplz.
   String? _pendingBookingId;
   String? _paymentUrl;
   bool _checkingPayment = false;
@@ -87,45 +86,22 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
   String selectedPaymentMethod = '';
   String? selectedBank;
 
-  // 🌟 Live Data Trackers
   List<Booking> _dayBookings = [];
   bool _isLoadingAvailability = false;
 
   static const List<String> malaysianBanks = [
-    'Maybank2u',
-    'CIMB Clicks',
-    'Public Bank',
-    'RHB Now',
-    'Hong Leong Bank',
-    'Bank Islam',
-    'AmBank',
-    'Bank Rakyat',
-    'Affin Bank',
-    'Alliance Bank',
-    'BSN',
-    'Bank Muamalat',
-    'Agrobank',
-    'OCBC Bank',
-    'UOB Malaysia',
+    'Maybank2u', 'CIMB Clicks', 'Public Bank', 'RHB Now', 'Hong Leong Bank',
+    'Bank Islam', 'AmBank', 'Bank Rakyat', 'Affin Bank', 'Alliance Bank',
+    'BSN', 'Bank Muamalat', 'Agrobank', 'OCBC Bank', 'UOB Malaysia',
   ];
 
   static const List<String> _weekdayStartTimes = [
-    '5:00 PM',
-    '6:00 PM',
-    '9:00 PM',
-    '10:00 PM',
+    '5:00 PM', '6:00 PM', '9:00 PM', '10:00 PM',
   ];
 
   static const List<String> _weekendStartTimes = [
-    '10:00 AM',
-    '11:00 AM',
-    '12:00 PM',
-    '3:00 PM',
-    '4:00 PM',
-    '5:00 PM',
-    '6:00 PM',
-    '9:00 PM',
-    '10:00 PM',
+    '10:00 AM', '11:00 AM', '12:00 PM', '3:00 PM', '4:00 PM',
+    '5:00 PM', '6:00 PM', '9:00 PM', '10:00 PM',
   ];
 
   List<String> get availableStartTimes {
@@ -136,18 +112,8 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
   }
 
   static const List<String> monthNames = [
-    'Jan',
-    'Feb',
-    'Mar',
-    'Apr',
-    'May',
-    'Jun',
-    'Jul',
-    'Aug',
-    'Sep',
-    'Oct',
-    'Nov',
-    'Dec',
+    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
   ];
 
   String get formattedDate =>
@@ -156,7 +122,6 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
       _formatTime(_minutesFor(selectedStartTime) + selectedDurationHours * 60);
   String get timeRangeString => '$selectedStartTime–$calculatedEndTime';
 
-  // 🌟 Define precise court quantities per sport
   List<String> get _currentCourts {
     if (selectedSport == 'Badminton') return ['Court 01', 'Court 02'];
     if (selectedSport == 'Ping Pong') return ['Table 01', 'Table 02'];
@@ -173,22 +138,26 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
     return '$selectedSport $suffix';
   }
 
-  // 🌟 Check live Supabase DB for overlapping times
+  // 🌟 FIX: Reads exact "Closed" status string
   String _getCourtStatus(String facilityName, List<String> requestedSlots) {
     if (_availabilityError != null) return 'Unavailable';
     for (final booking in _dayBookings) {
       if (booking.facilityName == facilityName &&
           booking.timeSlots.any((slot) => requestedSlots.contains(slot))) {
-        return switch (booking.status) {
+        
+        final stat = booking.status.toLowerCase();
+        if (stat.contains('closed') || stat.contains('maintenance')) {
+          return booking.status; // Returns "Closed (Maintenance)"
+        }
+
+        return switch (stat) {
           'reserved' => 'Reserved',
-          'closed' => 'Closed by management',
           'past' => 'Session ended',
           _ => 'Booked',
         };
       }
     }
 
-    // 1. Is it currently in our cart?
     if (cartItems.any(
       (item) =>
           item.facilityName == facilityName &&
@@ -201,7 +170,6 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
     return 'Available';
   }
 
-  // 🌟 Fetch Live Bookings From Supabase
   Future<void> _fetchAvailability() async {
     final request = ++_availabilityRequest;
     final date = selectedDate;
@@ -229,7 +197,6 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
     }
   }
 
-  // 🌟 Prevent selecting a booked court by defaulting to the first green one
   void _autoSelectFirstAvailableCourt() {
     final startMinutes = _minutesFor(selectedStartTime);
     final requestedTimeSlots = List.generate(
@@ -368,16 +335,11 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
 
   Widget _buildCurrentStepCard() {
     switch (currentStep) {
-      case 1:
-        return _buildStep1ChooseSport();
-      case 2:
-        return _buildStep2ChooseCourt();
-      case 3:
-        return _buildStep3ReviewBooking();
-      case 4:
-        return _buildStep4PaymentAndStatus();
-      default:
-        return _buildStep1ChooseSport();
+      case 1: return _buildStep1ChooseSport();
+      case 2: return _buildStep2ChooseCourt();
+      case 3: return _buildStep3ReviewBooking();
+      case 4: return _buildStep4PaymentAndStatus();
+      default: return _buildStep1ChooseSport();
     }
   }
 
@@ -452,7 +414,7 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
                 selectedCourt = _currentCourts.first;
                 currentStep = 2;
               });
-              _fetchAvailability(); // 🌟 Fetch live DB bookings for this day
+              _fetchAvailability(); 
             },
       borderRadius: BorderRadius.circular(12),
       child: Container(
@@ -513,15 +475,11 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
 
   IconData _sportIcon(String sport) {
     switch (sport) {
-      case 'Badminton':
-        return Icons.sports_tennis;
+      case 'Badminton': return Icons.sports_tennis;
       case 'Ping Pong':
-      case 'Snooker':
-        return Icons.table_restaurant;
-      case 'Dart':
-        return Icons.gps_fixed;
-      default:
-        return Icons.sports;
+      case 'Snooker': return Icons.table_restaurant;
+      case 'Dart': return Icons.gps_fixed;
+      default: return Icons.sports;
     }
   }
 
@@ -595,7 +553,7 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
                           () => selectedDurationHours =
                               selectedDurationHours == 1 ? 2 : 1,
                         );
-                        _autoSelectFirstAvailableCourt(); // Recheck slots
+                        _autoSelectFirstAvailableCourt();
                       },
                     ),
                   ],
@@ -617,7 +575,6 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
                     icon: const Icon(Icons.refresh),
                     label: Text(_availabilityError!),
                   ),
-                // Availability is advisory; the server rechecks on Pay.
 
                 if (_isLoadingAvailability)
                   const Padding(
@@ -646,18 +603,17 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
                         Color surfaceTint;
                         bool isSelectable = false;
 
+                        // 🌟 GREY UI Styling logic
                         if (status == 'Available') {
                           statusColor = const Color(0xFF2E7D32);
                           surfaceTint = const Color(0xFFF3FAF5);
                           isSelectable = true;
-                        } else if (status == 'Booked' ||
-                            status == 'Reserved' ||
-                            status == 'In Cart') {
+                        } else if (status == 'Booked' || status == 'Reserved' || status == 'In Cart') {
                           statusColor = const Color(0xFFD32F2F);
                           surfaceTint = const Color(0xFFFDF2F2);
                         } else {
-                          statusColor = const Color(0xFF757575);
-                          surfaceTint = const Color(0xFFF5F5F5);
+                          statusColor = const Color(0xFF757575); // Grey Color
+                          surfaceTint = const Color(0xFFF5F5F5); // Grey BG
                         }
 
                         return Expanded(
@@ -669,7 +625,8 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
                             ),
                             child: _courtCard(
                               courtName: courtSuffix,
-                              statusLabel: status,
+                              // 🌟 Format the text to fit the box
+                              statusLabel: status.contains('Closed') ? status.replaceFirst(' (', '\n(') : status,
                               statusColor: statusColor,
                               surfaceTint: surfaceTint,
                               isSelectable: isSelectable,
@@ -679,7 +636,6 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
                           ),
                         );
                       } else {
-                        // Invisible spacer for 1-court sports to keep UI alignment
                         return const Expanded(child: SizedBox());
                       }
                     }),
@@ -776,7 +732,7 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
           ? () => setState(() => selectedCourt = courtName)
           : () {
               ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text('$courtName is $statusLabel.')),
+                SnackBar(content: Text('$courtName is ${statusLabel.replaceAll('\n', ' ')}.')),
               );
             },
       borderRadius: BorderRadius.circular(10),
@@ -823,6 +779,7 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
                 fontSize: 11,
                 fontWeight: FontWeight.bold,
                 color: statusColor,
+                height: 1.2
               ),
               textAlign: TextAlign.center,
             ),
@@ -913,7 +870,6 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
   }
 
   Widget _buildCartItemCard(Booking booking) {
-    // Each cart card describes its saved booking, not the current sport picker.
     final facilityName = booking.facilityName.toString();
     final sport = facilityName.split(
       RegExp(r'\s+(?:Court|Table|Board)\b', caseSensitive: false),
@@ -1369,7 +1325,6 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
     );
   }
 
-  // With Billplz, the bank or e-wallet is chosen on the Billplz page.
   bool get _canSubmitPayment =>
       _bookingService.usesRealPayment ||
       selectedPaymentMethod == 'E-Wallet' ||
@@ -1453,7 +1408,6 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
     );
   }
 
-  // Opened from a button tap so the browser does not block the new tab.
   Future<void> _openPaymentPage() async {
     final url = _paymentUrl;
     if (url == null) return;
@@ -1597,7 +1551,6 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
     final unavailable = <Booking>[];
     final dates = <DateTime, List<Booking>>{};
     try {
-      // Check every date in a mixed-date cart. Never clear unrelated items.
       for (final item in cartSnapshot) {
         final date = DateUtils.dateOnly(item.date);
         final bookings = dates[date] ??=
@@ -1612,8 +1565,6 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
       }
     } catch (error, stackTrace) {
       debugPrint('Cart conflict cleanup failed: $error');
-      debugPrintStack(stackTrace: stackTrace);
-      // Retain the existing availability failure behaviour.
       if (!mounted) return;
       _showMessage(
         'A selected slot is reserved or booked. No payment was taken. Choose another time.',
@@ -1660,11 +1611,9 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
   Future<void> _reserveSelectedCart() async {
     if (_isReserving || cartItems.isEmpty || reservationCreated) return;
     setState(() => _isReserving = true);
-    // Keep this key on network errors: the server might have committed already.
     final key = _checkoutRequestId ??= BookingService.newCheckoutRequestId();
     try {
       if (_bookingService.usesRealPayment) {
-        // 1. Hold the slots (pending_payment, 10 minutes). Same key = same booking.
         final booking = await _bookingService.reserveCart(
           cartItems,
           requestId: key,
@@ -1682,7 +1631,6 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
           });
           return;
         }
-        // 2. The backend creates the Billplz bill using the database amount.
         final url = await _bookingService.createBillplzPayment(
           _pendingBookingId!,
         );
@@ -1739,7 +1687,6 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
         );
       }
     } on PaymentException catch (e) {
-      // Slots stay reserved; retrying reuses the same booking and bill.
       if (mounted) _showMessage(e.message);
     } catch (_) {
       if (mounted)
@@ -1789,10 +1736,11 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
     if (picked != null && picked != selectedDate) {
       setState(() {
         selectedDate = picked;
-        if (!availableStartTimes.contains(selectedStartTime))
+        if (!availableStartTimes.contains(selectedStartTime)) {
           selectedStartTime = availableStartTimes.first;
+        }
       });
-      _fetchAvailability(); // Re-fetch the live bookings for the new date!
+      _fetchAvailability(); 
     }
   }
 
@@ -1869,8 +1817,6 @@ class _PrototypeCourtPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     if (size.isEmpty) return;
-
-    // Draw using a consistent coordinate system at every card size.
     final scale = size.width / 240 < size.height / 130
         ? size.width / 240
         : size.height / 130;
@@ -1894,7 +1840,6 @@ class _PrototypeCourtPainter extends CustomPainter {
 
     switch (sport) {
       case 'Ping Pong':
-        // Table outline and centre markings.
         const pingTable = Rect.fromLTWH(35, 15, 170, 100);
         canvas.drawRRect(
           RRect.fromRectAndRadius(pingTable, const Radius.circular(4)),
@@ -1903,7 +1848,6 @@ class _PrototypeCourtPainter extends CustomPainter {
         canvas.drawRect(pingTable.deflate(5), pen);
         canvas.drawLine(const Offset(40, 65), const Offset(200, 65), pen);
 
-        // Net across the middle of the table.
         canvas.drawLine(
           const Offset(120, 11),
           const Offset(120, 119),
@@ -1914,7 +1858,6 @@ class _PrototypeCourtPainter extends CustomPainter {
           canvas.drawLine(Offset(115, y), Offset(125, y), pen);
         }
 
-        // Paddle and ball.
         pen.strokeWidth = 2;
         canvas.drawOval(const Rect.fromLTWH(211, 76, 18, 24), pen);
         canvas.drawLine(
@@ -1934,7 +1877,6 @@ class _PrototypeCourtPainter extends CustomPainter {
         pen.strokeWidth = 1.5;
         canvas.drawRect(snookerTable.deflate(8), pen);
 
-        // Six pockets.
         for (final point in const [
           Offset(29, 23),
           Offset(120, 23),
@@ -1946,7 +1888,6 @@ class _PrototypeCourtPainter extends CustomPainter {
           canvas.drawCircle(point, 5, fill);
         }
 
-        // Baulk line and D.
         canvas.drawLine(const Offset(70, 24), const Offset(70, 106), pen);
         canvas.drawArc(
           const Rect.fromLTWH(49, 44, 42, 42),
@@ -1956,7 +1897,6 @@ class _PrototypeCourtPainter extends CustomPainter {
           pen,
         );
 
-        // Cue ball and triangular group of reds.
         canvas.drawCircle(const Offset(56, 65), 4, fill);
         for (int row = 0; row < 5; row++) {
           for (int ball = 0; ball <= row; ball++) {
@@ -1971,13 +1911,10 @@ class _PrototypeCourtPainter extends CustomPainter {
 
       case 'Dart':
         const centre = Offset(120, 65);
-
-        // Board rings.
         for (final radius in [55.0, 48.0, 33.0, 28.0]) {
           canvas.drawCircle(centre, radius, pen);
         }
 
-        // Twenty board segments.
         for (int segment = 0; segment < 20; segment++) {
           canvas.save();
           canvas.translate(centre.dx, centre.dy);
@@ -1996,7 +1933,6 @@ class _PrototypeCourtPainter extends CustomPainter {
         break;
 
       default:
-        // Proportioned horizontal court with a vertical centre net.
         pen
           ..strokeWidth = 1.4
           ..strokeCap = StrokeCap.butt;
@@ -2028,8 +1964,6 @@ class _PrototypeCourtPainter extends CustomPainter {
   }
 }
 
-
-// Distinct sport symbols: paddle/ball for Ping Pong, cue/balls for Snooker.
 class _SportChoiceIconPainter extends CustomPainter {
   final String sport;
   final Color color;
@@ -2056,7 +1990,6 @@ class _SportChoiceIconPainter extends CustomPainter {
       canvas.restore();
       canvas.drawCircle(const Offset(23, 5), 3, pen..strokeWidth = 1.8);
     } else {
-      // Triangular rack of balls and a diagonal cue.
       for (final point in const [
         Offset(11, 7), Offset(7, 14), Offset(15, 14),
         Offset(3, 21), Offset(11, 21), Offset(19, 21),
