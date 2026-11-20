@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 class AdminOverviewTab extends StatefulWidget {
   final VoidCallback? onViewAllBookings;
@@ -10,26 +11,105 @@ class AdminOverviewTab extends StatefulWidget {
 }
 
 class _AdminOverviewTabState extends State<AdminOverviewTab> {
+  final supabase = Supabase.instance.client;
   String _selectedView = 'Daily';
+  bool _isLoading = true;
 
-  // Dynamic stats
-  final Map<String, Map<String, String>> _dashboardStats = {
-    'Daily': {'bookings': '2', 'revenue': 'RM 12', 'active': '4', 'reports': '00', 'failed': '00'},
-    'Weekly': {'bookings': '18', 'revenue': 'RM 108', 'active': '12', 'reports': '01', 'failed': '00'},
-    'Monthly': {'bookings': '64', 'revenue': 'RM 384', 'active': '05', 'reports': '04', 'failed': '02'},
+  List<dynamic> _recentReservations = [];
+
+  // Dynamic stats container
+  Map<String, Map<String, String>> _dashboardStats = {
+    'Daily': {'bookings': '0', 'revenue': 'RM 0', 'active': '0', 'reports': '0', 'failed': '0'},
+    'Weekly': {'bookings': '0', 'revenue': 'RM 0', 'active': '0', 'reports': '0', 'failed': '0'},
+    'Monthly': {'bookings': '0', 'revenue': 'RM 0', 'active': '0', 'reports': '0', 'failed': '0'},
   };
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchOverviewData();
+  }
+
+  Future<void> _fetchOverviewData() async {
+    setState(() => _isLoading = true);
+    try {
+      final allBookingsResp = await supabase.from('bookings').select('*, profiles(full_name, matric_number)');
+      final List<dynamic> allBookings = List<dynamic>.from(allBookingsResp);
+
+      allBookings.sort((a, b) {
+        final idA = a['id'] ?? 0;
+        final idB = b['id'] ?? 0;
+        if (idA is int && idB is int) return idB.compareTo(idA);
+        return 0;
+      });
+
+      final recentData = allBookings.take(4).toList();
+      final now = DateTime.now();
+      final today = DateTime(now.year, now.month, now.day);
+      
+      int dailyB = 0, weeklyB = 0, monthlyB = 0;
+      int dailyR = 0, weeklyR = 0, monthlyR = 0;
+      int activeCount = 0;
+
+      for (var b in allBookings) {
+        // 🌟 Fix 1: Case-insensitive status check
+        final status = (b['status']?.toString() ?? '').toLowerCase();
+        if (status == 'confirmed' || status == 'paid') activeCount++;
+
+        final bDateRaw = DateTime.tryParse(b['booking_date'].toString()) ?? now;
+        final bDate = DateTime(bDateRaw.year, bDateRaw.month, bDateRaw.day);
+        
+        // 🌟 Fix 2: Bulletproof amount parsing (handles ints, doubles, and strings)
+        final rawAmount = b['amount'];
+        int amount = 0;
+        if (rawAmount != null) {
+          if (rawAmount is num) amount = rawAmount.toInt();
+          else if (rawAmount is String) amount = double.tryParse(rawAmount)?.toInt() ?? 0;
+        }
+
+        final diffDays = today.difference(bDate).inDays.abs();
+
+        if (diffDays == 0) { dailyB++; dailyR += amount; }
+        if (diffDays <= 7) { weeklyB++; weeklyR += amount; }
+        if (diffDays <= 30) { monthlyB++; monthlyR += amount; }
+      }
+
+      int pendingReports = 0;
+      try {
+        final allReports = await supabase.from('reports').select('status');
+        pendingReports = allReports.where((r) => r['status']?.toString().toLowerCase() == 'submitted' || r['status']?.toString().toLowerCase() == 'under review').length;
+      } catch (_) {}
+
+      setState(() {
+        _recentReservations = recentData;
+        _dashboardStats = {
+          'Daily': {'bookings': '$dailyB', 'revenue': 'RM $dailyR', 'active': '$activeCount', 'reports': '$pendingReports', 'failed': '0'},
+          'Weekly': {'bookings': '$weeklyB', 'revenue': 'RM $weeklyR', 'active': '$activeCount', 'reports': '$pendingReports', 'failed': '0'},
+          'Monthly': {'bookings': '$monthlyB', 'revenue': 'RM $monthlyR', 'active': '$activeCount', 'reports': '$pendingReports', 'failed': '0'},
+        };
+      });
+    } catch (e) {
+      debugPrint('Dashboard Error: $e');
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
 
   void _showManualBookingModal() {
     showModalBottomSheet(
       context: context,
-      isScrollControlled: true, // 🌟 Allows keyboard to push it up
+      isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (context) => const _ManualBookingSheet(),
+      builder: (context) => _ManualBookingSheet(onBookingAdded: _fetchOverviewData),
     );
   }
 
   @override
   Widget build(BuildContext context) {
+    if (_isLoading) {
+      return const Center(child: CircularProgressIndicator(color: Color(0xFF173F32)));
+    }
+
     final currentStats = _dashboardStats[_selectedView]!;
 
     return SingleChildScrollView(
@@ -37,11 +117,11 @@ class _AdminOverviewTabState extends State<AdminOverviewTab> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('— WEDNESDAY, 11 NOVEMBER', style: TextStyle(color: Color(0xFF173F32), fontWeight: FontWeight.bold, fontSize: 12, letterSpacing: 1)),
+          Text('— ${DateTime.now().toString().split(' ')[0]}', style: const TextStyle(color: Color(0xFF173F32), fontWeight: FontWeight.bold, fontSize: 12, letterSpacing: 1)),
           const SizedBox(height: 8),
-          const Text('Good afternoon, Aisyah.', style: TextStyle(fontSize: 28, fontWeight: FontWeight.w900, color: Color(0xFF0D211A))),
+          const Text('Admin Dashboard', style: TextStyle(fontSize: 28, fontWeight: FontWeight.w900, color: Color(0xFF0D211A))),
           const SizedBox(height: 8),
-          const Text('Here\'s what\'s happening across the shared KRP Play prototype records.', style: TextStyle(color: Colors.grey, fontSize: 14)),
+          const Text('Live database overview from Supabase.', style: TextStyle(color: Colors.grey, fontSize: 14)),
           const SizedBox(height: 32),
 
           // View Filter & Manual Booking
@@ -84,7 +164,7 @@ class _AdminOverviewTabState extends State<AdminOverviewTab> {
           ),
           const SizedBox(height: 24),
 
-          // 🌟 Responsive Grid for Stat Cards
+          // Responsive Grid for Stat Cards
           LayoutBuilder(
             builder: (context, constraints) {
               int columns = constraints.maxWidth > 800 ? 3 : (constraints.maxWidth > 500 ? 2 : 1);
@@ -94,50 +174,14 @@ class _AdminOverviewTabState extends State<AdminOverviewTab> {
                 spacing: 16,
                 runSpacing: 16,
                 children: [
-                  _buildStatCard(width, Icons.calendar_today, const Color(0xFFE8F5E9), '$_selectedView BOOKINGS'.toUpperCase(), currentStats['bookings']!, '$_selectedView prototype records'),
+                  _buildStatCard(width, Icons.calendar_today, const Color(0xFFE8F5E9), '$_selectedView BOOKINGS'.toUpperCase(), currentStats['bookings']!, 'Live database records'),
                   _buildStatCard(width, Icons.money, const Color(0xFFE3F2FD), '$_selectedView REVENUE'.toUpperCase(), currentStats['revenue']!, 'Confirmed payments'),
                   _buildStatCard(width, Icons.people_outline, const Color(0xFFF3E5F5), 'ACTIVE RESERVATIONS', currentStats['active']!, 'Paid and reserved'),
-                  _buildStatCard(width, Icons.info_outline, const Color(0xFFFFF3E0), 'PENDING USER REPORTS', currentStats['reports']!, currentStats['reports'] == '00' ? 'Inbox clear' : 'Needs attention'),
-                  _buildStatCard(width, Icons.schedule, const Color(0xFFFFF3E0), 'FAILED REFUNDS', currentStats['failed']!, currentStats['failed'] == '00' ? 'No failures' : 'Action required'),
+                  _buildStatCard(width, Icons.info_outline, const Color(0xFFFFF3E0), 'PENDING USER REPORTS', currentStats['reports']!, currentStats['reports'] == '0' ? 'Inbox clear' : 'Needs attention'),
+                  _buildStatCard(width, Icons.schedule, const Color(0xFFFFF3E0), 'FAILED REFUNDS', currentStats['failed']!, currentStats['failed'] == '0' ? 'No failures' : 'Action required'),
                 ],
               );
             },
-          ),
-          
-          const SizedBox(height: 32),
-          
-          // Shared System Activity
-          Container(
-            padding: const EdgeInsets.all(24),
-            decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.grey.shade200)),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text('— SHARED SYSTEM ACTIVITY', style: TextStyle(color: Color(0xFF173F32), fontWeight: FontWeight.bold, fontSize: 10, letterSpacing: 1)),
-                const SizedBox(height: 8),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Text('Recent activity', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w600)),
-                    Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4), decoration: BoxDecoration(color: Colors.grey[200], borderRadius: BorderRadius.circular(4)), child: const Text('Prototype data', style: TextStyle(fontSize: 10)))
-                  ],
-                ),
-                const SizedBox(height: 16),
-                LayoutBuilder(
-                  builder: (context, constraints) {
-                    bool isMobile = constraints.maxWidth < 400;
-                    return Flex(
-                      direction: isMobile ? Axis.vertical : Axis.horizontal,
-                      children: [
-                        Expanded(flex: isMobile ? 0 : 1, child: _buildActivityCard(Icons.calendar_today, 'New booking received', '#KRP-1842')),
-                        SizedBox(width: isMobile ? 0 : 12, height: isMobile ? 12 : 0),
-                        Expanded(flex: isMobile ? 0 : 1, child: _buildActivityCard(Icons.payment, 'Payment confirmed', 'RM 6.00')),
-                      ],
-                    );
-                  }
-                )
-              ],
-            ),
           ),
           
           const SizedBox(height: 32),
@@ -156,19 +200,31 @@ class _AdminOverviewTabState extends State<AdminOverviewTab> {
             ],
           ),
           const SizedBox(height: 16),
+          
           Container(
             decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.grey.shade200)),
-            child: Column(
-              children: [
-                _buildReservationRow('#KRP-1842', 'Ng She Ling', 'A24CS0285', 'Badminton Court 01', '11 Nov 2026\n8:00 PM'),
-                const Divider(height: 1),
-                _buildReservationRow('#KRP-1841', 'Amir Hakim', 'A24CS0117', 'Ping Pong Table 02', '11 Nov 2026\n6:00 PM'),
-                const Divider(height: 1),
-                _buildReservationRow('#KRP-1840', 'Tan Jia Yie', 'A24CS0302', 'Snooker Table', '12 Nov 2026\n5:00 PM'),
-                const Divider(height: 1),
-                _buildReservationRow('#KRP-1839', 'Nur Izzati', 'A24CS0211', 'Dart Board', '12 Nov 2026\n10:00 PM'),
-              ],
-            ),
+            child: _recentReservations.isEmpty
+                ? const Padding(padding: EdgeInsets.all(24), child: Center(child: Text('No bookings found in database.')))
+                : Column(
+                    children: _recentReservations.asMap().entries.map((entry) {
+                      final index = entry.key;
+                      final b = entry.value;
+                      final profile = b['profiles'] ?? {};
+                      
+                      return Column(
+                        children: [
+                          _buildReservationRow(
+                            '#KRP-${b['id'].toString().padLeft(4, '0')}', 
+                            profile['full_name'] ?? 'Unknown User', 
+                            profile['matric_number'] ?? 'N/A', 
+                            b['facility_name'] ?? 'Facility', 
+                            '${b['booking_date'] ?? ''}\n${b['start_time'] ?? ''}'
+                          ),
+                          if (index != _recentReservations.length - 1) const Divider(height: 1),
+                        ],
+                      );
+                    }).toList(),
+                  ),
           )
         ],
       ),
@@ -194,28 +250,6 @@ class _AdminOverviewTabState extends State<AdminOverviewTab> {
                 Text(value, style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 4),
                 Text(subtitle, style: const TextStyle(fontSize: 12, color: Colors.green)),
-              ],
-            ),
-          )
-        ],
-      ),
-    );
-  }
-
-  Widget _buildActivityCard(IconData icon, String title, String subtitle) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(color: Colors.grey[50], borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.grey.shade200)),
-      child: Row(
-        children: [
-          Icon(icon, size: 20, color: Colors.grey[700]),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(title, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
-                Text(subtitle, style: TextStyle(fontSize: 12, color: Colors.grey[600])),
               ],
             ),
           )
@@ -253,24 +287,24 @@ class _AdminOverviewTabState extends State<AdminOverviewTab> {
   }
 }
 
-// 🌟 Upgraded Interactive Bottom Sheet
+// 🌟 Fully Connected Interactive Bottom Sheet
 class _ManualBookingSheet extends StatefulWidget {
-  const _ManualBookingSheet();
+  final VoidCallback onBookingAdded;
+  const _ManualBookingSheet({required this.onBookingAdded});
+  
   @override
   State<_ManualBookingSheet> createState() => _ManualBookingSheetState();
 }
 
 class _ManualBookingSheetState extends State<_ManualBookingSheet> {
-  final _nameController = TextEditingController(text: 'Walk-in Student');
-  final _matricController = TextEditingController(text: 'A24CS0000');
-  final _contactController = TextEditingController(text: '012-000 0000');
-  final _dateController = TextEditingController(text: '12/11/2026');
+  final supabase = Supabase.instance.client;
+  bool _isSubmitting = false;
 
+  final _dateController = TextEditingController(text: DateTime.now().toString().split(' ')[0]);
   String _selectedCategory = 'KRP Student';
   String _selectedFacility = 'Badminton Court 01';
-  String _selectedSlot = '5:00 PM – 6:00 PM';
+  String _selectedSlot = '5:00 PM';
 
-  // Smart price calculation logic matching Student UI
   int get _calculatedPrice {
     bool isKRP = _selectedCategory == 'KRP Student';
     if (_selectedFacility.contains('Badminton')) return isKRP ? 6 : 8;
@@ -280,22 +314,47 @@ class _ManualBookingSheetState extends State<_ManualBookingSheet> {
     return 6; 
   }
 
+  Future<void> _submitManualBooking() async {
+    setState(() => _isSubmitting = true);
+
+    try {
+      final user = supabase.auth.currentUser;
+      
+      // Inserts the manual booking directly into the bookings table
+      await supabase.from('bookings').insert({
+        'user_id': user?.id, // Assigning to admin for walk-ins
+        'facility_name': _selectedFacility,
+        'booking_date': _dateController.text,
+        'start_time': _selectedSlot,
+        'amount': _calculatedPrice,
+        'status': 'Paid', // Admin manual bookings are assumed paid
+      });
+
+      if (mounted) {
+        Navigator.pop(context);
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Manual booking added to Supabase successfully!')));
+        widget.onBookingAdded(); // Refreshes the dashboard stats instantly
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error adding booking: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _isSubmitting = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    // 🌟 This padding pushes the sheet up when the keyboard opens
     final bottomPadding = MediaQuery.of(context).viewInsets.bottom;
 
     return Container(
       constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.9),
-      padding: EdgeInsets.only(bottom: bottomPadding), // Keyboard padding
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
+      padding: EdgeInsets.only(bottom: bottomPadding),
+      decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // Header
           Padding(
             padding: const EdgeInsets.all(20.0),
             child: Row(
@@ -306,7 +365,7 @@ class _ManualBookingSheetState extends State<_ManualBookingSheet> {
                   children: [
                     Text('Add manual booking', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
                     SizedBox(height: 4),
-                    Text('Create a reservation for a walk-in or assisted student.', style: TextStyle(color: Colors.grey, fontSize: 12)),
+                    Text('Create a reservation for a walk-in.', style: TextStyle(color: Colors.grey, fontSize: 12)),
                   ],
                 ),
                 IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(context))
@@ -314,43 +373,21 @@ class _ManualBookingSheetState extends State<_ManualBookingSheet> {
             ),
           ),
           const Divider(height: 1),
-          
-          // Scrollable Form
           Flexible(
             child: SingleChildScrollView(
               padding: const EdgeInsets.all(20.0),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _buildLabel('Student name'),
-                  _buildTextField(_nameController),
-                  const SizedBox(height: 16),
-                  
-                  _buildLabel('Matric number'),
-                  _buildTextField(_matricController),
-                  const SizedBox(height: 16),
-                  
-                  _buildLabel('Contact number'),
-                  _buildTextField(_contactController),
-                  const SizedBox(height: 16),
-                  
                   _buildLabel('Student category'),
-                  _buildDropdown(
-                    _selectedCategory,
-                    ['KRP Student', 'Non-KRP Student', 'Public'],
-                    (val) => setState(() => _selectedCategory = val!),
-                  ),
+                  _buildDropdown(_selectedCategory, ['KRP Student', 'Non-KRP Student', 'Public'], (val) => setState(() => _selectedCategory = val!)),
                   const SizedBox(height: 16),
                   
                   _buildLabel('Facility'),
-                  _buildDropdown(
-                    _selectedFacility,
-                    ['Badminton Court 01', 'Badminton Court 02', 'Ping Pong Table 01', 'Snooker Table', 'Dart Board'],
-                    (val) => setState(() => _selectedFacility = val!),
-                  ),
+                  _buildDropdown(_selectedFacility, ['Badminton Court 01', 'Badminton Court 02', 'Ping Pong Table 01', 'Snooker Table', 'Dart Board'], (val) => setState(() => _selectedFacility = val!)),
                   const SizedBox(height: 16),
                   
-                  _buildLabel('Date'),
+                  _buildLabel('Date (YYYY-MM-DD)'),
                   TextField(
                     controller: _dateController,
                     decoration: InputDecoration(
@@ -362,30 +399,21 @@ class _ManualBookingSheetState extends State<_ManualBookingSheet> {
                   const SizedBox(height: 16),
                   
                   _buildLabel('Time slot'),
-                  _buildDropdown(
-                    _selectedSlot,
-                    ['5:00 PM – 6:00 PM', '6:00 PM – 7:00 PM', '8:00 PM – 9:00 PM'],
-                    (val) => setState(() => _selectedSlot = val!),
-                  ),
+                  _buildDropdown(_selectedSlot, ['5:00 PM', '6:00 PM', '8:00 PM', '9:00 PM'], (val) => setState(() => _selectedSlot = val!)),
                 ],
               ),
             ),
           ),
-
-          // Bottom Fixed Action Bar
           Container(
             padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, -5))],
-            ),
+            decoration: BoxDecoration(color: Colors.white, boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, -5))]),
             child: Column(
-              mainAxisSize: MainAxisSize.min, // Hug content
+              mainAxisSize: MainAxisSize.min,
               children: [
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text('Official $_selectedCategory price · RM $_calculatedPrice/hour', style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                    Text('Official $_selectedCategory price', style: const TextStyle(fontSize: 12, color: Colors.grey)),
                     Text('RM $_calculatedPrice.00', style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
                   ],
                 ),
@@ -398,11 +426,10 @@ class _ManualBookingSheetState extends State<_ManualBookingSheet> {
                       padding: const EdgeInsets.symmetric(vertical: 16),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                     ),
-                    onPressed: () {
-                      Navigator.pop(context);
-                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Manual booking added successfully!')));
-                    },
-                    child: const Text('Confirm booking', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+                    onPressed: _isSubmitting ? null : _submitManualBooking,
+                    child: _isSubmitting 
+                      ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                      : const Text('Confirm booking', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
                   ),
                 )
               ],
@@ -413,26 +440,12 @@ class _ManualBookingSheetState extends State<_ManualBookingSheet> {
     );
   }
 
-  Widget _buildLabel(String text) => Padding(
-    padding: const EdgeInsets.only(bottom: 8.0),
-    child: Text(text, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.black87)),
-  );
-
-  Widget _buildTextField(TextEditingController controller) => TextField(
-    controller: controller,
-    decoration: InputDecoration(
-      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-    ),
-  );
+  Widget _buildLabel(String text) => Padding(padding: const EdgeInsets.only(bottom: 8.0), child: Text(text, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.black87)));
 
   Widget _buildDropdown(String value, List<String> items, ValueChanged<String?> onChanged) {
     return DropdownButtonFormField<String>(
       value: value,
-      decoration: InputDecoration(
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-      ),
+      decoration: InputDecoration(border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)), contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14)),
       items: items.map((e) => DropdownMenuItem(value: e, child: Text(e))).toList(),
       onChanged: onChanged,
     );
