@@ -15,9 +15,11 @@ class _AdminOverviewTabState extends State<AdminOverviewTab> {
   String _selectedView = 'Daily';
   bool _isLoading = true;
 
+  // 🌟 1. Add this variable to hold the connection
+  RealtimeChannel? _bookingSubscription; 
+
   List<dynamic> _recentReservations = [];
 
-  // Dynamic stats container
   Map<String, Map<String, String>> _dashboardStats = {
     'Daily': {'bookings': '0', 'revenue': 'RM 0', 'active': '0', 'reports': '0', 'failed': '0'},
     'Weekly': {'bookings': '0', 'revenue': 'RM 0', 'active': '0', 'reports': '0', 'failed': '0'},
@@ -28,19 +30,48 @@ class _AdminOverviewTabState extends State<AdminOverviewTab> {
   void initState() {
     super.initState();
     _fetchOverviewData();
+    _setupRealtime(); // 🌟 2. Call the listener
+  }
+
+  // 🌟 3. Add this whole method to listen to the database
+  void _setupRealtime() {
+    _bookingSubscription = supabase
+        .channel('public:bookings')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all, // Listens for INSERT, UPDATE, and DELETE
+          schema: 'public',
+          table: 'bookings',
+          callback: (payload) {
+            // The moment a student pays, this triggers automatically!
+            if (mounted) {
+              _fetchOverviewData();
+            }
+          },
+        )
+        .subscribe();
+  }
+
+  // 🌟 4. Add this to close the connection when leaving the dashboard
+  @override
+  void dispose() {
+    if (_bookingSubscription != null) {
+      supabase.removeChannel(_bookingSubscription!);
+    }
+    super.dispose();
   }
 
   Future<void> _fetchOverviewData() async {
     setState(() => _isLoading = true);
     try {
-      final allBookingsResp = await supabase.from('bookings').select('*, profiles(full_name, matric_number)');
+      // Fetch all bookings
+      final allBookingsResp = await supabase.from('bookings').select('*, profiles!booking_user_id_fkey(full_name, matric_number)');
       final List<dynamic> allBookings = List<dynamic>.from(allBookingsResp);
 
+      // 🌟 FIX 1: Sort by 'created_at' date instead of the random UUID so the newest is ALWAYS at the top!
       allBookings.sort((a, b) {
-        final idA = a['id'] ?? 0;
-        final idB = b['id'] ?? 0;
-        if (idA is int && idB is int) return idB.compareTo(idA);
-        return 0;
+        final dateA = DateTime.tryParse(a['created_at']?.toString() ?? '') ?? DateTime(2000);
+        final dateB = DateTime.tryParse(b['created_at']?.toString() ?? '') ?? DateTime(2000);
+        return dateB.compareTo(dateA); 
       });
 
       final recentData = allBookings.take(4).toList();
@@ -49,43 +80,76 @@ class _AdminOverviewTabState extends State<AdminOverviewTab> {
       
       int dailyB = 0, weeklyB = 0, monthlyB = 0;
       int dailyR = 0, weeklyR = 0, monthlyR = 0;
-      int activeCount = 0;
+      int dailyActive = 0, weeklyActive = 0, monthlyActive = 0;
 
       for (var b in allBookings) {
-        // 🌟 Fix 1: Case-insensitive status check
         final status = (b['status']?.toString() ?? '').toLowerCase();
-        if (status == 'confirmed' || status == 'paid') activeCount++;
+        final isActive = (status == 'confirmed' || status == 'paid');
 
-        final bDateRaw = DateTime.tryParse(b['booking_date'].toString()) ?? now;
+        // 🌟 THE FIX: Safely read checkout_payload as a List (Array) to get the real court date
+        final rawPayload = b['checkout_payload'];
+        Map<String, dynamic>? firstCartItem;
+        if (rawPayload is List && rawPayload.isNotEmpty) {
+          firstCartItem = rawPayload.first as Map<String, dynamic>?;
+        }
+
+        // Pull the actual scheduled court date (not the checkout time)
+        final String dateString = b['booking_date'] ?? firstCartItem?['booking_date'] ?? firstCartItem?['date'] ?? b['created_at']?.toString() ?? now.toString();
+        
+        final bDateRaw = DateTime.tryParse(dateString) ?? now;
         final bDate = DateTime(bDateRaw.year, bDateRaw.month, bDateRaw.day);
         
-        // 🌟 Fix 2: Bulletproof amount parsing (handles ints, doubles, and strings)
-        final rawAmount = b['amount'];
+        final rawAmount = b['total_amount'] ?? b['amount'];
         int amount = 0;
         if (rawAmount != null) {
           if (rawAmount is num) amount = rawAmount.toInt();
           else if (rawAmount is String) amount = double.tryParse(rawAmount)?.toInt() ?? 0;
         }
 
+        // Calculate the difference between "Today" and the "Court Booking Date"
         final diffDays = today.difference(bDate).inDays.abs();
 
-        if (diffDays == 0) { dailyB++; dailyR += amount; }
-        if (diffDays <= 7) { weeklyB++; weeklyR += amount; }
-        if (diffDays <= 30) { monthlyB++; monthlyR += amount; }
+        if (diffDays == 0) { 
+          dailyB++; 
+          dailyR += amount; 
+          if (isActive) dailyActive++;
+        }
+        if (diffDays <= 7) { 
+          weeklyB++; 
+          weeklyR += amount; 
+          if (isActive) weeklyActive++;
+        }
+        if (diffDays <= 30) { 
+          monthlyB++; 
+          monthlyR += amount; 
+          if (isActive) monthlyActive++;
+        }
       }
 
-      int pendingReports = 0;
+      int dailyRep = 0, weeklyRep = 0, monthlyRep = 0;
       try {
-        final allReports = await supabase.from('reports').select('status');
-        pendingReports = allReports.where((r) => r['status']?.toString().toLowerCase() == 'submitted' || r['status']?.toString().toLowerCase() == 'under review').length;
+        final allReports = await supabase.from('reports').select('status, created_at');
+        for (var r in allReports) {
+          final rStatus = (r['status']?.toString() ?? '').toLowerCase();
+          if (rStatus == 'submitted' || rStatus == 'under review') {
+            final rDateRaw = DateTime.tryParse(r['created_at']?.toString() ?? '') ?? now;
+            final rDate = DateTime(rDateRaw.year, rDateRaw.month, rDateRaw.day);
+            final diffDays = today.difference(rDate).inDays.abs();
+
+            if (diffDays == 0) dailyRep++;
+            if (diffDays <= 7) weeklyRep++;
+            if (diffDays <= 30) monthlyRep++;
+          }
+        }
       } catch (_) {}
 
+      // Apply all the new time-filtered variables without errors!
       setState(() {
         _recentReservations = recentData;
         _dashboardStats = {
-          'Daily': {'bookings': '$dailyB', 'revenue': 'RM $dailyR', 'active': '$activeCount', 'reports': '$pendingReports', 'failed': '0'},
-          'Weekly': {'bookings': '$weeklyB', 'revenue': 'RM $weeklyR', 'active': '$activeCount', 'reports': '$pendingReports', 'failed': '0'},
-          'Monthly': {'bookings': '$monthlyB', 'revenue': 'RM $monthlyR', 'active': '$activeCount', 'reports': '$pendingReports', 'failed': '0'},
+          'Daily': {'bookings': '$dailyB', 'revenue': 'RM $dailyR', 'active': '$dailyActive', 'reports': '$dailyRep', 'failed': '0'},
+          'Weekly': {'bookings': '$weeklyB', 'revenue': 'RM $weeklyR', 'active': '$weeklyActive', 'reports': '$weeklyRep', 'failed': '0'},
+          'Monthly': {'bookings': '$monthlyB', 'revenue': 'RM $monthlyR', 'active': '$monthlyActive', 'reports': '$monthlyRep', 'failed': '0'},
         };
       });
     } catch (e) {
@@ -211,14 +275,34 @@ class _AdminOverviewTabState extends State<AdminOverviewTab> {
                       final b = entry.value;
                       final profile = b['profiles'] ?? {};
                       
+                      // 🌟 FIX 3: Shorten the ugly UUID to just the first 8 characters
+                      final String rawId = b['id'].toString();
+                      final String shortId = rawId.length > 8 ? rawId.substring(0, 8).toUpperCase() : rawId.toUpperCase();
+                      
+                      // 🌟 FIX 4: Safely handle checkout_payload as a List (Array)
+                      final rawPayload = b['checkout_payload'];
+                      Map<String, dynamic>? firstCartItem;
+                      
+                      if (rawPayload is List && rawPayload.isNotEmpty) {
+                        firstCartItem = rawPayload.first as Map<String, dynamic>?;
+                      }
+
+                      final String facility = b['facility_name'] ?? firstCartItem?['facility_name'] ?? 'Facility Not Set';
+                      final String bDate = b['booking_date'] ?? firstCartItem?['date'] ?? 'No Date';
+                      
+                      String bTime = b['start_time'] ?? 'No Time';
+                      if (b['start_time'] == null && firstCartItem?['start_times'] is List && (firstCartItem?['start_times'] as List).isNotEmpty) {
+                        bTime = (firstCartItem!['start_times'] as List).first.toString();
+                      }
+
                       return Column(
                         children: [
                           _buildReservationRow(
-                            '#KRP-${b['id'].toString().padLeft(4, '0')}', 
+                            '#KRP-$shortId', 
                             profile['full_name'] ?? 'Unknown User', 
                             profile['matric_number'] ?? 'N/A', 
-                            b['facility_name'] ?? 'Facility', 
-                            '${b['booking_date'] ?? ''}\n${b['start_time'] ?? ''}'
+                            facility, 
+                            '$bDate\n$bTime'
                           ),
                           if (index != _recentReservations.length - 1) const Divider(height: 1),
                         ],
