@@ -71,6 +71,7 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
   String selectedStartTime = '9:00 PM';
   int selectedDurationHours = 1;
   final List<Booking> cartItems = [];
+  final Set<String> _unavailableCartIds = {};
 
   bool reservationCreated = false;
   bool _isReserving = false;
@@ -175,16 +176,6 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
 
   // 🌟 Check live Supabase DB for overlapping times
   String _getCourtStatus(String facilityName, List<String> requestedSlots) {
-    // 1. Is it currently in our cart?
-    if (cartItems.any(
-      (item) =>
-          item.facilityName == facilityName &&
-          DateUtils.isSameDay(item.date, selectedDate) &&
-          item.timeSlots.any((slot) => requestedSlots.contains(slot)),
-    )) {
-      return 'In Cart';
-    }
-
     if (_availabilityError != null) return 'Unavailable';
     for (final booking in _dayBookings) {
       if (booking.facilityName == facilityName &&
@@ -197,6 +188,17 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
         };
       }
     }
+
+    // 1. Is it currently in our cart?
+    if (cartItems.any(
+      (item) =>
+          item.facilityName == facilityName &&
+          DateUtils.isSameDay(item.date, selectedDate) &&
+          item.timeSlots.any((slot) => requestedSlots.contains(slot)),
+    )) {
+      return 'In Cart';
+    }
+
     return 'Available';
   }
 
@@ -213,6 +215,22 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
       if (!mounted || request != _availabilityRequest) return;
       setState(() {
         _dayBookings = bookings;
+        // A cart entry is not a reservation. Fresh server state wins.
+        // Do not flag our own pending Billplz hold as another user's conflict.
+        if (_pendingBookingId == null && !reservationCreated) {
+          for (final item in cartItems.where(
+            (item) => DateUtils.isSameDay(item.date, date),
+          )) {
+            final blocked = bookings.any((booking) =>
+                booking.facilityName == item.facilityName &&
+                booking.timeSlots.any((slot) => item.timeSlots.contains(slot)));
+            if (blocked) {
+              _unavailableCartIds.add(item.id.toString());
+            } else {
+              _unavailableCartIds.remove(item.id.toString());
+            }
+          }
+        }
         _isLoadingAvailability = false;
         _autoSelectFirstAvailableCourt();
       });
@@ -903,6 +921,7 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
     final sport = selectedSport;
     final court = booking.facilityName.replaceFirst('$selectedSport ', '');
     final date = booking.date;
+    final unavailable = _unavailableCartIds.contains(booking.id.toString());
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -940,6 +959,11 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
                   '$court · ${date.day} ${monthNames[date.month - 1]} ${date.year}',
                   style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
                 ),
+                if (unavailable)
+                  const Text(
+                    'Unavailable — remove this item and choose another slot.',
+                    style: TextStyle(color: Colors.red, fontWeight: FontWeight.w600),
+                  ),
                 const SizedBox(height: 3),
                 Text(
                   '${booking.timeSlots.first} - ${_formatTime(_minutesFor(booking.timeSlots.first.toString()) + (booking.timeSlots.length as int) * 60)}',
@@ -1115,6 +1139,7 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
   void _removeCartItem(Booking booking) {
     setState(() {
       _checkoutRequestId = null;
+      _unavailableCartIds.remove(booking.id.toString());
       cartItems.removeWhere((item) => item.id == booking.id);
     });
   }
@@ -1368,7 +1393,7 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
             borderRadius: BorderRadius.circular(10),
           ),
         ),
-        onPressed: _canSubmitPayment && !_isReserving
+        onPressed: _canSubmitPayment && !_isReserving && _unavailableCartIds.isEmpty
             ? _reserveSelectedCart
             : null,
         child: Text(
@@ -1574,7 +1599,8 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
   }
 
   Future<void> _reserveSelectedCart() async {
-    if (_isReserving || cartItems.isEmpty || reservationCreated) return;
+    if (_isReserving || cartItems.isEmpty || reservationCreated ||
+        _unavailableCartIds.isNotEmpty) return;
     setState(() => _isReserving = true);
     // Keep this key on network errors: the server might have committed already.
     final key = _checkoutRequestId ??= BookingService.newCheckoutRequestId();
@@ -1626,11 +1652,51 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
           e.code == '23505' || e.message.contains('SLOT_UNAVAILABLE');
       if (conflict) {
         _checkoutRequestId = null;
-        _showMessage(
-          'A selected slot is reserved or booked. No payment was taken. Choose another time.',
-        );
         setState(() => currentStep = 2);
+        // The cart can span several dates. Recheck each date to identify only
+        // the blocked items; the server remains the final checkout authority.
+        final blockedItems = <Booking>[];
+        try {
+          final byDate = <DateTime, List<Booking>>{};
+          for (final item in cartItems) {
+            final date = DateUtils.dateOnly(item.date);
+            final bookings = byDate[date] ??=
+                await _bookingService.getBookingsForDate(date);
+            if (bookings.any((booking) =>
+                booking.facilityName == item.facilityName &&
+                booking.timeSlots.any((slot) => item.timeSlots.contains(slot)))) {
+              blockedItems.add(item);
+            }
+          }
+          if (!mounted) return;
+          setState(() {
+            _unavailableCartIds
+              ..clear()
+              ..addAll(blockedItems.map((item) => item.id.toString()));
+          });
+        } catch (_) {
+          // Do not guess which item conflicts when the refresh fails.
+        }
+        if (!mounted) return;
         await _fetchAvailability();
+        if (!mounted) return;
+        await showDialog<void>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: const Text('Selected slot is no longer available'),
+            content: Text(
+              blockedItems.isEmpty
+                  ? 'A selected slot is booked, reserved or unavailable. No payment was taken. Refresh availability and choose another slot.'
+                  : '${blockedItems.map((item) => "${item.facilityName} · ${item.date.day}/${item.date.month}/${item.date.year} · ${item.timeSlots.join(", ")}").join("\n")}\n\nThese slots are booked, reserved or unavailable. No payment was taken. Remove the unavailable items and choose another slot.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('Choose another slot'),
+              ),
+            ],
+          ),
+        );
       } else if (e.message.contains('HOLD_EXPIRED')) {
         _checkoutRequestId = null;
         _showMessage(
@@ -1644,6 +1710,7 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
         if (!mounted) return;
         setState(() {
           cartItems.clear();
+          _unavailableCartIds.clear();
           currentStep = 1;
         });
         _showMessage(
@@ -1947,3 +2014,4 @@ class _PrototypeCourtPainter extends CustomPainter {
     return oldDelegate.lineColor != lineColor || oldDelegate.sport != sport;
   }
 }
+
