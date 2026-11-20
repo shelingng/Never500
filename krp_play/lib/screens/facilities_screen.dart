@@ -71,7 +71,6 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
   String selectedStartTime = '9:00 PM';
   int selectedDurationHours = 1;
   final List<Booking> cartItems = [];
-  final Set<String> _unavailableCartIds = {};
 
   bool reservationCreated = false;
   bool _isReserving = false;
@@ -215,26 +214,12 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
       if (!mounted || request != _availabilityRequest) return;
       setState(() {
         _dayBookings = bookings;
-        // A cart entry is not a reservation. Fresh server state wins.
-        // Do not flag our own pending Billplz hold as another user's conflict.
-        if (_pendingBookingId == null && !reservationCreated) {
-          for (final item in cartItems.where(
-            (item) => DateUtils.isSameDay(item.date, date),
-          )) {
-            final blocked = bookings.any((booking) =>
-                booking.facilityName == item.facilityName &&
-                booking.timeSlots.any((slot) => item.timeSlots.contains(slot)));
-            if (blocked) {
-              _unavailableCartIds.add(item.id.toString());
-            } else {
-              _unavailableCartIds.remove(item.id.toString());
-            }
-          }
-        }
         _isLoadingAvailability = false;
         _autoSelectFirstAvailableCourt();
       });
-    } catch (_) {
+    } catch (error, stackTrace) {
+      debugPrint('Facility availability failed: $error');
+      debugPrintStack(stackTrace: stackTrace);
       if (!mounted || request != _availabilityRequest) return;
       setState(() {
         _isLoadingAvailability = false;
@@ -486,7 +471,17 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
                 color: const Color(0xFFEBF5E9),
                 borderRadius: BorderRadius.circular(12),
               ),
-              child: Icon(_sportIcon(sport), color: primaryGreen),
+              child: sport == 'Ping Pong' || sport == 'Snooker'
+                  ? Center(
+                      child: CustomPaint(
+                        size: const Size(28, 28),
+                        painter: _SportChoiceIconPainter(
+                          sport: sport,
+                          color: primaryGreen,
+                        ),
+                      ),
+                    )
+                  : Icon(_sportIcon(sport), color: primaryGreen),
             ),
             const SizedBox(width: 14),
             Expanded(
@@ -918,10 +913,15 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
   }
 
   Widget _buildCartItemCard(Booking booking) {
-    final sport = selectedSport;
-    final court = booking.facilityName.replaceFirst('$selectedSport ', '');
+    // Each cart card describes its saved booking, not the current sport picker.
+    final facilityName = booking.facilityName.toString();
+    final sport = facilityName.split(
+      RegExp(r'\s+(?:Court|Table|Board)\b', caseSensitive: false),
+    ).first;
+    final court = facilityName.startsWith('$sport ')
+        ? facilityName.substring(sport.length + 1)
+        : facilityName;
     final date = booking.date;
-    final unavailable = _unavailableCartIds.contains(booking.id.toString());
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -959,11 +959,6 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
                   '$court · ${date.day} ${monthNames[date.month - 1]} ${date.year}',
                   style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
                 ),
-                if (unavailable)
-                  const Text(
-                    'Unavailable — remove this item and choose another slot.',
-                    style: TextStyle(color: Colors.red, fontWeight: FontWeight.w600),
-                  ),
                 const SizedBox(height: 3),
                 Text(
                   '${booking.timeSlots.first} - ${_formatTime(_minutesFor(booking.timeSlots.first.toString()) + (booking.timeSlots.length as int) * 60)}',
@@ -1139,7 +1134,6 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
   void _removeCartItem(Booking booking) {
     setState(() {
       _checkoutRequestId = null;
-      _unavailableCartIds.remove(booking.id.toString());
       cartItems.removeWhere((item) => item.id == booking.id);
     });
   }
@@ -1393,7 +1387,7 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
             borderRadius: BorderRadius.circular(10),
           ),
         ),
-        onPressed: _canSubmitPayment && !_isReserving && _unavailableCartIds.isEmpty
+        onPressed: _canSubmitPayment && !_isReserving
             ? _reserveSelectedCart
             : null,
         child: Text(
@@ -1598,9 +1592,68 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
     );
   }
 
+  Future<void> _removeConflictingCartItems() async {
+    final cartSnapshot = List<Booking>.from(cartItems);
+    final unavailable = <Booking>[];
+    final dates = <DateTime, List<Booking>>{};
+    try {
+      // Check every date in a mixed-date cart. Never clear unrelated items.
+      for (final item in cartSnapshot) {
+        final date = DateUtils.dateOnly(item.date);
+        final bookings = dates[date] ??=
+            await _bookingService.getBookingsForDate(date);
+        final blocked = bookings.any((booking) =>
+            booking.facilityName == item.facilityName &&
+            booking.timeSlots.any((slot) => item.timeSlots.contains(slot)));
+        if (blocked) unavailable.add(item);
+      }
+    } catch (_) {
+      // Retain the existing availability failure behaviour.
+      if (!mounted) return;
+      _showMessage(
+        'A selected slot is reserved or booked. No payment was taken. Choose another time.',
+      );
+      setState(() => currentStep = 2);
+      await _fetchAvailability();
+      return;
+    }
+    if (!mounted) return;
+    final removedIds = unavailable.map((item) => item.id).toSet();
+    setState(() {
+      cartItems.removeWhere((item) => removedIds.contains(item.id));
+      currentStep = 2;
+    });
+    await _fetchAvailability();
+    if (!mounted) return;
+    final details = unavailable.map((item) {
+      final date = item.date;
+      final start = item.timeSlots.first.toString();
+      final end = _formatTime(
+        _minutesFor(start) + (item.timeSlots.length as int) * 60,
+      );
+      return '${item.facilityName} · ${date.day} ${monthNames[date.month - 1]} ${date.year} · $start–$end';
+    }).join('\n\n');
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Selected slot is no longer available'),
+        content: SingleChildScrollView(
+          child: Text(unavailable.isEmpty
+              ? 'A selected slot was booked or reserved before checkout. No payment was started. Please choose another slot.'
+              : '$details\n\nThese slots are booked, reserved or unavailable and have been removed from your cart. Other cart items are kept. No payment was started.'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Choose another slot'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _reserveSelectedCart() async {
-    if (_isReserving || cartItems.isEmpty || reservationCreated ||
-        _unavailableCartIds.isNotEmpty) return;
+    if (_isReserving || cartItems.isEmpty || reservationCreated) return;
     setState(() => _isReserving = true);
     // Keep this key on network errors: the server might have committed already.
     final key = _checkoutRequestId ??= BookingService.newCheckoutRequestId();
@@ -1652,51 +1705,7 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
           e.code == '23505' || e.message.contains('SLOT_UNAVAILABLE');
       if (conflict) {
         _checkoutRequestId = null;
-        setState(() => currentStep = 2);
-        // The cart can span several dates. Recheck each date to identify only
-        // the blocked items; the server remains the final checkout authority.
-        final blockedItems = <Booking>[];
-        try {
-          final byDate = <DateTime, List<Booking>>{};
-          for (final item in cartItems) {
-            final date = DateUtils.dateOnly(item.date);
-            final bookings = byDate[date] ??=
-                await _bookingService.getBookingsForDate(date);
-            if (bookings.any((booking) =>
-                booking.facilityName == item.facilityName &&
-                booking.timeSlots.any((slot) => item.timeSlots.contains(slot)))) {
-              blockedItems.add(item);
-            }
-          }
-          if (!mounted) return;
-          setState(() {
-            _unavailableCartIds
-              ..clear()
-              ..addAll(blockedItems.map((item) => item.id.toString()));
-          });
-        } catch (_) {
-          // Do not guess which item conflicts when the refresh fails.
-        }
-        if (!mounted) return;
-        await _fetchAvailability();
-        if (!mounted) return;
-        await showDialog<void>(
-          context: context,
-          builder: (dialogContext) => AlertDialog(
-            title: const Text('Selected slot is no longer available'),
-            content: Text(
-              blockedItems.isEmpty
-                  ? 'A selected slot is booked, reserved or unavailable. No payment was taken. Refresh availability and choose another slot.'
-                  : '${blockedItems.map((item) => "${item.facilityName} · ${item.date.day}/${item.date.month}/${item.date.year} · ${item.timeSlots.join(", ")}").join("\n")}\n\nThese slots are booked, reserved or unavailable. No payment was taken. Remove the unavailable items and choose another slot.',
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(dialogContext),
-                child: const Text('Choose another slot'),
-              ),
-            ],
-          ),
-        );
+        await _removeConflictingCartItems();
       } else if (e.message.contains('HOLD_EXPIRED')) {
         _checkoutRequestId = null;
         _showMessage(
@@ -1710,7 +1719,6 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
         if (!mounted) return;
         setState(() {
           cartItems.clear();
-          _unavailableCartIds.clear();
           currentStep = 1;
         });
         _showMessage(
@@ -2015,3 +2023,47 @@ class _PrototypeCourtPainter extends CustomPainter {
   }
 }
 
+
+// Distinct sport symbols: paddle/ball for Ping Pong, cue/balls for Snooker.
+class _SportChoiceIconPainter extends CustomPainter {
+  final String sport;
+  final Color color;
+
+  const _SportChoiceIconPainter({required this.sport, required this.color});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    canvas.save();
+    canvas.scale(size.width / 28, size.height / 28);
+    final fill = Paint()..color = color;
+    final pen = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.2
+      ..strokeCap = StrokeCap.round;
+    if (sport == 'Ping Pong') {
+      canvas.save();
+      canvas.translate(12, 11);
+      canvas.rotate(0.6);
+      canvas.drawOval(const Rect.fromLTWH(-7, -8, 14, 16), fill);
+      canvas.drawLine(const Offset(0, 7), const Offset(0, 16),
+          pen..strokeWidth = 4);
+      canvas.restore();
+      canvas.drawCircle(const Offset(23, 5), 3, pen..strokeWidth = 1.8);
+    } else {
+      // Triangular rack of balls and a diagonal cue.
+      for (final point in const [
+        Offset(11, 7), Offset(7, 14), Offset(15, 14),
+        Offset(3, 21), Offset(11, 21), Offset(19, 21),
+      ]) {
+        canvas.drawCircle(point, 3, fill);
+      }
+      canvas.drawLine(const Offset(18, 2), const Offset(27, 23), pen);
+    }
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(covariant _SportChoiceIconPainter oldDelegate) =>
+      oldDelegate.sport != sport || oldDelegate.color != color;
+}
