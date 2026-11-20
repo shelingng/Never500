@@ -16,18 +16,13 @@ class PaymentException implements Exception {
 class BookingService {
   SupabaseClient get _supabase => Supabase.instance.client;
 
-  // Payment backend (krp_play/backend). Set at run time, e.g.
-  // flutter run -d chrome --dart-define=PAYMENT_BACKEND_URL=https://xxxx-3000.asse.devtunnels.ms
-  // When empty, checkout falls back to the clearly labelled demo payment.
   static const String paymentBackendUrl = String.fromEnvironment(
     'PAYMENT_BACKEND_URL',
   );
 
   bool get usesRealPayment => paymentBackendUrl.isNotEmpty;
 
-  // Asks the backend to create (or reuse) a Billplz bill for a reserved booking.
-  // The amount is taken from the database on the server, never from this app.
-  Future<String> createBillplzPayment(String bookingId) async {
+  createBillplzPayment(String bookingId) async {
     final session = _supabase.auth.currentSession;
     if (session == null) throw const PaymentException('Sign in to pay.');
 
@@ -64,10 +59,7 @@ class BookingService {
     return body['paymentUrl'].toString();
   }
 
-  // Returns {bookingStatus, paymentDeadline, lastAttempt}. bookingStatus is
-  // written by the verified webhook; lastAttempt is Billplz's latest attempt
-  // ('completed', 'failed', 'pending' or null if the user has not tried yet).
-  Future<Map<String, dynamic>> getPaymentStatus(String bookingId) async {
+  getPaymentStatus(String bookingId) async {
     final session = _supabase.auth.currentSession;
     if (session == null) throw const PaymentException('Sign in to pay.');
 
@@ -99,7 +91,6 @@ class BookingService {
     return body;
   }
 
-  // 1. Fetch available facilities from public.facilities
   getFacilities() async {
     final response = await _supabase
         .from('facilities')
@@ -108,7 +99,6 @@ class BookingService {
     return response;
   }
 
-  // A retry of the same checkout must reuse the same request ID.
   static String newCheckoutRequestId() {
     final random = Random.secure();
     final bytes = List<int>.generate(16, (_) => random.nextInt(256));
@@ -119,21 +109,21 @@ class BookingService {
         '${hex.substring(12, 16)}-${hex.substring(16, 20)}-${hex.substring(20)}';
   }
 
-  Future<Map<String, dynamic>> reserveCart(
+  reserveCart(
     List<Booking> cart, {
     required String requestId,
   }) async {
     return _checkout(cart, requestId: requestId);
   }
 
-  // Explicit prototype payment: never used as evidence of real funds.
-  Future<Map<String, dynamic>> demoPayCart(
+  demoPayCart(
     List<Booking> cart, {
     required String requestId,
     required String method,
-  }) => _checkout(cart, requestId: requestId, demoMethod: method);
+  }) =>
+      _checkout(cart, requestId: requestId, demoMethod: method);
 
-  Future<Map<String, dynamic>> _checkout(
+  _checkout(
     List<Booking> cart, {
     required String requestId,
     String? demoMethod,
@@ -167,8 +157,7 @@ class BookingService {
     return Map<String, dynamic>.from(result as Map);
   }
 
-  // Kept fail-closed for older screens: clients cannot attest that money arrived.
-  Future<void> confirmPayment(
+  confirmPayment(
     String bookingId,
     num amount,
     String method,
@@ -178,9 +167,9 @@ class BookingService {
     );
   }
 
-  Future<List<Booking>> getUserBookings() async {
+  getUserBookings() async {
     final user = _supabase.auth.currentUser;
-    if (user == null) return [];
+    if (user == null) return <Booking>[];
     final response = await _supabase
         .from('bookings')
         .select(
@@ -191,13 +180,13 @@ class BookingService {
     return _unpackBookings(response);
   }
 
-  // No other user's order, identity or payment details are fetched for browsing.
-  Future<List<Booking>> getBookingsForDate(DateTime date) async {
+  getBookingsForDate(DateTime date) async {
     final response = await _supabase.rpc(
       'slot_availability',
       params: {'p_date': _date(date)},
     );
-    return (response as List)
+
+    final bookings = (response as List)
         .where((r) => r['status'] != 'available')
         .map(
           (r) => Booking(
@@ -212,6 +201,35 @@ class BookingService {
           ),
         )
         .toList();
+
+    try {
+      final closures = await _supabase
+          .from('bookings')
+          .select('id, facility_name, start_time, status')
+          .eq('booking_date', _date(date))
+          .ilike('status', '%Closed%');
+
+      for (var c in closures) {
+        final rawTime = c['start_time'].toString();
+        final formattedTime =
+            rawTime.contains('M') ? rawTime : _displayTime(rawTime);
+
+        bookings.add(
+          Booking(
+            id: c['id'].toString(),
+            userId: 'admin',
+            facilityName: c['facility_name'].toString(),
+            date: date,
+            timeSlots: [formattedTime],
+            pricePerSession: 0,
+            totalPrice: 0,
+            status: c['status'].toString(),
+          ),
+        );
+      }
+    } catch (_) {}
+
+    return bookings;
   }
 
   static String _date(DateTime date) =>
@@ -236,8 +254,7 @@ class BookingService {
     (m) => ' ${m[1]!.padLeft(2, '0')}',
   );
 
-  // 🌟 6. Create Report in Database
-  Future<void> createReport({
+  createReport({
     required String category,
     String? bookingId,
     required String description,
@@ -249,7 +266,6 @@ class BookingService {
     final ref =
         'REP-${DateTime.now().millisecondsSinceEpoch.toString().substring(5)}';
 
-    // Map UI Category to Database Strict Format Constraint
     String dbCategory = 'other';
     if (category == 'Booking Issue') dbCategory = 'booking_issue';
     if (category == 'Payment Issue') dbCategory = 'payment_issue';
@@ -267,8 +283,7 @@ class BookingService {
     });
   }
 
-  // 🌟 7. Fetch Reports from Database
-  Future<List<dynamic>> getUserReports() async {
+  getUserReports() async {
     final user = _supabase.auth.currentUser;
     if (user == null) return [];
 
@@ -281,7 +296,6 @@ class BookingService {
     return response;
   }
 
-  // New orders use real slot joins. Legacy notes are read-only compatibility.
   List<Booking> _unpackBookings(List<dynamic> response) {
     final results = <Booking>[];
     for (final row in response) {
@@ -296,12 +310,13 @@ class BookingService {
       }
       final label = switch (status) {
         'confirmed' => row['is_demo'] == true
-            ? 'Demo paid & confirmed' : 'Paid & Confirmed',
+            ? 'Demo paid & confirmed'
+            : 'Paid & Confirmed',
         'pending_payment' => 'Reserved - awaiting payment',
         'expired' => 'Expired - unpaid',
         _ => status,
       };
-      final groups = <String, List<Map<String, dynamic>>>{};
+      final groups = <String, List>{};
       for (final raw in (row['booking_items'] as List? ?? [])) {
         final item = Map<String, dynamic>.from(raw as Map);
         final slot = item['time_slots'] as Map?;
