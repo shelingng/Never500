@@ -10,15 +10,23 @@ class AdminReportsTab extends StatefulWidget {
 
 class _AdminReportsTabState extends State<AdminReportsTab> {
   static const _green = Color(0xFF173F32);
+  static const _storageBucket = 'report-attachments';
   final supabase = Supabase.instance.client;
-
-  static const _statuses = ['Submitted', 'Under Review', 'Resolved', 'Rejected'];
 
   final _searchController = TextEditingController();
   String _selectedStatus = 'All';
+  DateTime? _selectedDate;
 
   bool _isLoading = true;
   List _reports = [];
+
+  static const _statusOptions = [
+    'All',
+    'Submitted',
+    'Under Review',
+    'Resolved',
+    'Rejected',
+  ];
 
   @override
   void initState() {
@@ -26,56 +34,591 @@ class _AdminReportsTabState extends State<AdminReportsTab> {
     _fetchReports();
   }
 
+  String _normalizeStatus(dynamic rawStatus) {
+    final s = (rawStatus?.toString() ?? '').trim().toLowerCase().replaceAll('_', ' ');
+    if (s == 'submitted' || s == 'open' || s == 'new' || s == 'pending') {
+      return 'Submitted';
+    }
+    if (s == 'under review' || s == 'in review' || s == 'reviewing' || s == 'in progress') {
+      return 'Under Review';
+    }
+    if (s == 'resolved' || s == 'closed' || s == 'completed') {
+      return 'Resolved';
+    }
+    if (s == 'rejected' || s == 'declined' || s == 'dismissed') {
+      return 'Rejected';
+    }
+    return rawStatus?.toString().trim().isNotEmpty == true
+        ? rawStatus.toString().trim()
+        : 'Submitted';
+  }
+
+  String _formatDateIso(DateTime date) =>
+      '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+
+  String _formatDateLabel(DateTime date) {
+    const months = [
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+    ];
+    return '${date.day} ${months[date.month - 1]} ${date.year}';
+  }
+
+  String _extractDateOnly(dynamic rawDate) {
+    final str = (rawDate?.toString() ?? '').trim();
+    if (str.isEmpty) return '';
+    final parsed = DateTime.tryParse(str);
+    if (parsed != null) {
+      return _formatDateIso(parsed.toLocal());
+    }
+    return str.length >= 10 ? str.substring(0, 10) : str;
+  }
+
+  Future<void> _selectDate(BuildContext context) async {
+    final now = DateTime.now();
+    final initialDate = _selectedDate ?? DateTime(now.year, now.month, now.day);
+
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: initialDate,
+      firstDate: DateTime(2025, 1, 1),
+      lastDate: DateTime(now.year + 1, 12, 31),
+      builder: (context, child) => Theme(
+        data: Theme.of(context).copyWith(
+          colorScheme: const ColorScheme.light(
+            primary: _green,
+            onPrimary: Colors.white,
+          ),
+        ),
+        child: child!,
+      ),
+    );
+
+    if (picked != null) {
+      setState(() => _selectedDate = picked);
+    }
+  }
+
+  Future<String> _resolveAttachmentUrl(String rawPath) async {
+    final cleaned = rawPath.trim();
+    if (cleaned.isEmpty) return '';
+    if (cleaned.startsWith('http://') || cleaned.startsWith('https://')) {
+      return cleaned;
+    }
+
+    String bucket = _storageBucket;
+    String objectPath = cleaned;
+    if (cleaned.contains('/')) {
+      final firstSlash = cleaned.indexOf('/');
+      final maybeBucket = cleaned.substring(0, firstSlash);
+      if (maybeBucket == 'report-attachments' || maybeBucket == 'reports' || maybeBucket == 'attachments') {
+        bucket = maybeBucket;
+        objectPath = cleaned.substring(firstSlash + 1);
+      }
+    }
+
+    try {
+      final signed = await supabase.storage.from(bucket).createSignedUrl(objectPath, 3600);
+      if (signed.isNotEmpty) return signed;
+    } catch (_) {}
+
+    return supabase.storage.from(bucket).getPublicUrl(objectPath);
+  }
+
   Future<void> _fetchReports() async {
     setState(() => _isLoading = true);
     try {
-      final response = await supabase
-          .from('reports')
-          .select('*, profiles!reports_user_id_fkey(full_name, matric_number)')
-          .order('created_at', ascending: false);
+      List rows = [];
+      try {
+        rows = await supabase
+            .from('reports')
+            .select('*, profiles!reports_user_id_fkey(full_name, matric_number)')
+            .order('created_at', ascending: false);
+      } catch (_) {
+        rows = await supabase
+            .from('reports')
+            .select()
+            .order('created_at', ascending: false);
+      }
 
-      final mappedReports = response.map((r) {
-        final p = r['profiles'] ?? {};
-        // Format date string safely
-        String formattedDate = '';
-        if (r['created_at'] != null) {
-          final d = DateTime.tryParse(r['created_at'].toString());
-          if (d != null) formattedDate = '${d.year}-${d.month.toString().padLeft(2,'0')}-${d.day.toString().padLeft(2,'0')}';
+      final userIds = <String>{};
+      final bookingIds = <String>{};
+      final reportIds = <String>[];
+
+      for (final r in rows) {
+        final rid = (r['id'] ?? '').toString().trim();
+        if (rid.isNotEmpty) reportIds.add(rid);
+
+        final uid = (r['user_id'] ?? '').toString().trim();
+        if (uid.isNotEmpty) userIds.add(uid);
+
+        final bid = (r['related_booking_id'] ?? '').toString().trim();
+        if (bid.isNotEmpty) bookingIds.add(bid);
+      }
+
+      final profilesById = <String, Map<String, dynamic>>{};
+      if (userIds.isNotEmpty) {
+        try {
+          final profRows = await supabase
+              .from('profiles')
+              .select('id, full_name, matric_number')
+              .inFilter('id', userIds.toList());
+          for (final p in profRows) {
+            final pid = (p['id'] ?? '').toString().trim();
+            if (pid.isNotEmpty) {
+              profilesById[pid] = Map<String, dynamic>.from(p as Map);
+            }
+          }
+        } catch (_) {}
+      }
+
+      final bookingsById = <String, Map<String, dynamic>>{};
+      if (bookingIds.isNotEmpty) {
+        try {
+          final bRows = await supabase
+              .from('bookings')
+              .select('id, facility_name, booking_date, start_time, checkout_payload')
+              .inFilter('id', bookingIds.toList());
+          for (final b in bRows) {
+            final bid = (b['id'] ?? '').toString().trim();
+            if (bid.isNotEmpty) {
+              bookingsById[bid] = Map<String, dynamic>.from(b as Map);
+            }
+          }
+        } catch (_) {}
+      }
+
+      final attachmentsByReportId = <String, List>{};
+      if (reportIds.isNotEmpty) {
+        try {
+          final attRows = await supabase
+              .from('report_attachments')
+              .select()
+              .inFilter('report_id', reportIds)
+              .order('created_at', ascending: true);
+
+          for (final a in attRows) {
+            final rid = (a['report_id'] ?? '').toString().trim();
+            final path = (a['storage_path'] ?? '').toString().trim();
+            if (rid.isEmpty || path.isEmpty) continue;
+            final url = await _resolveAttachmentUrl(path);
+            if (url.isEmpty) continue;
+            attachmentsByReportId.putIfAbsent(rid, () => []).add({
+              'url': url,
+              'name': (a['file_name'] ?? 'Attachment').toString(),
+              'mime': (a['mime_type'] ?? '').toString(),
+            });
+          }
+        } catch (_) {}
+      }
+
+      final mapped = rows.map((r) {
+        final rawId = (r['id'] ?? '').toString().trim();
+        final refCode = (r['report_reference'] ?? r['report_code'] ?? '').toString().trim();
+        final displayRef = refCode.isNotEmpty
+            ? refCode
+            : (rawId.isNotEmpty ? 'RPT-$rawId' : 'RPT-UNKNOWN');
+
+        final uid = (r['user_id'] ?? '').toString().trim();
+        final joinedProfile = r['profiles'] is Map
+            ? Map<String, dynamic>.from(r['profiles'] as Map)
+            : <String, dynamic>{};
+        final lookedUpProfile = uid.isNotEmpty
+            ? (profilesById[uid] ?? <String, dynamic>{})
+            : <String, dynamic>{};
+
+        final userName = [
+          joinedProfile['full_name'],
+          lookedUpProfile['full_name'],
+        ].map((v) => (v ?? '').toString().trim()).firstWhere((v) => v.isNotEmpty, orElse: () => '');
+
+        final matric = [
+          joinedProfile['matric_number'],
+          lookedUpProfile['matric_number'],
+        ].map((v) => (v ?? '').toString().trim()).firstWhere((v) => v.isNotEmpty, orElse: () => '');
+
+        final bid = (r['related_booking_id'] ?? '').toString().trim();
+        final booking = bid.isNotEmpty ? (bookingsById[bid] ?? <String, dynamic>{}) : <String, dynamic>{};
+        String facility = (booking['facility_name'] ?? '').toString().trim();
+        if (facility.isEmpty && booking['checkout_payload'] is List && (booking['checkout_payload'] as List).isNotEmpty) {
+          final firstItem = (booking['checkout_payload'] as List).first;
+          if (firstItem is Map) {
+            facility = (firstItem['facility_name'] ?? '').toString().trim();
+          }
         }
 
+        final title = [
+          r['subject'],
+          r['title'],
+          r['issue_type'],
+        ].map((v) => (v ?? '').toString().trim()).firstWhere((v) => v.isNotEmpty, orElse: () => 'General Issue');
+
+        final description = [
+          r['description'],
+          r['details'],
+          r['message'],
+        ].map((v) => (v ?? '').toString().trim()).firstWhere((v) => v.isNotEmpty, orElse: () => '');
+
+        final category = (r['category'] ?? '').toString().trim();
+        final rawStatus = (r['status'] ?? 'submitted').toString().trim();
+        final normalizedStatus = _normalizeStatus(rawStatus);
+        final dateIso = _extractDateOnly(r['created_at'] ?? r['submitted_at']);
+        final adminResponse = (r['admin_response'] ?? r['admin_notes'] ?? '').toString();
+        final photos = rawId.isNotEmpty ? (attachmentsByReportId[rawId] ?? []) : [];
+
         return {
-          'db_id': r['id'], // Actual database ID for updating
-          'id': 'RPT-${r['id'].toString().padLeft(4, '0')}',
-          'name': p['full_name'] ?? 'Unknown User',
-          'matric': p['matric_number'] ?? 'N/A',
-          'facility': r['facility_name'] ?? 'Facility Not Specified',
-          'booking': r['booking_id'] != null ? '#KRP-${r['booking_id'].toString().padLeft(4,'0')}' : 'General',
-          'date': formattedDate,
-          'subject': r['issue_type'] ?? 'General Issue',
-          'description': r['description'] ?? 'No description provided.',
-          'status': r['status'] ?? 'Submitted',
-          'response': r['admin_response'] ?? '',
-          'image_url': r['image_url'], // If you have images
+          'id': r['id'],
+          'ref': displayRef,
+          'title': title,
+          'description': description,
+          'category': category,
+          'relatedBookingId': bid,
+          'facility': facility,
+          'userName': userName,
+          'matric': matric,
+          'status': rawStatus.isEmpty ? 'submitted' : rawStatus,
+          'normalizedStatus': normalizedStatus,
+          'date': dateIso,
+          'adminResponse': adminResponse,
+          'photos': photos,
         };
       }).toList();
 
-      if (mounted) setState(() => _reports = mappedReports);
+      if (mounted) {
+        setState(() => _reports = mapped);
+      }
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error loading reports: $e')));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error loading reports: $e')),
+        );
+      }
     } finally {
-      if (mounted) setState(() => _isLoading = false);
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
     }
   }
 
   List get _filteredReports {
     final query = _searchController.text.trim().toLowerCase();
+    final targetDateIso = _selectedDate != null ? _formatDateIso(_selectedDate!) : null;
+
     return _reports.where((report) {
-      final matchesStatus = _selectedStatus == 'All' || report['status'] == _selectedStatus;
+      final matchesStatus = _selectedStatus == 'All' ||
+          report['normalizedStatus'] == _selectedStatus ||
+          report['status'].toString().toLowerCase() == _selectedStatus.toLowerCase();
+
+      final reportDate = (report['date']?.toString() ?? '').trim();
+      final matchesDate = targetDateIso == null || reportDate == targetDateIso;
+
       final searchable = [
-        report['id'], report['name'], report['matric'], report['facility'], report['subject']
+        report['ref'],
+        report['title'],
+        report['description'],
+        report['category'],
+        report['userName'],
+        report['matric'],
+        report['facility'],
+        report['date'],
       ].join(' ').toLowerCase();
-      return matchesStatus && searchable.contains(query);
+
+      return matchesStatus && matchesDate && searchable.contains(query);
     }).toList();
+  }
+
+  void _clearFilters() {
+    setState(() {
+      _searchController.clear();
+      _selectedStatus = 'All';
+      _selectedDate = null;
+    });
+  }
+
+  Color _statusColor(String status) {
+    final norm = _normalizeStatus(status);
+    if (norm == 'Resolved') return const Color(0xFF237346);
+    if (norm == 'Under Review') return const Color(0xFF1D5B96);
+    if (norm == 'Rejected') return const Color(0xFFB13D35);
+    return const Color(0xFF946000);
+  }
+
+  Widget _statusBadge(String status) {
+    final color = _statusColor(status);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withAlpha(22),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Text(
+        status,
+        style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w600),
+      ),
+    );
+  }
+
+  void _showPhotoPreview(String imageUrl, String title) {
+    showDialog(
+      context: context,
+      builder: (ctx) => Dialog(
+        backgroundColor: Colors.black,
+        insetPadding: const EdgeInsets.all(16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            AppBar(
+              backgroundColor: Colors.black,
+              foregroundColor: Colors.white,
+              title: Text(title, overflow: TextOverflow.ellipsis),
+              leading: IconButton(
+                icon: const Icon(Icons.close),
+                onPressed: () => Navigator.pop(ctx),
+              ),
+            ),
+            Flexible(
+              child: InteractiveViewer(
+                child: Image.network(
+                  imageUrl,
+                  fit: BoxFit.contain,
+                  errorBuilder: (_, __, ___) => const Padding(
+                    padding: EdgeInsets.all(24),
+                    child: Text('Unable to load photo.', style: TextStyle(color: Colors.white)),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openReviewDialog(Map report) async {
+    String nextStatus = _normalizeStatus(report['status']);
+    if (!_statusOptions.contains(nextStatus) || nextStatus == 'All') {
+      nextStatus = 'Submitted';
+    }
+    final responseController = TextEditingController(text: (report['adminResponse'] ?? '').toString());
+    final photos = (report['photos'] is List) ? (report['photos'] as List) : [];
+    bool saving = false;
+
+    await showDialog(
+      context: context,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              title: Text(report['ref'].toString()),
+              content: SizedBox(
+                width: 480,
+                child: SingleChildScrollView(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        report['title'].toString(),
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 17),
+                      ),
+                      if ((report['category'] ?? '').toString().isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Text('Category: ${report['category']}', style: const TextStyle(color: Colors.grey, fontSize: 12)),
+                      ],
+                      if ((report['userName'] ?? '').toString().isNotEmpty ||
+                          (report['matric'] ?? '').toString().isNotEmpty) ...[
+                        const SizedBox(height: 6),
+                        Text(
+                          [
+                            if ((report['userName'] ?? '').toString().isNotEmpty) report['userName'].toString(),
+                            if ((report['matric'] ?? '').toString().isNotEmpty) report['matric'].toString(),
+                          ].join(' · '),
+                          style: const TextStyle(color: Colors.grey, fontSize: 13),
+                        ),
+                      ],
+                      if ((report['facility'] ?? '').toString().isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Text('Facility: ${report['facility']}', style: const TextStyle(fontSize: 13)),
+                      ],
+                      if ((report['relatedBookingId'] ?? '').toString().isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Text('Related booking: ${report['relatedBookingId']}', style: const TextStyle(color: Colors.grey, fontSize: 12)),
+                      ],
+                      if ((report['date'] ?? '').toString().isNotEmpty) ...[
+                        const SizedBox(height: 4),
+                        Text('Submitted ${report['date']}', style: const TextStyle(color: Colors.grey, fontSize: 12)),
+                      ],
+                      const Divider(height: 20),
+                      const Text('Problem description', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                      const SizedBox(height: 6),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF7F9F7),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: Colors.grey.shade200),
+                        ),
+                        child: Text(
+                          (report['description'] ?? '').toString().isNotEmpty
+                              ? report['description'].toString()
+                              : 'No description provided.',
+                          style: const TextStyle(fontSize: 13),
+                        ),
+                      ),
+                      if (photos.isNotEmpty) ...[
+                        const SizedBox(height: 16),
+                        Text('Attached photos (${photos.length})', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 10,
+                          runSpacing: 10,
+                          children: photos.map((p) {
+                            final url = (p['url'] ?? '').toString();
+                            final name = (p['name'] ?? 'Photo').toString();
+                            return InkWell(
+                              onTap: () => _showPhotoPreview(url, name),
+                              borderRadius: BorderRadius.circular(10),
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(10),
+                                child: Image.network(
+                                  url,
+                                  width: 110,
+                                  height: 110,
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (_, __, ___) => Container(
+                                    width: 110,
+                                    height: 110,
+                                    color: Colors.grey.shade200,
+                                    alignment: Alignment.center,
+                                    child: const Icon(Icons.broken_image_outlined, color: Colors.grey),
+                                  ),
+                                ),
+                              ),
+                            );
+                          }).toList(),
+                        ),
+                      ],
+                      const SizedBox(height: 16),
+                      DropdownButtonFormField(
+                        value: nextStatus,
+                        isExpanded: true,
+                        decoration: InputDecoration(
+                          labelText: 'Update report status',
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                        ),
+                        items: _statusOptions
+                            .where((s) => s != 'All')
+                            .map((s) => DropdownMenuItem(value: s, child: Text(s)))
+                            .toList(),
+                        onChanged: (val) {
+                          if (val != null) {
+                            setDialogState(() => nextStatus = val);
+                          }
+                        },
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: responseController,
+                        maxLines: 2,
+                        decoration: InputDecoration(
+                          labelText: 'Admin response (optional)',
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: saving ? null : () => Navigator.pop(dialogContext),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  style: FilledButton.styleFrom(backgroundColor: _green),
+                  onPressed: saving || report['id'] == null
+                      ? null
+                      : () async {
+                          setDialogState(() => saving = true);
+                          try {
+                            final dbStatus = nextStatus.toLowerCase().replaceAll(' ', '_');
+                            final payload = <String, dynamic>{
+                              'status': dbStatus,
+                              'admin_response': responseController.text.trim(),
+                              'reviewed_at': DateTime.now().toIso8601String(),
+                            };
+                            final currentUserId = supabase.auth.currentUser?.id;
+                            if (currentUserId != null && currentUserId.isNotEmpty) {
+                              payload['reviewed_by'] = currentUserId;
+                            }
+
+                            await supabase
+                                .from('reports')
+                                .update(payload)
+                                .eq('id', report['id']);
+
+                            if (dialogContext.mounted) {
+                              Navigator.pop(dialogContext);
+                            }
+                            await _fetchReports();
+                            if (mounted) {
+                              ScaffoldMessenger.of(this.context).showSnackBar(
+                                SnackBar(content: Text('Report updated to $nextStatus.')),
+                              );
+                            }
+                          } catch (e) {
+                            if (mounted) {
+                              ScaffoldMessenger.of(this.context).showSnackBar(
+                                SnackBar(content: Text('Failed to update report: $e')),
+                              );
+                            }
+                          } finally {
+                            if (dialogContext.mounted) {
+                              setDialogState(() => saving = false);
+                            }
+                          }
+                        },
+                  child: Text(saving ? 'Saving...' : 'Save'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    responseController.dispose();
+  }
+
+  Widget _buildDateFilterButton() {
+    final hasDate = _selectedDate != null;
+    return InkWell(
+      onTap: () => _selectDate(context),
+      borderRadius: BorderRadius.circular(10),
+      child: InputDecorator(
+        decoration: InputDecoration(
+          labelText: 'Submitted date',
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+          suffixIcon: hasDate
+              ? IconButton(
+                  icon: const Icon(Icons.close, size: 18),
+                  tooltip: 'Clear date',
+                  onPressed: () => setState(() => _selectedDate = null),
+                )
+              : const Icon(Icons.calendar_today, size: 18),
+        ),
+        child: Text(
+          hasDate ? _formatDateLabel(_selectedDate!) : 'All Dates',
+          style: TextStyle(
+            fontSize: 14,
+            color: hasDate ? Colors.black87 : Colors.grey.shade700,
+          ),
+          overflow: TextOverflow.ellipsis,
+        ),
+      ),
+    );
   }
 
   @override
@@ -84,312 +627,267 @@ class _AdminReportsTabState extends State<AdminReportsTab> {
     super.dispose();
   }
 
-  void _clearFilters() {
-    setState(() {
-      _searchController.clear();
-      _selectedStatus = 'All';
-    });
-  }
-
-  Color _statusColor(String status) {
-    final s = status.toLowerCase();
-    if (s == 'submitted') return const Color(0xFF946000);
-    if (s == 'under review') return const Color(0xFF2665A6);
-    if (s == 'resolved') return const Color(0xFF237346);
-    if (s == 'rejected') return const Color(0xFFB13D35);
-    return Colors.blueGrey;
-  }
-
-  Widget _badge(String status) {
-    final color = _statusColor(status);
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(color: color.withAlpha(22), borderRadius: BorderRadius.circular(8)),
-      child: Text(status, style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w700)),
-    );
-  }
-
-  Widget _detail(String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(label, style: const TextStyle(color: Colors.grey, fontSize: 12)),
-          const SizedBox(height: 4),
-          Text(value),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _openReport(Map<String, dynamic> report) async {
-    final result = await showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => _ReportDetailsDialog(report: report),
-    );
-
-    if (!mounted || result == null) return;
-
-    try {
-      // 🌟 Update Supabase Database
-      await supabase.from('reports').update({
-        'status': result['status'],
-        'admin_response': result['response'],
-      }).eq('id', report['db_id']);
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Report updated successfully!')));
-        _fetchReports(); // Refresh the list
-      }
-    } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error updating report: $e')));
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
-    final reports = _filteredReports;
+    final visibleReports = _filteredReports;
 
     return SingleChildScrollView(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(24),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Column(
+              const Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
-                children: const [
-                  Text('SUPPORT INBOX', style: TextStyle(color: _green, fontWeight: FontWeight.bold, fontSize: 12, letterSpacing: 1.5)),
-                  SizedBox(height: 8),
+                children: [
                   Text('User reports', style: TextStyle(fontSize: 28, fontWeight: FontWeight.w800, color: _green)),
+                  SizedBox(height: 6),
+                  Text(
+                    'Review issues and update their resolution progress directly in the live database.',
+                    style: TextStyle(color: Colors.grey, fontSize: 14),
+                  ),
                 ],
               ),
-              IconButton(icon: const Icon(Icons.refresh, color: _green), onPressed: _fetchReports)
+              IconButton(
+                icon: const Icon(Icons.refresh, color: _green),
+                onPressed: _fetchReports,
+                tooltip: 'Refresh reports',
+              ),
             ],
           ),
-          const SizedBox(height: 8),
-          const Text('Review issues and update their resolution progress directly in the live database.', style: TextStyle(color: Colors.grey)),
           const SizedBox(height: 20),
-          
+
           Container(
-            padding: const EdgeInsets.all(18),
-            decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14), border: Border.all(color: const Color(0xFFE2E8E3))),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                TextField(
-                  controller: _searchController,
-                  decoration: InputDecoration(labelText: 'Search reports', prefixIcon: const Icon(Icons.search), border: OutlineInputBorder(borderRadius: BorderRadius.circular(10))),
-                  onChanged: (_) => setState(() {}),
-                ),
-                const SizedBox(height: 16),
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Expanded(
-                      flex: 2,
-                      child: DropdownButtonFormField<String>(
-                        key: ValueKey(_selectedStatus),
-                        initialValue: _selectedStatus,
-                        decoration: const InputDecoration(labelText: 'Report status', border: OutlineInputBorder()),
-                        items: ['All', ..._statuses].map((status) => DropdownMenuItem(value: status, child: Text(status, overflow: TextOverflow.ellipsis))).toList(),
-                        onChanged: (value) { if (value != null) setState(() => _selectedStatus = value); },
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      flex: 1,
-                      child: TextButton.icon(onPressed: _clearFilters, icon: const Icon(Icons.filter_alt_off_outlined, color: _green, size: 18), label: const Text('Clear', style: TextStyle(color: _green, fontWeight: FontWeight.w600))),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 18),
-          Text('${reports.length} report(s)', style: const TextStyle(fontWeight: FontWeight.w600, color: Colors.grey)),
-          const SizedBox(height: 12),
-          
-          if (_isLoading)
-            const Center(child: Padding(padding: EdgeInsets.all(40), child: CircularProgressIndicator(color: _green)))
-          else if (reports.isEmpty)
-            const Padding(padding: EdgeInsets.symmetric(vertical: 32), child: Center(child: Text('No reports match your filters.')))
-          else
-            ...reports.map((report) => Card(
-              margin: const EdgeInsets.only(bottom: 14),
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
               color: Colors.white,
-              child: Padding(
-                padding: const EdgeInsets.all(18),
-                child: Column(
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: Colors.grey.shade300),
+            ),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final isCompact = constraints.maxWidth < 820;
+                final statusDropdown = DropdownButtonFormField(
+                  value: _selectedStatus,
+                  isExpanded: true,
+                  decoration: InputDecoration(
+                    labelText: 'Report status',
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                  items: _statusOptions
+                      .map((s) => DropdownMenuItem(value: s, child: Text(s, overflow: TextOverflow.ellipsis)))
+                      .toList(),
+                  onChanged: (val) {
+                    if (val != null) setState(() => _selectedStatus = val);
+                  },
+                );
+
+                if (isCompact) {
+                  return Column(
+                    children: [
+                      TextField(
+                        controller: _searchController,
+                        decoration: InputDecoration(
+                          labelText: 'Search reports',
+                          prefixIcon: const Icon(Icons.search),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                        ),
+                        onChanged: (_) => setState(() {}),
+                      ),
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          Expanded(child: statusDropdown),
+                          const SizedBox(width: 10),
+                          Expanded(child: _buildDateFilterButton()),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: TextButton.icon(
+                          onPressed: _clearFilters,
+                          icon: const Icon(Icons.filter_alt_off_outlined, size: 18, color: _green),
+                          label: const Text('Clear', style: TextStyle(color: _green)),
+                        ),
+                      ),
+                    ],
+                  );
+                }
+
+                return Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(report['id'], style: const TextStyle(fontWeight: FontWeight.bold, color: _green)),
-                        _badge(report['status']),
-                      ],
+                    Expanded(
+                      flex: 3,
+                      child: TextField(
+                        controller: _searchController,
+                        decoration: InputDecoration(
+                          labelText: 'Search reports',
+                          prefixIcon: const Icon(Icons.search),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                        ),
+                        onChanged: (_) => setState(() {}),
+                      ),
                     ),
-                    const SizedBox(height: 12),
-                    Text(report['subject'], style: const TextStyle(fontSize: 19, fontWeight: FontWeight.bold)),
-                    const SizedBox(height: 8),
-                    Text('${report['name']} · ${report['matric']}'),
-                    _detail('Facility', report['facility']),
-                    Text('Submitted ${report['date']}', style: const TextStyle(color: Colors.grey, fontSize: 12)),
-                    const SizedBox(height: 14),
-                    SizedBox(
-                      width: double.infinity,
-                      child: OutlinedButton.icon(
-                        onPressed: () => _openReport(report),
-                        icon: const Icon(Icons.visibility_outlined, color: Colors.black87),
-                        label: const Text('View / Update', style: TextStyle(color: Colors.black87)),
+                    const SizedBox(width: 12),
+                    Expanded(flex: 2, child: statusDropdown),
+                    const SizedBox(width: 12),
+                    Expanded(flex: 2, child: _buildDateFilterButton()),
+                    const SizedBox(width: 8),
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8.0),
+                      child: TextButton.icon(
+                        onPressed: _clearFilters,
+                        icon: const Icon(Icons.filter_alt_off_outlined, size: 18, color: _green),
+                        label: const Text('Clear', style: TextStyle(color: _green)),
                       ),
                     ),
                   ],
-                ),
-              ),
-            )),
-        ],
-      ),
-    );
-  }
-}
-
-class _ReportDetailsDialog extends StatefulWidget {
-  final Map<String, dynamic> report;
-  const _ReportDetailsDialog({required this.report});
-
-  @override
-  State<_ReportDetailsDialog> createState() => _ReportDetailsDialogState();
-}
-
-class _ReportDetailsDialogState extends State<_ReportDetailsDialog> {
-  final _formKey = GlobalKey<FormState>();
-  late String _status;
-  late final TextEditingController _responseController;
-
-  @override
-  void initState() {
-    super.initState();
-    _status = widget.report['status'];
-    // Prevent dropdown crashes if DB status is something unexpected
-    if (!['Submitted', 'Under Review', 'Resolved', 'Rejected'].contains(_status)) {
-      _status = 'Submitted';
-    }
-    _responseController = TextEditingController(text: widget.report['response']);
-  }
-
-  @override
-  void dispose() {
-    _responseController.dispose();
-    super.dispose();
-  }
-
-  void _save() {
-    if (!_formKey.currentState!.validate()) return;
-    Navigator.pop(context, {
-      'status': _status,
-      'response': _responseController.text.trim(),
-    });
-  }
-
-  Widget _section(String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 14),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(label, style: const TextStyle(color: Colors.grey, fontSize: 12)),
-          const SizedBox(height: 4),
-          Text(value),
-        ],
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final report = widget.report;
-
-    return AlertDialog(
-      title: Text(report['id']),
-      content: SizedBox(
-        width: 480,
-        child: SingleChildScrollView(
-          child: Form(
-            key: _formKey,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _section('Subject', report['subject']),
-                _section('Student', '${report['name']} · ${report['matric']}'),
-                _section('Facility', report['facility']),
-                _section('Booking reference', report['booking']),
-                _section('Submitted', report['date']),
-                _section('Description', report['description']),
-                
-                if (report['image_url'] != null && report['image_url'].toString().isNotEmpty) ...[
-                  const Text('Supporting evidence', style: TextStyle(color: Colors.grey, fontSize: 12)),
-                  const SizedBox(height: 8),
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(12),
-                    child: Image.network(
-                      report['image_url'],
-                      width: double.infinity,
-                      height: 200,
-                      fit: BoxFit.cover,
-                      errorBuilder: (context, error, stackTrace) => const Text('Unable to load attachment from Supabase.'),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                ] else
-                  _section('Supporting evidence', 'No image attachment provided.'),
-                
-                const Divider(height: 24),
-                DropdownButtonFormField<String>(
-                  initialValue: _status,
-                  decoration: const InputDecoration(labelText: 'Status', border: OutlineInputBorder()),
-                  items: const [
-                    DropdownMenuItem(value: 'Submitted', child: Text('Submitted')),
-                    DropdownMenuItem(value: 'Under Review', child: Text('Under Review')),
-                    DropdownMenuItem(value: 'Resolved', child: Text('Resolved')),
-                    DropdownMenuItem(value: 'Rejected', child: Text('Rejected')),
-                  ],
-                  onChanged: (value) { if (value != null) setState(() => _status = value); },
-                ),
-                const SizedBox(height: 16),
-                TextFormField(
-                  controller: _responseController,
-                  minLines: 3,
-                  maxLines: 5,
-                  decoration: const InputDecoration(
-                    labelText: 'Response to student',
-                    hintText: 'Explain the action taken or decision.',
-                    border: OutlineInputBorder(),
-                    alignLabelWithHint: true,
-                  ),
-                  validator: (value) {
-                    final needsResponse = _status == 'Resolved' || _status == 'Rejected';
-                    if (needsResponse && (value == null || value.trim().isEmpty)) {
-                      return 'Explain why this report is $_status.';
-                    }
-                    return null;
-                  },
-                ),
-              ],
+                );
+              },
             ),
           ),
-        ),
+
+          const SizedBox(height: 20),
+          Text(
+            '${visibleReports.length} report(s)',
+            style: const TextStyle(color: Colors.grey, fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: 12),
+
+          if (_isLoading)
+            const Center(
+              child: Padding(
+                padding: EdgeInsets.all(40),
+                child: CircularProgressIndicator(color: _green),
+              ),
+            )
+          else if (visibleReports.isEmpty)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(36),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: Colors.grey.shade200),
+              ),
+              child: const Column(
+                children: [
+                  Icon(Icons.assignment_late_outlined, size: 42, color: Colors.grey),
+                  SizedBox(height: 10),
+                  Text('No reports match your search and filters.', style: TextStyle(color: Colors.grey, fontSize: 15)),
+                ],
+              ),
+            )
+          else
+            Column(
+              children: visibleReports.map((report) {
+                final photos = (report['photos'] is List) ? (report['photos'] as List) : [];
+                return Card(
+                  margin: const EdgeInsets.only(bottom: 16),
+                  elevation: 0,
+                  color: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    side: BorderSide(color: Colors.grey.shade300),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(18),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Expanded(
+                              child: Text(
+                                report['ref'].toString(),
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 16,
+                                  color: _green,
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            _statusBadge(report['status'].toString()),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          report['title'].toString(),
+                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 17),
+                        ),
+                        if ((report['description'] ?? '').toString().isNotEmpty) ...[
+                          const SizedBox(height: 4),
+                          Text(
+                            report['description'].toString(),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(color: Colors.grey.shade700, fontSize: 13),
+                          ),
+                        ],
+                        if ((report['userName'] ?? '').toString().isNotEmpty ||
+                            (report['matric'] ?? '').toString().isNotEmpty) ...[
+                          const SizedBox(height: 8),
+                          Text(
+                            [
+                              if ((report['userName'] ?? '').toString().isNotEmpty) report['userName'].toString(),
+                              if ((report['matric'] ?? '').toString().isNotEmpty) report['matric'].toString(),
+                            ].join(' · '),
+                            style: TextStyle(color: Colors.grey.shade700, fontSize: 13),
+                          ),
+                        ],
+                        if ((report['facility'] ?? '').toString().isNotEmpty) ...[
+                          const SizedBox(height: 8),
+                          const Text('Facility', style: TextStyle(color: Colors.grey, fontSize: 12)),
+                          Text(report['facility'].toString(), style: const TextStyle(fontSize: 14)),
+                        ],
+                        if (photos.isNotEmpty) ...[
+                          const SizedBox(height: 10),
+                          Row(
+                            children: [
+                              const Icon(Icons.photo_library_outlined, size: 15, color: _green),
+                              const SizedBox(width: 6),
+                              Text(
+                                '${photos.length} photo(s) attached',
+                                style: const TextStyle(color: _green, fontSize: 12, fontWeight: FontWeight.w600),
+                              ),
+                            ],
+                          ),
+                        ],
+                        if ((report['date'] ?? '').toString().isNotEmpty) ...[
+                          const SizedBox(height: 4),
+                          Text(
+                            'Submitted ${report['date']}',
+                            style: const TextStyle(color: Colors.grey, fontSize: 12),
+                          ),
+                        ],
+                        const SizedBox(height: 14),
+                        SizedBox(
+                          width: double.infinity,
+                          child: OutlinedButton.icon(
+                            onPressed: () => _openReviewDialog(report),
+                            icon: const Icon(Icons.visibility_outlined, size: 18, color: Colors.black87),
+                            label: const Text('View / Update', style: TextStyle(color: Colors.black87)),
+                            style: OutlinedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              }).toList(),
+            ),
+        ],
       ),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-        FilledButton(onPressed: _save, style: FilledButton.styleFrom(backgroundColor: const Color(0xFF173F32)), child: const Text('Update live database')),
-      ],
     );
   }
 }

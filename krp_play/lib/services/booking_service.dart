@@ -1,10 +1,18 @@
 import 'dart:convert';
 import 'dart:math';
+import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/booking.dart';
+
+class ReportPhotoUpload {
+  final String name;
+  final Uint8List bytes;
+
+  const ReportPhotoUpload({required this.name, required this.bytes});
+}
 
 class PaymentException implements Exception {
   final String message;
@@ -15,6 +23,8 @@ class PaymentException implements Exception {
 
 class BookingService {
   SupabaseClient get _supabase => Supabase.instance.client;
+
+  static const String reportBucket = 'report-attachments';
 
   static const String paymentBackendUrl = String.fromEnvironment(
     'PAYMENT_BACKEND_URL',
@@ -257,12 +267,19 @@ class BookingService {
   createReport({
     required String category,
     String? bookingId,
+    String? subject,
     required String description,
+    List<ReportPhotoUpload> photos = const [],
   }) async {
     final user = _supabase.auth.currentUser;
     if (user == null) throw Exception('Must be logged in');
 
-    final title = description.split(RegExp(r'[.!?\n]')).first.trim();
+    final cleanedSubject = (subject ?? '').trim();
+    final fallbackTitle = description.split(RegExp(r'[.!?\n]')).first.trim();
+    final finalSubject = cleanedSubject.isNotEmpty
+        ? cleanedSubject
+        : (fallbackTitle.isEmpty ? 'Facility report' : fallbackTitle);
+
     final ref =
         'REP-${DateTime.now().millisecondsSinceEpoch.toString().substring(5)}';
 
@@ -272,15 +289,49 @@ class BookingService {
     if (category == 'Facility Problem') dbCategory = 'facility_problem';
     if (category == 'Account Issue') dbCategory = 'account_issue';
 
-    await _supabase.from('reports').insert({
-      'report_reference': ref,
-      'user_id': user.id,
-      'related_booking_id': bookingId,
-      'category': dbCategory,
-      'subject': title.isEmpty ? 'Facility report' : title,
-      'description': description,
-      'status': 'submitted',
-    });
+    final inserted = await _supabase
+        .from('reports')
+        .insert({
+          'report_reference': ref,
+          'user_id': user.id,
+          'related_booking_id': bookingId,
+          'category': dbCategory,
+          'is_refund_request': false,
+          'subject': finalSubject,
+          'description': description,
+          'status': 'submitted',
+        })
+        .select('id')
+        .single();
+
+    final reportId = inserted['id']?.toString();
+    if (reportId != null && photos.isNotEmpty) {
+      for (int i = 0; i < photos.length; i++) {
+        final photo = photos[i];
+        final ext = photo.name.split('.').last.toLowerCase();
+        final mime = ext == 'png' ? 'image/png' : 'image/jpeg';
+        final storagePath =
+            '${user.id}/$reportId/${DateTime.now().millisecondsSinceEpoch}_$i.$ext';
+
+        await _supabase.storage
+            .from(reportBucket)
+            .uploadBinary(
+              storagePath,
+              photo.bytes,
+              fileOptions: FileOptions(contentType: mime, upsert: true),
+            );
+
+        await _supabase.from('report_attachments').insert({
+          'report_id': reportId,
+          'storage_path': storagePath,
+          'file_name': photo.name,
+          'mime_type': mime,
+          'file_size_bytes': photo.bytes.length,
+        });
+      }
+    }
+
+    return inserted;
   }
 
   getUserReports() async {

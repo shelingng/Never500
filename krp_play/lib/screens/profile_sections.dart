@@ -1,4 +1,5 @@
 part of 'profile_screen.dart';
+
 final Map<String, List<_ReportPhoto>> prototypePhotoCache = {};
 
 class _ReportPhoto {
@@ -36,13 +37,13 @@ abstract class _ProfileSectionsState extends State<ProfileScreen> {
   bool _showReport = false;
   String _reportCategory = 'Booking Issue';
   String? _bookingId;
+  final _reportTitle = TextEditingController();
   final _description = TextEditingController();
-  
-  // 🌟 Live Supabase Variables
+
   final List<_LocalReport> _reports = [];
   bool _isLoadingReports = true;
   bool _isSubmittingReport = false;
-  
+
   final _draftPhotos = <_ReportPhoto>[];
   final Map<String, List<_ReportPhoto>> _photoCache = {};
   bool _pickingPhoto = false;
@@ -63,8 +64,7 @@ abstract class _ProfileSectionsState extends State<ProfileScreen> {
   @override
   void initState() {
     super.initState();
-    // 🌟 Instantly fetch real reports from Supabase when the screen loads
-    _fetchLiveReports(); 
+    _fetchLiveReports();
   }
 
   Future<void> _fetchLiveReports() async {
@@ -77,96 +77,110 @@ abstract class _ProfileSectionsState extends State<ProfileScreen> {
             String facilityName = 'General inquiry';
             if (row['related_booking_id'] != null) {
               try {
-                facilityName = _bookings.firstWhere((b) => b.id == row['related_booking_id']).facilityName;
+                facilityName = _bookings
+                    .firstWhere((b) => b.id == row['related_booking_id'])
+                    .facilityName;
               } catch (_) {
                 facilityName = 'Linked Booking';
               }
             }
 
-            // Map DB constraint string back to UI Format
             String uiCategory = 'Other';
             if (row['category'] == 'booking_issue') uiCategory = 'Booking Issue';
             if (row['category'] == 'payment_issue') uiCategory = 'Payment Issue';
-            if (row['category'] == 'facility_problem') uiCategory = 'Facility Problem';
+            if (row['category'] == 'facility_problem') {
+              uiCategory = 'Facility Problem';
+            }
             if (row['category'] == 'account_issue') uiCategory = 'Account Issue';
-            
-            final createdAt = row['created_at'] != null ? DateTime.parse(row['created_at']) : DateTime.now();
+
+            final createdAt = row['created_at'] != null
+                ? DateTime.parse(row['created_at'].toString()).toLocal()
+                : DateTime.now();
+
+            final desc = (row['description'] ?? '').toString();
+            final subj = (row['subject'] ?? '').toString().trim();
 
             _reports.add(_LocalReport(
-              id: row['report_reference'] ?? row['id'].toString().substring(0, 8),
+              id: row['report_reference'] ??
+                  row['id'].toString().substring(0, 8),
               category: uiCategory,
-              title: row['subject'] ?? 'Facility report',
+              title: subj.isNotEmpty ? subj : 'Facility report',
               facility: facilityName,
               dateTime: '${_shortDate(createdAt)} · ${_clockTime(createdAt)}',
-              description: row['description'] ?? '',
-              photos: const [], 
-              status: row['status'] == 'submitted' ? 'Submitted' :
-                      row['status'] == 'under_review' ? 'Under Review' :
-                      row['status'] == 'resolved' ? 'Resolved' : 'Rejected',
+              description: desc,
+              photos: prototypePhotoCache[desc] ?? const [],
+              status: row['status'] == 'submitted'
+                  ? 'Submitted'
+                  : row['status'] == 'under_review'
+                      ? 'Under Review'
+                      : row['status'] == 'resolved'
+                          ? 'Resolved'
+                          : 'Rejected',
             ));
           }
           _isLoadingReports = false;
         });
       }
     } catch (e) {
-      if(mounted) setState(() => _isLoadingReports = false);
+      if (mounted) setState(() => _isLoadingReports = false);
     }
   }
 
   @override
   void dispose() {
+    _reportTitle.dispose();
     _description.dispose();
     super.dispose();
   }
 
   Widget _refundRequests() => Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      _card(
-        color: const Color(0xFFEFF4EF),
-        child: const Text(
-          'Students cannot cancel bookings or submit refund requests. KRP Management handles eligible refunds when a booked facility is closed, under maintenance, or otherwise unavailable. Students can view refund progress here.',
-          style: TextStyle(height: 1.4),
-        ),
-      ),
-      const SizedBox(height: 8),
-      _refundCard(
-        'BK-2026-0317',
-        'Badminton Court 01',
-        'Facility closed for maintenance',
-        'FPX Online Banking · Maybank',
-        'Bank Transfer',
-        'PROCESSING',
-      ),
-      _refundCard(
-        'BK-2026-0302',
-        'Badminton Court 02',
-        'Court unavailable by admin',
-        'Touch \'n Go eWallet',
-        'TNG eWallet',
-        'REFUNDED',
-      ),
-      _refundCard(
-        'BK-2026-0224',
-        'Ping Pong Table 01',
-        'Refund processing failed; management will retry',
-        'FPX Online Banking · CIMB Bank',
-        'Manual (Admin)',
-        'FAILED',
-      ),
-      const Padding(
-        padding: EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-        child: Text(
-          'Demo refund status only. Processing times depend on the payment provider; no transaction is performed in this prototype.',
-          style: TextStyle(
-            fontSize: 12,
-            color: Colors.black54,
-            fontStyle: FontStyle.italic,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _card(
+            color: const Color(0xFFEFF4EF),
+            child: const Text(
+              'Students cannot cancel bookings or submit refund requests. KRP Management handles eligible refunds when a booked facility is closed, under maintenance, or otherwise unavailable. Students can view refund progress here.',
+              style: TextStyle(height: 1.4),
+            ),
           ),
-        ),
-      ),
-    ],
-  );
+          const SizedBox(height: 8),
+          _refundCard(
+            'BK-2026-0317',
+            'Badminton Court 01',
+            'Facility closed for maintenance',
+            'FPX Online Banking · Maybank',
+            'Bank Transfer',
+            'PROCESSING',
+          ),
+          _refundCard(
+            'BK-2026-0302',
+            'Badminton Court 02',
+            'Court unavailable by admin',
+            'Touch \'n Go eWallet',
+            'TNG eWallet',
+            'REFUNDED',
+          ),
+          _refundCard(
+            'BK-2026-0224',
+            'Ping Pong Table 01',
+            'Refund processing failed; management will retry',
+            'FPX Online Banking · CIMB Bank',
+            'Manual (Admin)',
+            'FAILED',
+          ),
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+            child: Text(
+              'Demo refund status only. Processing times depend on the payment provider; no transaction is performed in this prototype.',
+              style: TextStyle(
+                fontSize: 12,
+                color: Colors.black54,
+                fontStyle: FontStyle.italic,
+              ),
+            ),
+          ),
+        ],
+      );
 
   Widget _refundCard(
     String id,
@@ -179,13 +193,13 @@ abstract class _ProfileSectionsState extends State<ProfileScreen> {
     final color = status == 'REFUNDED'
         ? _green
         : status == 'FAILED'
-        ? const Color(0xFFB3261E)
-        : const Color(0xFFB36B00);
+            ? const Color(0xFFB3261E)
+            : const Color(0xFFB36B00);
     final background = status == 'REFUNDED'
         ? _pale
         : status == 'FAILED'
-        ? const Color(0xFFFCE8E6)
-        : const Color(0xFFFFF0D8);
+            ? const Color(0xFFFCE8E6)
+            : const Color(0xFFFFF0D8);
     return _card(
       margin: const EdgeInsets.only(bottom: 12),
       child: Column(
@@ -213,87 +227,84 @@ abstract class _ProfileSectionsState extends State<ProfileScreen> {
   }
 
   Widget _myReports() => Column(
-    crossAxisAlignment: CrossAxisAlignment.stretch,
-    children: [
-      _card(
-        color: const Color(0xFFEFF4EF),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'How can we help?',
-              style: TextStyle(fontSize: 19, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 12),
-            Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _card(
+            color: const Color(0xFFEFF4EF),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(
-                  child: _contactBox(
-                    Icons.support_agent,
-                    'Admin contact',
-                    'krp@university.edu',
-                  ),
+                const Text(
+                  'How can we help?',
+                  style: TextStyle(fontSize: 19, fontWeight: FontWeight.bold),
                 ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: _contactBox(
-                    Icons.location_on_outlined,
-                    'Visit us',
-                    'KRP Sports Centre',
-                  ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _contactBox(
+                        Icons.support_agent,
+                        'Admin contact',
+                        'krp@university.edu',
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: _contactBox(
+                        Icons.location_on_outlined,
+                        'Visit us',
+                        'KRP Sports Centre',
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),
-          ],
-        ),
-      ),
-      const SizedBox(height: 12),
-      const Text(
-        'Reports are now connected to the live database! (Photo uploads require a Supabase storage bucket setup, so they are kept local for now).',
-        style: TextStyle(fontSize: 12, color: Colors.black54),
-      ),
-      const SizedBox(height: 12),
-      if (!_showReport)
-        FilledButton.icon(
-          onPressed: () => setState(() => _showReport = true),
-          icon: const Icon(Icons.add),
-          label: const Text('Create Report'),
-          style: FilledButton.styleFrom(
-            backgroundColor: _green,
-            minimumSize: const Size.fromHeight(48),
           ),
-        )
-      else
-        _reportForm(),
-      const SizedBox(height: 18),
-      const Text(
-        'Submitted reports',
-        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
-      ),
-      const SizedBox(height: 10),
-      
-      // 🌟 Live Supabase Data View
-      if (_isLoadingReports)
-        const Padding(
-          padding: EdgeInsets.all(40),
-          child: Center(child: CircularProgressIndicator(color: _green)),
-        )
-      else if (_reports.isEmpty)
-        _empty(
-          Icons.description_outlined,
-          'No reports submitted',
-          'Reports you submit will be listed here.',
-        )
-      else
-        ..._reports.map(_reportCard),
-    ],
-  );
+          const SizedBox(height: 12),
+          const Text(
+            'Reports and photo attachments sync to the live database so admins can review details and photos.',
+            style: TextStyle(fontSize: 12, color: Colors.black54),
+          ),
+          const SizedBox(height: 12),
+          if (!_showReport)
+            FilledButton.icon(
+              onPressed: () => setState(() => _showReport = true),
+              icon: const Icon(Icons.add),
+              label: const Text('Create Report'),
+              style: FilledButton.styleFrom(
+                backgroundColor: _green,
+                minimumSize: const Size.fromHeight(48),
+              ),
+            )
+          else
+            _reportForm(),
+          const SizedBox(height: 18),
+          const Text(
+            'Submitted reports',
+            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+          ),
+          const SizedBox(height: 10),
+          if (_isLoadingReports)
+            const Padding(
+              padding: EdgeInsets.all(40),
+              child: Center(child: CircularProgressIndicator(color: _green)),
+            )
+          else if (_reports.isEmpty)
+            _empty(
+              Icons.description_outlined,
+              'No reports submitted',
+              'Reports you submit will be listed here.',
+            )
+          else
+            ..._reports.map(_reportCard),
+        ],
+      );
 
   Widget _reportForm() {
     final bookings = _bookings;
-    final bookingValue = bookings.any((item) => item.id == _bookingId)
-        ? _bookingId
-        : null;
+    final bookingValue =
+        bookings.any((item) => item.id == _bookingId) ? _bookingId : null;
     return _card(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -314,8 +325,9 @@ abstract class _ProfileSectionsState extends State<ProfileScreen> {
                   (value) => DropdownMenuItem(value: value, child: Text(value)),
                 )
                 .toList(),
-            onChanged: (value) =>
-                setState(() => _reportCategory = value?.toString() ?? _reportCategory),
+            onChanged: (value) => setState(
+              () => _reportCategory = value?.toString() ?? _reportCategory,
+            ),
           ),
           const SizedBox(height: 12),
           DropdownButtonFormField(
@@ -348,6 +360,15 @@ abstract class _ProfileSectionsState extends State<ProfileScreen> {
                 style: TextStyle(fontSize: 12, color: Colors.black54),
               ),
             ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _reportTitle,
+            decoration: const InputDecoration(
+              labelText: 'Report title',
+              hintText: 'e.g., Broken badminton net on Court 01',
+              border: OutlineInputBorder(),
+            ),
+          ),
           const SizedBox(height: 12),
           TextField(
             controller: _description,
@@ -397,8 +418,15 @@ abstract class _ProfileSectionsState extends State<ProfileScreen> {
               backgroundColor: _green,
               minimumSize: const Size.fromHeight(48),
             ),
-            child: _isSubmittingReport 
-                ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+            child: _isSubmittingReport
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                      color: Colors.white,
+                      strokeWidth: 2,
+                    ),
+                  )
                 : const Text('Submit report'),
           ),
         ],
@@ -437,15 +465,20 @@ abstract class _ProfileSectionsState extends State<ProfileScreen> {
         return;
       }
 
-      final jpeg =
-          bytes.length >= 3 &&
+      final jpeg = bytes.length >= 3 &&
           bytes[0] == 0xFF &&
           bytes[1] == 0xD8 &&
           bytes[2] == 0xFF;
-      final png =
-          bytes.length >= 8 &&
+      final png = bytes.length >= 8 &&
           listEquals(bytes.sublist(0, 8), [
-            0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,
+            0x89,
+            0x50,
+            0x4E,
+            0x47,
+            0x0D,
+            0x0A,
+            0x1A,
+            0x0A,
           ]);
       if (!jpeg && !png) {
         _message('This file is not a valid JPG or PNG photo.');
@@ -569,11 +602,16 @@ abstract class _ProfileSectionsState extends State<ProfileScreen> {
     );
   }
 
-  // 🌟 2. THIS IS THE FIXED FUNCTION THAT SAVES TO SUPABASE
   void _submitReport() async {
     if (_pickingPhoto || _isSubmittingReport) return;
-    
+
+    final title = _reportTitle.text.trim();
     final description = _description.text.trim();
+
+    if (title.isEmpty) {
+      _message('Please enter a report title.');
+      return;
+    }
     if (description.isEmpty) {
       _message('Please describe the problem.');
       return;
@@ -584,25 +622,29 @@ abstract class _ProfileSectionsState extends State<ProfileScreen> {
 
     try {
       prototypePhotoCache[description] = List.from(_draftPhotos);
+
       await BookingService().createReport(
         category: _reportCategory,
         bookingId: _bookingId,
+        subject: title,
         description: description,
+        photos: _draftPhotos
+            .map((p) => ReportPhotoUpload(name: p.name, bytes: p.bytes))
+            .toList(),
       );
 
       _message('Report submitted successfully!');
 
-      // Fetch the updated reports from the DB to show the user instantly
       await _fetchLiveReports();
 
       setState(() {
+        _reportTitle.clear();
         _description.clear();
         _draftPhotos.clear();
         _bookingId = null;
         _reportCategory = _ProfileSectionsState._categories.first;
         _showReport = false;
       });
-
     } catch (e) {
       _message('Error submitting report: $e');
     } finally {
@@ -611,7 +653,6 @@ abstract class _ProfileSectionsState extends State<ProfileScreen> {
   }
 
   Widget _reportCard(_LocalReport report) {
-    // 🌟 Check if there are cached photos for this description
     final cachedPhotos = prototypePhotoCache[report.description] ?? report.photos;
     final hasPhoto = cachedPhotos.isNotEmpty || report.samplePhotoAsset != null;
 
@@ -686,8 +727,6 @@ abstract class _ProfileSectionsState extends State<ProfileScreen> {
                 ),
               ],
             ),
-            
-            // 🌟 Displays the photo thumbnail right here if it exists!
             if (hasPhoto) ...[
               const SizedBox(height: 12),
               _reportThumbnails(_LocalReport(
@@ -702,7 +741,6 @@ abstract class _ProfileSectionsState extends State<ProfileScreen> {
                 status: report.status,
               )),
             ],
-
             const SizedBox(height: 12),
             Text(
               'REPORT ID  ${report.id}',
@@ -784,129 +822,134 @@ abstract class _ProfileSectionsState extends State<ProfileScreen> {
       );
 
   Widget _contactBox(IconData icon, String title, String value) => Container(
-    padding: const EdgeInsets.all(10),
-    decoration: BoxDecoration(
-      color: Colors.white,
-      borderRadius: BorderRadius.circular(10),
-    ),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Icon(icon, size: 20, color: _green),
-        const SizedBox(height: 5),
-        Text(
-          title,
-          style: const TextStyle(fontSize: 11, color: Colors.black54),
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(10),
         ),
-        Text(
-          value,
-          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
-          overflow: TextOverflow.ellipsis,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(icon, size: 20, color: _green),
+            const SizedBox(height: 5),
+            Text(
+              title,
+              style: const TextStyle(fontSize: 11, color: Colors.black54),
+            ),
+            Text(
+              value,
+              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ],
         ),
-      ],
-    ),
-  );
+      );
 
   Widget _info(IconData icon, String title, String value) => Column(
-    children: [
-      Padding(
-        padding: const EdgeInsets.symmetric(vertical: 14),
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 14),
+            child: Row(
+              children: [
+                Icon(icon, color: const Color(0xFFC5F84B)),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: const TextStyle(
+                          color: Colors.white70,
+                          fontSize: 12,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        value,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const Divider(height: 1, color: Color(0xFF45635A)),
+        ],
+      );
+
+  Widget _labelValue(String label, String value) => Padding(
+        padding: const EdgeInsets.only(bottom: 6),
         child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(icon, color: const Color(0xFFC5F84B)),
-            const SizedBox(width: 12),
+            SizedBox(
+              width: 112,
+              child: Text(
+                label,
+                style: const TextStyle(color: Colors.black54, fontSize: 12),
+              ),
+            ),
             Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: const TextStyle(color: Colors.white70, fontSize: 12),
-                  ),
-                  const SizedBox(height: 3),
-                  Text(
-                    value,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ],
+              child: Text(
+                value,
+                style:
+                    const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
               ),
             ),
           ],
         ),
-      ),
-      const Divider(height: 1, color: Color(0xFF45635A)),
-    ],
-  );
-
-  Widget _labelValue(String label, String value) => Padding(
-    padding: const EdgeInsets.only(bottom: 6),
-    child: Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        SizedBox(
-          width: 112,
-          child: Text(
-            label,
-            style: const TextStyle(color: Colors.black54, fontSize: 12),
-          ),
-        ),
-        Expanded(
-          child: Text(
-            value,
-            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
-          ),
-        ),
-      ],
-    ),
-  );
+      );
 
   Widget _badge(String text, Color background, Color foreground) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
-    decoration: BoxDecoration(
-      color: background,
-      borderRadius: BorderRadius.circular(20),
-    ),
-    child: Text(
-      text,
-      style: TextStyle(
-        color: foreground,
-        fontSize: 10,
-        fontWeight: FontWeight.bold,
-      ),
-    ),
-  );
+        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+        decoration: BoxDecoration(
+          color: background,
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Text(
+          text,
+          style: TextStyle(
+            color: foreground,
+            fontSize: 10,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+      );
 
   Widget _empty(IconData icon, String title, String subtitle) => _card(
-    child: Column(
-      children: [
-        Icon(icon, color: _green, size: 30),
-        const SizedBox(height: 8),
-        Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
-        const SizedBox(height: 4),
-        Text(
-          subtitle,
-          style: const TextStyle(color: Colors.black54),
-          textAlign: TextAlign.center,
+        child: Column(
+          children: [
+            Icon(icon, color: _green, size: 30),
+            const SizedBox(height: 8),
+            Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 4),
+            Text(
+              subtitle,
+              style: const TextStyle(color: Colors.black54),
+              textAlign: TextAlign.center,
+            ),
+          ],
         ),
-      ],
-    ),
-  );
+      );
 
   Widget _card({
     required Widget child,
     Color color = Colors.white,
     EdgeInsets margin = EdgeInsets.zero,
-  }) => Card(
-    color: color,
-    margin: margin,
-    elevation: 2,
-    shadowColor: const Color(0x221A332C),
-    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-    child: Padding(padding: const EdgeInsets.all(16), child: child),
-  );
+  }) =>
+      Card(
+        color: color,
+        margin: margin,
+        elevation: 2,
+        shadowColor: const Color(0x221A332C),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        child: Padding(padding: const EdgeInsets.all(16), child: child),
+      );
 
   void _message(String text) =>
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
@@ -915,8 +958,9 @@ abstract class _ProfileSectionsState extends State<ProfileScreen> {
       booking.timeSlots.map(_minutes).reduce((a, b) => a < b ? a : b);
 
   String _bookingTime(Booking booking) {
-    if (booking.timeSlots.isEmpty) return 'Time TBD'; 
-    final slots = booking.timeSlots.map((e) => _minutes(e.toString())).toList()..sort();
+    if (booking.timeSlots.isEmpty) return 'Time TBD';
+    final slots = booking.timeSlots.map((e) => _minutes(e.toString())).toList()
+      ..sort();
     return '${_timeLabel(slots.first)} - ${_timeLabel(slots.last + 60)}';
   }
 
@@ -929,7 +973,7 @@ abstract class _ProfileSectionsState extends State<ProfileScreen> {
       if (parts.last.toUpperCase() == 'AM' && hour == 12) hour = 0;
       return hour * 60 + int.parse(clock[1]);
     } catch (_) {
-      return 0; 
+      return 0;
     }
   }
 
@@ -940,8 +984,19 @@ abstract class _ProfileSectionsState extends State<ProfileScreen> {
   }
 
   String _month(int month) => const [
-    'JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC',
-  ][month - 1];
+        'JAN',
+        'FEB',
+        'MAR',
+        'APR',
+        'MAY',
+        'JUN',
+        'JUL',
+        'AUG',
+        'SEP',
+        'OCT',
+        'NOV',
+        'DEC',
+      ][month - 1];
 
   String _shortDate(DateTime date) =>
       '${date.day} ${_month(date.month)} ${date.year}';
