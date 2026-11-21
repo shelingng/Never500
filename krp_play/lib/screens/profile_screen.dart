@@ -42,7 +42,10 @@ class ProfileScreen extends StatefulWidget {
 class _ProfileScreenState extends _ProfileSectionsState {
   late int _tab = widget.initialTab;
   bool _editing = false, _verified = false;
-  bool _isLoadingBookings = true;
+  bool _loadingBookings = true;
+  @override
+  bool get _isLoadingBookings => _loadingBookings;
+  
   String _category = 'KRP Student';
   final _name = TextEditingController();
   final _contact = TextEditingController();
@@ -73,7 +76,7 @@ class _ProfileScreenState extends _ProfileSectionsState {
           final date = a.date.compareTo(b.date);
           return date == 0 ? _start(a).compareTo(_start(b)) : date;
         });
-        _isLoadingBookings = false;
+        _loadingBookings = false;
       });
     }
   }
@@ -295,7 +298,7 @@ class _ProfileScreenState extends _ProfileSectionsState {
             _tab = index;
             _editing = false;
             if (index == 1) {
-              _isLoadingBookings = true;
+              _loadingBookings = true;
               _loadLiveBookings();
             }
             if (index == 3) {

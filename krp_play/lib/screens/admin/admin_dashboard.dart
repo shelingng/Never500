@@ -49,10 +49,9 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
   void initState() {
     super.initState();
 
-    // 🌟 Keeps the "View All" button on the Overview tab working
     _pages = [
       AdminOverviewTab(onViewAllBookings: () => _selectPage(2)),
-      const AdminSlotsTab(),
+      AdminSlotsTab(onNavigateToRefunds: () => _selectPage(4)),
       const AdminBookingsTab(),
       const AdminReportsTab(),
       const AdminRefundsTab(),
@@ -157,7 +156,6 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
 
   Widget _buildDrawer() {
     final screenWidth = MediaQuery.sizeOf(context).width;
-    // Cap the drawer width for extremely wide monitors
     final drawerWidth = screenWidth < 400 ? screenWidth * 0.88 : 340.0;
 
     return Drawer(
@@ -217,7 +215,6 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
       backgroundColor: const Color(0xFFF7F9F7),
       drawer: _buildDrawer(),
       drawerScrimColor: Colors.black.withAlpha(105),
-      
       appBar: AppBar(
         backgroundColor: Colors.white,
         foregroundColor: _green,
@@ -247,11 +244,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
           const SizedBox(width: 8),
         ],
       ),
-
-      // Retains each tab's local state when navigating between sections.
       body: IndexedStack(index: _currentIndex, children: _pages),
-
-      // 🌟 Restored the BottomNavigationBar for ALL screen sizes
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _currentIndex,
         type: BottomNavigationBarType.fixed,
