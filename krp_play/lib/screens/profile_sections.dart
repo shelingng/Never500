@@ -60,6 +60,7 @@ abstract class _ProfileSectionsState extends State<ProfileScreen> {
   ];
 
   List<Booking> get _bookings;
+  bool get _isLoadingBookings;
 
   @override
   void initState() {
@@ -133,61 +134,115 @@ abstract class _ProfileSectionsState extends State<ProfileScreen> {
     super.dispose();
   }
 
-  Widget _refundRequests() => Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _card(
-            color: const Color(0xFFEFF4EF),
-            child: const Text(
-              'Students cannot cancel bookings or submit refund requests. KRP Management handles eligible refunds when a booked facility is closed, under maintenance, or otherwise unavailable. Students can view refund progress here.',
-              style: TextStyle(height: 1.4),
-            ),
+  Widget _refundRequests() {
+    final supabase = Supabase.instance.client;
+    final bookingIds = _bookings
+        .map((b) => b.id.toString().trim())
+        .where((id) => id.isNotEmpty)
+        .toList();
+    final bookingsById = {
+      for (final b in _bookings) b.id.toString().trim(): b,
+    };
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _card(
+          color: const Color(0xFFEFF4EF),
+          child: const Text(
+            'Students cannot cancel bookings or submit refund requests. KRP Management handles eligible refunds when a booked facility is closed, under maintenance, or otherwise unavailable. Students can view refund progress here.',
+            style: TextStyle(height: 1.4),
           ),
-          const SizedBox(height: 8),
-          _refundCard(
-            'BK-2026-0317',
-            'Badminton Court 01',
-            'Facility closed for maintenance',
-            'FPX Online Banking · Maybank',
-            'Bank Transfer',
-            'PROCESSING',
-          ),
-          _refundCard(
-            'BK-2026-0302',
-            'Badminton Court 02',
-            'Court unavailable by admin',
-            'Touch \'n Go eWallet',
-            'TNG eWallet',
-            'REFUNDED',
-          ),
-          _refundCard(
-            'BK-2026-0224',
-            'Ping Pong Table 01',
-            'Refund processing failed; management will retry',
-            'FPX Online Banking · CIMB Bank',
-            'Manual (Admin)',
-            'FAILED',
-          ),
+        ),
+        const SizedBox(height: 12),
+        if (_isLoadingBookings)
           const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-            child: Text(
-              'Demo refund status only. Processing times depend on the payment provider; no transaction is performed in this prototype.',
-              style: TextStyle(
-                fontSize: 12,
-                color: Colors.black54,
-                fontStyle: FontStyle.italic,
-              ),
-            ),
+            padding: EdgeInsets.all(32),
+            child: Center(child: CircularProgressIndicator(color: _green)),
+          )
+        else if (bookingIds.isEmpty)
+          _empty(
+            Icons.receipt_long_outlined,
+            'No refund records',
+            'Refunds for affected bookings will appear here.',
+          )
+        else
+          FutureBuilder<List<dynamic>>(
+            future: supabase
+                .from('refunds')
+                .select()
+                .inFilter('booking_id', bookingIds)
+                .order('created_at', ascending: false),
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Padding(
+                  padding: EdgeInsets.all(32),
+                  child: Center(child: CircularProgressIndicator(color: _green)),
+                );
+              }
+              if (snapshot.hasError) {
+                return _empty(
+                  Icons.error_outline,
+                  'Could not load refunds',
+                  snapshot.error.toString(),
+                );
+              }
+              final rows = snapshot.data ?? const [];
+              if (rows.isEmpty) {
+                return _empty(
+                  Icons.receipt_long_outlined,
+                  'No refund records',
+                  'Refunds for affected bookings will appear here.',
+                );
+              }
+
+              return Column(
+                children: rows.map((raw) {
+                  final r = Map<String, dynamic>.from(raw as Map);
+                  final bid = (r['booking_id'] ?? '').toString().trim();
+                  final linkedBooking = bookingsById[bid];
+                  final refCode = (r['refund_reference'] ?? '').toString().trim();
+                  final displayId = refCode.isNotEmpty
+                      ? refCode
+                      : (linkedBooking?.reference ?? (bid.isNotEmpty ? bid : 'Refund'));
+                  final facility = linkedBooking?.facilityName ?? 'Sports Facility';
+                  final reason = (r['reason'] ?? 'Facility closure or disruption').toString();
+                  final method = (r['refund_method'] ?? 'Bank Transfer').toString();
+                  final channel = (r['refund_channel'] ?? '').toString().trim();
+                  final displayMethod = channel.isNotEmpty ? '$method · $channel' : method;
+                  final rawStatus = (r['status'] ?? 'awaiting_action').toString().trim().toLowerCase();
+                  final badgeLabel = switch (rawStatus) {
+                    'refunded' => 'REFUNDED',
+                    'failed' => 'FAILED',
+                    'processing' => 'PROCESSING',
+                    _ => 'AWAITING ACTION',
+                  };
+                  final amountVal = r['amount'] is num
+                      ? (r['amount'] as num).toDouble()
+                      : (double.tryParse(r['amount']?.toString() ?? '') ?? 0);
+
+                  return _refundCard(
+                    displayId,
+                    facility,
+                    reason,
+                    displayMethod,
+                    'RM ${amountVal.toStringAsFixed(2)}',
+                    badgeLabel,
+                  );
+                }).toList(),
+              );
+            },
           ),
-        ],
-      );
+      ],
+    );
+  }
 
   Widget _refundCard(
     String id,
     String court,
     String reason,
-    String payment,
     String method,
+    String amount,
     String status,
   ) {
     final color = status == 'REFUNDED'
@@ -208,7 +263,14 @@ abstract class _ProfileSectionsState extends State<ProfileScreen> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(id, style: const TextStyle(fontWeight: FontWeight.bold)),
+              Expanded(
+                child: Text(
+                  id,
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              const SizedBox(width: 8),
               _badge(status, background, color),
             ],
           ),
@@ -219,8 +281,8 @@ abstract class _ProfileSectionsState extends State<ProfileScreen> {
           ),
           const SizedBox(height: 8),
           _labelValue('Reason', reason),
-          _labelValue('Payment method', payment),
           _labelValue('Refund method', method),
+          _labelValue('Amount', amount),
         ],
       ),
     );

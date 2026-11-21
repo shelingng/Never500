@@ -18,7 +18,12 @@ class _Slot {
   _SlotStatus status;
   String? closureReason;
 
-  _Slot({required this.start, required this.status, required this.bookings, this.closureReason});
+  _Slot({
+    required this.start,
+    required this.status,
+    required this.bookings,
+    this.closureReason,
+  });
 
   DateTime get end => start.add(const Duration(hours: 1));
 
@@ -29,7 +34,9 @@ class _Slot {
 }
 
 class AdminSlotsTab extends StatefulWidget {
-  const AdminSlotsTab({super.key});
+  final VoidCallback? onNavigateToRefunds;
+
+  const AdminSlotsTab({super.key, this.onNavigateToRefunds});
 
   @override
   State<AdminSlotsTab> createState() => _AdminSlotsTabState();
@@ -70,19 +77,116 @@ class _AdminSlotsTabState extends State<AdminSlotsTab> {
     _fetchLiveSlots();
   }
 
-  _fetchLiveSlots() async {
+  String _normalizeFacilityName(String raw) {
+    return raw
+        .trim()
+        .toLowerCase()
+        .replaceFirstMapped(RegExp(r' 0+(\d+)$'), (m) => ' ${m[1]}');
+  }
+
+  bool _sameFacility(String a, String b) {
+    if (a.trim().isEmpty || b.trim().isEmpty) return false;
+    return _normalizeFacilityName(a) == _normalizeFacilityName(b);
+  }
+
+  bool _matchesHour(String rawTime, int hour) {
+    final t = rawTime.trim().toUpperCase();
+    if (t.isEmpty) return false;
+    final hour12 = hour > 12 ? hour - 12 : (hour == 0 ? 12 : hour);
+    final ampm = hour >= 12 ? 'PM' : 'AM';
+    final str24 = '${hour.toString().padLeft(2, '0')}:00:00';
+    final str12 = '$hour12:00 $ampm';
+    final hour24Padded = hour.toString().padLeft(2, '0');
+    return t.contains(str24) ||
+        t.contains(str12.toUpperCase()) ||
+        t.startsWith('$hour24Padded:') ||
+        t.contains('$hour12:00');
+  }
+
+  bool _bookingMatchesFacilityAndDate(Map b, String dateStr) {
+    final topFacility = (b['facility_name'] ?? '').toString().trim();
+    final topDate = (b['booking_date'] ?? '').toString().trim();
+
+    bool facilityOk = _sameFacility(topFacility, _facility);
+    bool dateOk = topDate == dateStr;
+
+    final rawPayload = b['checkout_payload'];
+    if (rawPayload is List) {
+      for (final item in rawPayload) {
+        if (item is Map) {
+          final itemFac = (item['facility_name'] ?? '').toString().trim();
+          final itemDate =
+              (item['booking_date'] ?? item['date'] ?? '').toString().trim();
+          if (_sameFacility(itemFac, _facility)) facilityOk = true;
+          if (itemDate == dateStr) dateOk = true;
+        }
+      }
+    }
+
+    return facilityOk && dateOk;
+  }
+
+  bool _bookingMatchesHour(Map b, int hour) {
+    if (_matchesHour((b['start_time'] ?? '').toString(), hour)) return true;
+
+    final rawPayload = b['checkout_payload'];
+    if (rawPayload is List) {
+      for (final item in rawPayload) {
+        if (item is Map) {
+          if (_matchesHour((item['start_time'] ?? '').toString(), hour)) {
+            return true;
+          }
+          if (item['start_times'] is List) {
+            for (final st in (item['start_times'] as List)) {
+              if (_matchesHour(st.toString(), hour)) return true;
+            }
+          }
+        }
+      }
+    }
+    return false;
+  }
+
+  bool _isInactiveBookingStatus(String status) {
+    final s = status.trim().toLowerCase();
+    return s.contains('cancel') || s.contains('expir') || s.contains('fail');
+  }
+
+  Future<String?> _resolvePaymentId(Map bookingRecord, String bookingId) async {
+    final directId = bookingRecord['payment_id']?.toString().trim();
+    if (directId != null && directId.isNotEmpty) {
+      return directId;
+    }
+
+    try {
+      final paymentRow = await supabase
+          .from('payments')
+          .select('id')
+          .eq('booking_id', bookingId)
+          .limit(1)
+          .maybeSingle();
+      final fetchedId = paymentRow?['id']?.toString().trim();
+      if (fetchedId != null && fetchedId.isNotEmpty) {
+        return fetchedId;
+      }
+    } catch (_) {}
+
+    return null;
+  }
+
+  Future<void> _fetchLiveSlots() async {
     setState(() => _isLoading = true);
     try {
       final dateStr =
           '${_selectedDate.year}-${_selectedDate.month.toString().padLeft(2, '0')}-${_selectedDate.day.toString().padLeft(2, '0')}';
 
-      final liveData = await supabase
-          .from('bookings')
-          .select()
-          .eq('facility_name', _facility)
-          .eq('booking_date', dateStr);
+      final allRows = await supabase.from('bookings').select();
+      final liveData = (allRows as List)
+          .map((r) => Map.from(r as Map))
+          .where((b) => _bookingMatchesFacilityAndDate(b, dateStr))
+          .toList();
 
-      List<dynamic> availabilityRows = [];
+      List availabilityRows = [];
       try {
         final rpcRes = await supabase.rpc(
           'slot_availability',
@@ -101,45 +205,29 @@ class _AdminSlotsTabState extends State<AdminSlotsTab> {
           : [17, 18, 20, 21, 22];
 
       final List<_Slot> fetchedSlots = [];
-      final normalizedFacility = _facility.replaceFirstMapped(
-        RegExp(r' 0+(\d+)$'),
-        (m) => ' ${m[1]}',
-      );
 
       for (int hour in hours) {
         final hour12 = hour > 12 ? hour - 12 : (hour == 0 ? 12 : hour);
         final ampm = hour >= 12 ? 'PM' : 'AM';
-        final str24 = '${hour.toString().padLeft(2, '0')}:00:00';
         final str12 = '$hour12:00 $ampm';
-        final hour24Padded = hour.toString().padLeft(2, '0');
 
-        bool matchesHour(String rawTime) {
-          final t = rawTime.trim().toUpperCase();
-          return t.contains(str24) ||
-              t.contains(str12.toUpperCase()) ||
-              t.startsWith('$hour24Padded:') ||
-              t.contains('$hour12:00');
-        }
-
-        final matchingBookings = liveData.where((b) {
-          final dbTime = b['start_time']?.toString() ?? '';
-          return matchesHour(dbTime);
-        }).toList();
+        final matchingBookings = liveData
+            .where(
+              (b) =>
+                  _bookingMatchesHour(b, hour) &&
+                  !_isInactiveBookingStatus((b['status'] ?? '').toString()),
+            )
+            .toList();
 
         final matchingSlots = availabilityRows.where((r) {
-          final status = (r['status']?.toString() ?? '').toLowerCase();
-          if (status == 'available') return false;
-          final rowFacility = (r['facility_name']?.toString() ?? '').trim();
-          final rowFacilityPadded = rowFacility.replaceFirstMapped(
-            RegExp(r' (\d+)$'),
-            (m) => ' ${m[1]!.padLeft(2, '0')}',
-          );
-          final sameFacility =
-              rowFacility.toLowerCase() == _facility.toLowerCase() ||
-              rowFacility.toLowerCase() == normalizedFacility.toLowerCase() ||
-              rowFacilityPadded.toLowerCase() == _facility.toLowerCase();
-          if (!sameFacility) return false;
-          return matchesHour(r['start_time']?.toString() ?? '');
+          final row = r as Map;
+          final status = (row['status']?.toString() ?? '').toLowerCase();
+          if (status == 'available' || _isInactiveBookingStatus(status)) {
+            return false;
+          }
+          final rowFacility = (row['facility_name'] ?? '').toString().trim();
+          if (!_sameFacility(rowFacility, _facility)) return false;
+          return _matchesHour((row['start_time'] ?? '').toString(), hour);
         }).toList();
 
         if (matchingBookings.isEmpty && matchingSlots.isEmpty) {
@@ -156,7 +244,12 @@ class _AdminSlotsTabState extends State<AdminSlotsTab> {
             ),
           );
         } else if (matchingBookings.isNotEmpty) {
-          final b = matchingBookings.first;
+          final b = matchingBookings.firstWhere(
+            (row) => (row['status']?.toString() ?? '')
+                .toLowerCase()
+                .contains('closed'),
+            orElse: () => matchingBookings.first,
+          );
           final status = (b['status']?.toString() ?? '').toLowerCase();
           final isClosed =
               status.contains('closed') || status.contains('maintenance');
@@ -207,11 +300,10 @@ class _AdminSlotsTabState extends State<AdminSlotsTab> {
             ),
           );
         } else {
-          final slotRow = matchingSlots.first;
+          final slotRow = matchingSlots.first as Map;
           final slotStatus =
               (slotRow['status']?.toString() ?? 'reserved').toLowerCase();
-          final refId =
-              '${slotRow['facility_name'] ?? _facility}-$str12';
+          final refId = '${slotRow['facility_name'] ?? _facility}-$str12';
           final safeId = refId.length > 12
               ? refId.substring(0, 12).toUpperCase()
               : refId.toUpperCase();
@@ -252,7 +344,24 @@ class _AdminSlotsTabState extends State<AdminSlotsTab> {
     }
   }
 
-  _reviewClosure(List<_Slot> requested) async {
+  Future<void> _showErrorDialog(String title, Object error) async {
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(title),
+        content: SelectableText(error.toString()),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _reviewClosure(List<_Slot> requested) async {
     final targets = requested
         .where((slot) => !slot.hasEnded && slot.status != _SlotStatus.closed)
         .toList();
@@ -292,7 +401,7 @@ class _AdminSlotsTabState extends State<AdminSlotsTab> {
               ),
               const SizedBox(height: 16),
               const Text(
-                'This will write directly to the live database and block students from booking these times.',
+                'Booked sessions closed by management will stay in Reservations history and create a refund record in Refund Management.',
                 style: TextStyle(color: Colors.red, fontSize: 12),
               ),
             ],
@@ -314,15 +423,17 @@ class _AdminSlotsTabState extends State<AdminSlotsTab> {
     if (!mounted || confirmed != true) return;
     setState(() => _isLoading = true);
 
+    int createdRefundCount = 0;
+
     try {
       final dateStr =
           '${_selectedDate.year}-${_selectedDate.month.toString().padLeft(2, '0')}-${_selectedDate.day.toString().padLeft(2, '0')}';
 
-      final records = await supabase
-          .from('bookings')
-          .select('id, start_time, status')
-          .eq('facility_name', _facility)
-          .eq('booking_date', dateStr);
+      final allRows = await supabase.from('bookings').select();
+      final records = (allRows as List)
+          .map((r) => Map.from(r as Map))
+          .where((b) => _bookingMatchesFacilityAndDate(b, dateStr))
+          .toList();
 
       for (final slot in targets) {
         final hour12 = slot.start.hour > 12
@@ -330,20 +441,83 @@ class _AdminSlotsTabState extends State<AdminSlotsTab> {
             : (slot.start.hour == 0 ? 12 : slot.start.hour);
         final ampm = slot.start.hour >= 12 ? 'PM' : 'AM';
         final slotTime = '$hour12:00 $ampm';
-        final hour24Padded = slot.start.hour.toString().padLeft(2, '0');
 
-        if (slot.status == _SlotStatus.reserved) {
+        final matchingRecords = records.where((record) {
+          final stat = (record['status']?.toString() ?? '').toLowerCase();
+          return _bookingMatchesHour(record, slot.start.hour) &&
+              !stat.contains('closed') &&
+              !_isInactiveBookingStatus(stat);
+        }).toList();
+
+        if (slot.status == _SlotStatus.reserved || matchingRecords.isNotEmpty) {
           bool updatedExisting = false;
-          for (var record in records) {
-            final st = record['start_time'].toString();
-            if (st.contains('$hour24Padded:') || st.contains('$hour12:00')) {
-              await supabase
-                  .from('bookings')
-                  .update({'status': 'Closed ($reason)'})
-                  .eq('id', record['id']);
-              updatedExisting = true;
+          for (var record in matchingRecords) {
+            final bookingId = record['id']?.toString().trim();
+            if (bookingId == null || bookingId.isEmpty) continue;
+
+            double refundAmount = 0;
+            final rawAmt = record['total_amount'] ?? record['amount'];
+            if (rawAmt is num) refundAmount = rawAmt.toDouble();
+            if (rawAmt is String) refundAmount = double.tryParse(rawAmt) ?? 0;
+
+            await supabase
+                .from('bookings')
+                .update({'status': 'Closed ($reason)'})
+                .eq('id', bookingId);
+            updatedExisting = true;
+
+            final existingRefund = await supabase
+                .from('refunds')
+                .select('id')
+                .eq('booking_id', bookingId)
+                .maybeSingle();
+
+            if (existingRefund == null) {
+              final paymentId = await _resolvePaymentId(record, bookingId);
+              final nowIso = DateTime.now().toIso8601String();
+              final adminId = supabase.auth.currentUser?.id;
+              final refCode =
+                  'RF-${DateTime.now().millisecondsSinceEpoch.toString().substring(5)}';
+
+              final insertMap = <String, dynamic>{
+                'refund_reference': refCode,
+                'booking_id': bookingId,
+                'amount': refundAmount,
+                'reason': 'Facility closed by KRP Management: $reason',
+                'refund_method': 'bank_transfer',
+                'refund_channel': 'bank_transfer',
+                'status': 'awaiting_action',
+                if (paymentId != null) 'payment_id': paymentId,
+                if (adminId != null) 'processed_by': adminId,
+                'created_at': nowIso,
+                'updated_at': nowIso,
+              };
+
+              final insertedRefund = await supabase
+                  .from('refunds')
+                  .insert(insertMap)
+                  .select('id')
+                  .single();
+
+              final refundId = insertedRefund['id']?.toString();
+              if (refundId != null) {
+                try {
+                  await supabase.from('refund_events').insert({
+                    'refund_id': refundId,
+                    'event_type': 'created_from_closure',
+                    'previous_status': null,
+                    'new_status': 'awaiting_action',
+                    'note': 'Closed $_facility ($dateStr $slotTime) — $reason',
+                    if (adminId != null) 'performed_by': adminId,
+                  });
+                } catch (_) {}
+              }
+              createdRefundCount++;
+            } else {
+              createdRefundCount++;
             }
           }
+
           if (!updatedExisting) {
             final uniqueRef =
                 'ADMIN-${slot.start.hour}-${DateTime.now().millisecondsSinceEpoch}';
@@ -371,23 +545,42 @@ class _AdminSlotsTabState extends State<AdminSlotsTab> {
           });
         }
       }
-      _message('Sessions successfully closed in live database.');
+
+      if (createdRefundCount > 0) {
+        _message(
+          'Booked slot closed ($createdRefundCount refund record(s)) — opening Refund Management.',
+        );
+      } else {
+        _message('Sessions successfully closed in live database.');
+      }
     } catch (e) {
-      _message('Error closing sessions: $e');
+      await _showErrorDialog('Refund / Closure Error', e);
     }
 
-    _fetchLiveSlots();
+    await _fetchLiveSlots();
+
+    if (mounted && createdRefundCount > 0) {
+      widget.onNavigateToRefunds?.call();
+    }
   }
 
-  _reopen(_Slot slot) async {
+  Future<void> _reopen(_Slot slot) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: const Text('Reopen session?'),
-        content: const Text('This will remove the closure block from the database and allow students to book this slot again.'),
+        content: const Text(
+          'This will remove the closure block from the database and allow students to book this slot again.',
+        ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Keep closed')),
-          FilledButton(onPressed: () => Navigator.pop(dialogContext, true), child: const Text('Reopen session')),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Keep closed'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Reopen session'),
+          ),
         ],
       ),
     );
@@ -396,51 +589,61 @@ class _AdminSlotsTabState extends State<AdminSlotsTab> {
     setState(() => _isLoading = true);
 
     try {
-      final dateStr = '${_selectedDate.year}-${_selectedDate.month.toString().padLeft(2, '0')}-${_selectedDate.day.toString().padLeft(2, '0')}';
+      final dateStr =
+          '${_selectedDate.year}-${_selectedDate.month.toString().padLeft(2, '0')}-${_selectedDate.day.toString().padLeft(2, '0')}';
 
-      final records = await supabase.from('bookings').select('id, start_time, status')
-        .eq('facility_name', _facility)
-        .eq('booking_date', dateStr);
+      final allRows = await supabase.from('bookings').select();
+      final records = (allRows as List)
+          .map((r) => Map.from(r as Map))
+          .where((b) => _bookingMatchesFacilityAndDate(b, dateStr))
+          .toList();
 
       for (var record in records) {
-        final st = record['start_time'].toString();
-        final stat = record['status'].toString().toLowerCase();
-
-        final hour24Padded = slot.start.hour.toString().padLeft(2, '0');
-        final hour12 = slot.start.hour > 12 ? slot.start.hour - 12 : (slot.start.hour == 0 ? 12 : slot.start.hour);
-
-        if (stat.contains('closed') && (st.contains('$hour24Padded:') || st.contains('$hour12:00'))) {
+        final stat = (record['status']?.toString() ?? '').toLowerCase();
+        if (stat.contains('closed') &&
+            _bookingMatchesHour(record, slot.start.hour)) {
           await supabase.from('bookings').delete().eq('id', record['id']);
         }
       }
 
       _message('Session reopened in live database.');
     } catch (e) {
-      _message('Error reopening: $e');
+      await _showErrorDialog('Reopen Error', e);
     }
 
-    _fetchLiveSlots();
+    await _fetchLiveSlots();
   }
 
   String _money(int cents) => 'RM ${(cents / 100).toStringAsFixed(2)}';
-  String _dateLabel(DateTime date) => '${date.day} ${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][date.month - 1]} ${date.year}';
-  String _time(DateTime date) => '${date.hour % 12 == 0 ? 12 : date.hour % 12}:00 ${date.hour < 12 ? 'AM' : 'PM'}';
+  String _dateLabel(DateTime date) =>
+      '${date.day} ${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][date.month - 1]} ${date.year}';
+  String _time(DateTime date) =>
+      '${date.hour % 12 == 0 ? 12 : date.hour % 12}:00 ${date.hour < 12 ? 'AM' : 'PM'}';
   String _timeRange(_Slot slot) => '${_time(slot.start)} - ${_time(slot.end)}';
   String _statusLabel(_Slot slot) {
     switch (slot.status) {
-      case _SlotStatus.open: return 'Open';
-      case _SlotStatus.reserved: return 'Reserved';
-      case _SlotStatus.closed: return 'Closed by management';
+      case _SlotStatus.open:
+        return 'Open';
+      case _SlotStatus.reserved:
+        return 'Reserved';
+      case _SlotStatus.closed:
+        return 'Closed by management';
     }
   }
+
   Color _statusColor(_Slot slot) {
     switch (slot.status) {
-      case _SlotStatus.open: return Colors.green.shade800;
-      case _SlotStatus.reserved: return Colors.blue.shade800;
-      case _SlotStatus.closed: return Colors.grey.shade700;
+      case _SlotStatus.open:
+        return Colors.green.shade800;
+      case _SlotStatus.reserved:
+        return Colors.blue.shade800;
+      case _SlotStatus.closed:
+        return Colors.grey.shade700;
     }
   }
-  void _message(String text) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+
+  void _message(String text) =>
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
 
   void _viewDetails(_Slot slot) {
     showDialog<void>(
@@ -456,18 +659,32 @@ class _AdminSlotsTabState extends State<AdminSlotsTab> {
             Text(_timeRange(slot)),
             const SizedBox(height: 12),
             Text('Status: ${_statusLabel(slot)}'),
-            if (slot.closureReason != null) Text('Closure reason: ${slot.closureReason}'),
+            if (slot.closureReason != null)
+              Text('Closure reason: ${slot.closureReason}'),
             const Divider(height: 24),
-            if (slot.bookings.isEmpty) const Text('No demo bookings for this session.'),
-            ...slot.bookings.map((booking) => Padding(padding: const EdgeInsets.only(bottom: 12), child: Text('${booking.id}\n${booking.cancelled ? 'Cancelled by management' : 'Active reservation'}\n${booking.paid ? 'Paid' : 'Unpaid'} · ${_money(booking.amount)}'))),
+            if (slot.bookings.isEmpty)
+              const Text('No bookings for this session.'),
+            ...slot.bookings.map(
+              (booking) => Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Text(
+                  '${booking.id}\n${booking.cancelled ? 'Cancelled by management' : 'Active reservation'}\n${booking.paid ? 'Paid' : 'Unpaid'} · ${_money(booking.amount)}',
+                ),
+              ),
+            ),
           ],
         ),
-        actions: [TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Close'))],
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Close'),
+          ),
+        ],
       ),
     );
   }
 
-  _selectDate(BuildContext context) async {
+  Future<void> _selectDate(BuildContext context) async {
     final now = DateTime.now();
     final firstDate = DateTime(now.year, now.month, now.day);
     final lastDate = firstDate.add(const Duration(days: 30));
@@ -514,7 +731,10 @@ class _AdminSlotsTabState extends State<AdminSlotsTab> {
       child: Card(
         elevation: 0,
         color: Colors.white,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: BorderSide(color: Colors.grey.shade300)),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: BorderSide(color: Colors.grey.shade300),
+        ),
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: Column(
@@ -522,19 +742,44 @@ class _AdminSlotsTabState extends State<AdminSlotsTab> {
             children: [
               Row(
                 children: [
-                  Expanded(child: Text(_timeRange(slot), style: const TextStyle(fontWeight: FontWeight.bold))),
+                  Expanded(
+                    child: Text(
+                      _timeRange(slot),
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                  ),
                   Checkbox(
                     value: _selected.contains(slot),
-                    onChanged: past || closed ? null : (checked) {
-                      setState(() { if (checked == true) _selected.add(slot); else _selected.remove(slot); });
-                    },
+                    onChanged: past || closed
+                        ? null
+                        : (checked) {
+                            setState(() {
+                              if (checked == true) {
+                                _selected.add(slot);
+                              } else {
+                                _selected.remove(slot);
+                              }
+                            });
+                          },
                   ),
                 ],
               ),
-              Text(_statusLabel(slot), style: TextStyle(color: _statusColor(slot), fontWeight: FontWeight.w600)),
+              Text(
+                _statusLabel(slot),
+                style: TextStyle(
+                  color: _statusColor(slot),
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
               const SizedBox(height: 8),
               Text(
-                past ? 'Session ended' : closed ? 'Reason: ${slot.closureReason}' : reserved ? 'Demo booking · ${slot.activeBookings.first.paid ? 'Paid' : 'Unpaid'}' : 'Available for booking',
+                past
+                    ? 'Session ended'
+                    : closed
+                        ? 'Reason: ${slot.closureReason}'
+                        : reserved
+                            ? 'Booked · ${slot.activeBookings.first.paid ? 'Paid' : 'Unpaid'}'
+                            : 'Available for booking',
                 style: const TextStyle(color: Colors.grey, fontSize: 12),
               ),
               const SizedBox(height: 12),
@@ -542,8 +787,23 @@ class _AdminSlotsTabState extends State<AdminSlotsTab> {
                 spacing: 8,
                 runSpacing: 8,
                 children: [
-                  if (!past) OutlinedButton(onPressed: closed ? () => _reopen(slot) : () => _reviewClosure([slot]), child: Text(closed ? 'Reopen' : reserved ? 'Review closure' : 'Close session')),
-                  TextButton(onPressed: () => _viewDetails(slot), child: const Text('View details')),
+                  if (!past)
+                    OutlinedButton(
+                      onPressed: closed
+                          ? () => _reopen(slot)
+                          : () => _reviewClosure([slot]),
+                      child: Text(
+                        closed
+                            ? 'Reopen'
+                            : reserved
+                                ? 'Review closure'
+                                : 'Close session',
+                      ),
+                    ),
+                  TextButton(
+                    onPressed: () => _viewDetails(slot),
+                    child: const Text('View details'),
+                  ),
                 ],
               ),
             ],
@@ -560,23 +820,27 @@ class _AdminSlotsTabState extends State<AdminSlotsTab> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('AVAILABILITY CONTROL', style: TextStyle(color: _green, fontWeight: FontWeight.bold, fontSize: 12, letterSpacing: 1)),
-          const SizedBox(height: 8),
-          const Text('Manage slots', style: TextStyle(fontSize: 28, fontWeight: FontWeight.w900, color: _green)),
-          const SizedBox(height: 8),
-          const Text('Review the booking impact before closing a session.'),
-          const SizedBox(height: 16),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(color: const Color(0xFFEAF2EE), borderRadius: BorderRadius.circular(12)),
-            child: const Text(
-              'UI DEMO · Changes stay in this screen while it is mounted. Restarting resets them. Student bookings, Refund Management and notifications are not connected yet.',
-              style: TextStyle(color: _green),
+          const Text(
+            'AVAILABILITY CONTROL',
+            style: TextStyle(
+              color: _green,
+              fontWeight: FontWeight.bold,
+              fontSize: 12,
+              letterSpacing: 1,
             ),
           ),
+          const SizedBox(height: 8),
+          const Text(
+            'Manage slots',
+            style: TextStyle(
+              fontSize: 28,
+              fontWeight: FontWeight.w900,
+              color: _green,
+            ),
+          ),
+          const SizedBox(height: 8),
+          const Text('Review the booking impact before closing a session.'),
           const SizedBox(height: 24),
-
           LayoutBuilder(
             builder: (context, constraints) {
               final isMobile = constraints.maxWidth < 600;
@@ -589,9 +853,33 @@ class _AdminSlotsTabState extends State<AdminSlotsTab> {
                       onTap: () => _selectDate(context),
                       borderRadius: BorderRadius.circular(8),
                       child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                        decoration: BoxDecoration(color: const Color(0xFFF8FAF8), borderRadius: BorderRadius.circular(8), border: Border.all(color: const Color(0xFFDCE4DF))),
-                        child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text('Date: ${_dateLabel(_selectedDate)}', style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Color(0xFF2C3E34))), const Icon(Icons.arrow_drop_down, size: 20, color: Colors.grey)]),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 14,
+                        ),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF8FAF8),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: const Color(0xFFDCE4DF)),
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              'Date: ${_dateLabel(_selectedDate)}',
+                              style: const TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                                color: Color(0xFF2C3E34),
+                              ),
+                            ),
+                            const Icon(
+                              Icons.arrow_drop_down,
+                              size: 20,
+                              color: Colors.grey,
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ),
@@ -601,8 +889,18 @@ class _AdminSlotsTabState extends State<AdminSlotsTab> {
                     child: DropdownButtonFormField<String>(
                       value: _facility,
                       isExpanded: true,
-                      decoration: const InputDecoration(labelText: 'Facility', border: OutlineInputBorder()),
-                      items: _facilities.map((facility) => DropdownMenuItem(value: facility, child: Text(facility))).toList(),
+                      decoration: const InputDecoration(
+                        labelText: 'Facility',
+                        border: OutlineInputBorder(),
+                      ),
+                      items: _facilities
+                          .map(
+                            (facility) => DropdownMenuItem(
+                              value: facility,
+                              child: Text(facility),
+                            ),
+                          )
+                          .toList(),
                       onChanged: (value) {
                         if (value != null) {
                           setState(() => _facility = value);
@@ -613,43 +911,72 @@ class _AdminSlotsTabState extends State<AdminSlotsTab> {
                   ),
                 ],
               );
-            }
+            },
           ),
           const SizedBox(height: 16),
-
-          const Text('Reserved sessions can be closed by management after review. Eligible paid bookings require a refund; unpaid bookings do not.', style: TextStyle(color: _green)),
+          const Text(
+            'Reserved sessions closed by management automatically create a refund record and navigate to Refund Management.',
+            style: TextStyle(color: _green),
+          ),
           const SizedBox(height: 16),
-
           Wrap(
             spacing: 12,
             runSpacing: 8,
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
               FilledButton.icon(
-                onPressed: _selected.isEmpty ? null : () => _reviewClosure(_selected.toList()),
+                onPressed: _selected.isEmpty
+                    ? null
+                    : () => _reviewClosure(_selected.toList()),
                 icon: const Icon(Icons.event_busy_outlined),
                 label: Text('Review selected (${_selected.length})'),
               ),
               TextButton(
-                onPressed: () => setState(() { _selected..clear()..addAll(_liveSlots.where((slot) => !slot.hasEnded && slot.status != _SlotStatus.closed)); }),
+                onPressed: () => setState(() {
+                  _selected
+                    ..clear()
+                    ..addAll(
+                      _liveSlots.where(
+                        (slot) =>
+                            !slot.hasEnded && slot.status != _SlotStatus.closed,
+                      ),
+                    );
+                }),
                 child: const Text('Select available and reserved sessions'),
               ),
-              if (_selected.isNotEmpty) TextButton(onPressed: () => setState(_selected.clear), child: const Text('Clear selection')),
+              if (_selected.isNotEmpty)
+                TextButton(
+                  onPressed: () => setState(_selected.clear),
+                  child: const Text('Clear selection'),
+                ),
             ],
           ),
-          const SizedBox(height: 12),
-          const Text('Each session is one hour. Break periods are excluded. Demo reservations are shown at 8 PM and 9 PM.', style: TextStyle(color: Colors.grey, fontSize: 12)),
           const SizedBox(height: 16),
-
           _isLoading
-            ? const Center(child: Padding(padding: EdgeInsets.all(40), child: CircularProgressIndicator(color: _green)))
-            : LayoutBuilder(
-                builder: (context, constraints) {
-                  final columns = constraints.maxWidth >= 1000 ? 3 : constraints.maxWidth >= 650 ? 2 : 1;
-                  final width = (constraints.maxWidth - (columns - 1) * 12) / columns;
-                  return Wrap(spacing: 12, runSpacing: 12, children: _liveSlots.map((slot) => _slotCard(slot, width)).toList());
-                },
-              ),
+              ? const Center(
+                  child: Padding(
+                    padding: EdgeInsets.all(40),
+                    child: CircularProgressIndicator(color: _green),
+                  ),
+                )
+              : LayoutBuilder(
+                  builder: (context, constraints) {
+                    final columns = constraints.maxWidth >= 1000
+                        ? 3
+                        : constraints.maxWidth >= 650
+                            ? 2
+                            : 1;
+                    final width =
+                        (constraints.maxWidth - (columns - 1) * 12) / columns;
+                    return Wrap(
+                      spacing: 12,
+                      runSpacing: 12,
+                      children: _liveSlots
+                          .map((slot) => _slotCard(slot, width))
+                          .toList(),
+                    );
+                  },
+                ),
         ],
       ),
     );
