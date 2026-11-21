@@ -57,10 +57,10 @@ class _AdminSlotsTabState extends State<AdminSlotsTab> {
   ];
 
   final Set<_Slot> _selected = {};
-  
+
   DateTime _selectedDate = DateTime.now();
   String _facility = _facilities.first;
-  
+
   bool _isLoading = true;
   List<_Slot> _liveSlots = [];
 
@@ -252,8 +252,7 @@ class _AdminSlotsTabState extends State<AdminSlotsTab> {
     }
   }
 
-  // 🌟 SAFELY FETCH IDS INSTEAD OF USING ILIKE
-  Future<void> _reviewClosure(List<_Slot> requested) async {
+  _reviewClosure(List<_Slot> requested) async {
     final targets = requested
         .where((slot) => !slot.hasEnded && slot.status != _SlotStatus.closed)
         .toList();
@@ -359,7 +358,6 @@ class _AdminSlotsTabState extends State<AdminSlotsTab> {
             });
           }
         } else {
-          // Open slot: insert a closure row so admin & student screens see it closed
           final uniqueRef =
               'ADMIN-${slot.start.hour}-${DateTime.now().millisecondsSinceEpoch}';
           await supabase.from('bookings').insert({
@@ -381,8 +379,7 @@ class _AdminSlotsTabState extends State<AdminSlotsTab> {
     _fetchLiveSlots();
   }
 
-  // 🌟 SAFELY DELETE BY ID INSTEAD OF USING ILIKE
-  Future<void> _reopen(_Slot slot) async {
+  _reopen(_Slot slot) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
@@ -400,7 +397,7 @@ class _AdminSlotsTabState extends State<AdminSlotsTab> {
 
     try {
       final dateStr = '${_selectedDate.year}-${_selectedDate.month.toString().padLeft(2, '0')}-${_selectedDate.day.toString().padLeft(2, '0')}';
-      
+
       final records = await supabase.from('bookings').select('id, start_time, status')
         .eq('facility_name', _facility)
         .eq('booking_date', dateStr);
@@ -408,12 +405,12 @@ class _AdminSlotsTabState extends State<AdminSlotsTab> {
       for (var record in records) {
         final st = record['start_time'].toString();
         final stat = record['status'].toString().toLowerCase();
-        
+
         final hour24Padded = slot.start.hour.toString().padLeft(2, '0');
         final hour12 = slot.start.hour > 12 ? slot.start.hour - 12 : (slot.start.hour == 0 ? 12 : slot.start.hour);
 
         if (stat.contains('closed') && (st.contains('$hour24Padded:') || st.contains('$hour12:00'))) {
-           await supabase.from('bookings').delete().eq('id', record['id']);
+          await supabase.from('bookings').delete().eq('id', record['id']);
         }
       }
 
@@ -579,7 +576,7 @@ class _AdminSlotsTabState extends State<AdminSlotsTab> {
             ),
           ),
           const SizedBox(height: 24),
-          
+
           LayoutBuilder(
             builder: (context, constraints) {
               final isMobile = constraints.maxWidth < 600;
@@ -619,10 +616,10 @@ class _AdminSlotsTabState extends State<AdminSlotsTab> {
             }
           ),
           const SizedBox(height: 16),
-          
+
           const Text('Reserved sessions can be closed by management after review. Eligible paid bookings require a refund; unpaid bookings do not.', style: TextStyle(color: _green)),
           const SizedBox(height: 16),
-          
+
           Wrap(
             spacing: 12,
             runSpacing: 8,
@@ -643,8 +640,8 @@ class _AdminSlotsTabState extends State<AdminSlotsTab> {
           const SizedBox(height: 12),
           const Text('Each session is one hour. Break periods are excluded. Demo reservations are shown at 8 PM and 9 PM.', style: TextStyle(color: Colors.grey, fontSize: 12)),
           const SizedBox(height: 16),
-          
-          _isLoading 
+
+          _isLoading
             ? const Center(child: Padding(padding: EdgeInsets.all(40), child: CircularProgressIndicator(color: _green)))
             : LayoutBuilder(
                 builder: (context, constraints) {

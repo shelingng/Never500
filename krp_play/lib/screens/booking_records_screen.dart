@@ -24,17 +24,19 @@ class _BookingRecordsScreenState extends State<BookingRecordsScreen> {
         title: const Text('Booking Records', style: TextStyle(fontWeight: FontWeight.bold)),
         elevation: 0,
       ),
-      // Use FutureBuilder for live Database fetching
       body: FutureBuilder(
         future: _bookingService.getUserBookings(),
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
           }
-          
-          dynamic bookings = snapshot.data;
-          
-          if (bookings == null || bookings.isEmpty) {
+
+          final rawBookings = snapshot.data;
+          final bookings = (rawBookings is List ? rawBookings : <dynamic>[])
+              .where((b) => !(b is Booking && b.status.trim().toLowerCase().startsWith('closed')))
+              .toList();
+
+          if (bookings.isEmpty) {
             return Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
@@ -53,7 +55,7 @@ class _BookingRecordsScreenState extends State<BookingRecordsScreen> {
             padding: const EdgeInsets.all(16),
             itemCount: bookings.length,
             itemBuilder: (context, index) {
-              final Booking booking = bookings[index];
+              final Booking booking = bookings[index] as Booking;
               final dateStr = '${booking.date.day}/${booking.date.month}/${booking.date.year}';
 
               return Card(
@@ -98,4 +100,3 @@ class _BookingRecordsScreenState extends State<BookingRecordsScreen> {
     );
   }
 }
-
