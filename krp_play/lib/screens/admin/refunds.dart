@@ -371,10 +371,23 @@ class _AdminRefundsTabState extends State<AdminRefundsTab> {
           bookingId != null &&
           bookingId.isNotEmpty) {
         try {
-          await supabase
+          final existingBooking = await supabase
               .from('bookings')
-              .update({'status': 'Refunded'})
-              .eq('id', bookingId);
+              .select('status')
+              .eq('id', bookingId)
+              .maybeSingle();
+          final currentBookingStatus =
+              (existingBooking?['status'] ?? '').toString().trim().toLowerCase();
+          final isAlreadyClosed =
+              currentBookingStatus.contains('closed') ||
+              currentBookingStatus.contains('maintenance');
+
+          if (!isAlreadyClosed) {
+            await supabase
+                .from('bookings')
+                .update({'status': 'Refunded'})
+                .eq('id', bookingId);
+          }
         } catch (_) {}
       }
 

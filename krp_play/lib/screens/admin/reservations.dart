@@ -20,10 +20,32 @@ class _AdminBookingsTabState extends State<AdminBookingsTab> {
   bool _isLoading = true;
   List _bookings = [];
 
+  RealtimeChannel? _bookingsChannel;
+
   @override
   void initState() {
     super.initState();
     _fetchBookings();
+    _bookingsChannel = supabase
+        .channel('admin:bookings_tab')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'bookings',
+          callback: (_) {
+            if (mounted) _fetchBookings();
+          },
+        )
+        .subscribe();
+  }
+
+  @override
+  void dispose() {
+    if (_bookingsChannel != null) {
+      supabase.removeChannel(_bookingsChannel!);
+    }
+    _searchController.dispose();
+    super.dispose();
   }
 
   String _normalizeCategoryLabel(dynamic rawCategory) {
@@ -196,10 +218,18 @@ class _AdminBookingsTabState extends State<AdminBookingsTab> {
               'id': rawId,
               'ref': (b['booking_reference'] ?? '#KRP-$shortId').toString(),
               'payId': 'PAY-$shortId',
-              'name': (p['full_name'] ?? 'Walk-in / Unknown').toString(),
-              'matric': (p['matric_number'] ?? 'N/A').toString(),
+              'name': (firstCartItem?['student_name'] ??
+                      p['full_name'] ??
+                      'Walk-in / Unknown')
+                  .toString(),
+              'matric': (firstCartItem?['matric_number'] ??
+                      p['matric_number'] ??
+                      'N/A')
+                  .toString(),
               'contact': (p['phone_number'] ?? 'Not provided').toString(),
-              'category': _normalizeCategoryLabel(p['student_category']),
+              'category': _normalizeCategoryLabel(
+                firstCartItem?['student_category'] ?? p['student_category'],
+              ),
               'facility': facility.isNotEmpty ? facility : 'Unknown Facility',
               'date': date,
               'time': time,
@@ -258,12 +288,6 @@ class _AdminBookingsTabState extends State<AdminBookingsTab> {
           matchesDate &&
           searchableText.contains(query);
     }).toList();
-  }
-
-  @override
-  void dispose() {
-    _searchController.dispose();
-    super.dispose();
   }
 
   void _clearFilters() {
