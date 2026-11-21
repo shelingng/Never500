@@ -59,9 +59,9 @@ class _ProfileScreenState extends _ProfileSectionsState {
     _contact.text = widget.contact ?? '';
     _matric.text = widget.matric ?? '';
     _category = widget.category ?? 'KRP Student';
-    
+
     _loadLiveBookings();
-    _loadLiveReports(); // 🌟 Load Supabase Reports
+    _loadLiveReports();
   }
 
   _loadLiveBookings() async {
@@ -78,54 +78,64 @@ class _ProfileScreenState extends _ProfileSectionsState {
     }
   }
 
-  // 🌟 Fetch Live Reports from Supabase and parse for UI
   void _loadLiveReports() async {
     try {
       final results = await BookingService().getUserReports();
       if (mounted) {
         setState(() {
-          // 🌟 1. Clear the final list instead of using '='
           _reports.clear();
-          
-          // 🌟 2. Add all the new live data into it
+
           _reports.addAll(results.map((row) {
             String facilityName = 'General inquiry';
             if (row['related_booking_id'] != null) {
               try {
-                facilityName = _bookings.firstWhere((b) => b.id == row['related_booking_id']).facilityName;
+                facilityName = _bookings
+                    .firstWhere((b) => b.id == row['related_booking_id'])
+                    .facilityName;
               } catch (_) {
                 facilityName = 'Linked Booking';
               }
             }
 
-            // Map DB constraint string back to UI Format
             String uiCategory = 'Other';
             if (row['category'] == 'booking_issue') uiCategory = 'Booking Issue';
             if (row['category'] == 'payment_issue') uiCategory = 'Payment Issue';
-            if (row['category'] == 'facility_problem') uiCategory = 'Facility Problem';
+            if (row['category'] == 'facility_problem') {
+              uiCategory = 'Facility Problem';
+            }
             if (row['category'] == 'account_issue') uiCategory = 'Account Issue';
 
-            final createdAt = row['created_at'] != null ? DateTime.parse(row['created_at']) : DateTime.now();
+            final createdAt = row['created_at'] != null
+                ? DateTime.parse(row['created_at'].toString()).toLocal()
+                : DateTime.now();
+
+            final desc = (row['description'] ?? '').toString();
+            final subj = (row['subject'] ?? '').toString().trim();
 
             return _LocalReport(
-              id: row['report_reference'] ?? row['id'].toString().substring(0, 8),
+              id: row['report_reference'] ??
+                  row['id'].toString().substring(0, 8),
               category: uiCategory,
-              title: row['subject'] ?? 'Facility report',
+              title: subj.isNotEmpty ? subj : 'Facility report',
               facility: facilityName,
               dateTime: '${_shortDate(createdAt)} · ${_clockTime(createdAt)}',
-              description: row['description'] ?? '',
-              photos: prototypePhotoCache[row['description']] ?? const [], 
-              status: row['status'] == 'submitted' ? 'Submitted' :
-                      row['status'] == 'under_review' ? 'Under Review' :
-                      row['status'] == 'resolved' ? 'Resolved' : 'Rejected',
+              description: desc,
+              photos: prototypePhotoCache[desc] ?? const [],
+              status: row['status'] == 'submitted'
+                  ? 'Submitted'
+                  : row['status'] == 'under_review'
+                      ? 'Under Review'
+                      : row['status'] == 'resolved'
+                          ? 'Resolved'
+                          : 'Rejected',
             );
           }).toList().cast<_LocalReport>());
-          
+
           _isLoadingReports = false;
         });
       }
     } catch (e) {
-      if(mounted) setState(() => _isLoadingReports = false);
+      if (mounted) setState(() => _isLoadingReports = false);
     }
   }
 
@@ -208,217 +218,215 @@ class _ProfileScreenState extends _ProfileSectionsState {
   }
 
   Widget _header() => Container(
-    padding: const EdgeInsets.all(18),
-    decoration: BoxDecoration(
-      color: const Color(0xFF23433A),
-      borderRadius: BorderRadius.circular(16),
-    ),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
+        padding: const EdgeInsets.all(18),
+        decoration: BoxDecoration(
+          color: const Color(0xFF23433A),
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Container(
-              width: 64,
-              height: 64,
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                color: _lime,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Text(
-                _name.text
-                    .trim()
-                    .split(RegExp(r'\s+'))
-                    .where((part) => part.isNotEmpty)
-                    .take(2)
-                    .map((part) => part[0].toUpperCase())
-                    .join(),
-                style: const TextStyle(
-                  color: _green,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 20,
+            Row(
+              children: [
+                Container(
+                  width: 64,
+                  height: 64,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: _lime,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    _name.text
+                        .trim()
+                        .split(RegExp(r'\s+'))
+                        .where((part) => part.isNotEmpty)
+                        .take(2)
+                        .map((part) => part[0].toUpperCase())
+                        .join(),
+                    style: const TextStyle(
+                      color: _green,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 20,
+                    ),
+                  ),
                 ),
+                const Spacer(),
+                OutlinedButton(
+                  onPressed: () => setState(() {
+                    _tab = 0;
+                    _editing = true;
+                  }),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.white,
+                    side: const BorderSide(color: Colors.white70),
+                  ),
+                  child: const Text('Edit profile'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              'STUDENT ACCOUNT',
+              style: TextStyle(
+                color: Colors.white70,
+                fontSize: 11,
+                letterSpacing: 1.1,
               ),
             ),
-            const Spacer(),
-            OutlinedButton(
-              onPressed: () => setState(() {
-                _tab = 0;
-                _editing = true;
-              }),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: Colors.white,
-                side: const BorderSide(color: Colors.white70),
+            const SizedBox(height: 5),
+            Text(
+              _name.text,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 22,
+                fontWeight: FontWeight.bold,
               ),
-              child: const Text('Edit profile'),
             ),
+            const SizedBox(height: 4),
+            Text(_category, style: const TextStyle(color: Colors.white70)),
           ],
         ),
-        const SizedBox(height: 16),
-        const Text(
-          'STUDENT ACCOUNT',
-          style: TextStyle(
-            color: Colors.white70,
-            fontSize: 11,
-            letterSpacing: 1.1,
-          ),
-        ),
-        const SizedBox(height: 5),
-        Text(
-          _name.text,
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 22,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        const SizedBox(height: 4),
-        Text(_category, style: const TextStyle(color: Colors.white70)),
-      ],
-    ),
-  );
+      );
 
   Widget _tabButton(String title, int index, [String? badge]) => InkWell(
-    onTap: () {
-      setState(() {
-        _tab = index;
-        _editing = false;
-        if (index == 1) {
-          _isLoadingBookings = true;
-          _loadLiveBookings();
-        }
-        if (index == 3) {
-          _isLoadingReports = true;
-          _loadLiveReports();
-        }
-      });
-    },
-    child: Container(
-      margin: const EdgeInsets.only(right: 20),
-      decoration: BoxDecoration(
-        color: _tab == index ? _lime : Colors.transparent,
-        borderRadius: BorderRadius.circular(10),
-      ),
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            title,
-            style: TextStyle(
-              color: _tab == index ? _green : _muted,
-              fontWeight: _tab == index ? FontWeight.bold : FontWeight.normal,
-            ),
+        onTap: () {
+          setState(() {
+            _tab = index;
+            _editing = false;
+            if (index == 1) {
+              _isLoadingBookings = true;
+              _loadLiveBookings();
+            }
+            if (index == 3) {
+              _isLoadingReports = true;
+              _loadLiveReports();
+            }
+          });
+        },
+        child: Container(
+          margin: const EdgeInsets.only(right: 20),
+          decoration: BoxDecoration(
+            color: _tab == index ? _lime : Colors.transparent,
+            borderRadius: BorderRadius.circular(10),
           ),
-          if (badge != null) ...[
-            const SizedBox(width: 5),
-            CircleAvatar(
-              radius: 9,
-              backgroundColor: const Color(0xFFE8F1EB),
-              child: Text(
-                badge,
-                style: const TextStyle(fontSize: 10, color: _green),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                title,
+                style: TextStyle(
+                  color: _tab == index ? _green : _muted,
+                  fontWeight: _tab == index ? FontWeight.bold : FontWeight.normal,
+                ),
               ),
-            ),
-          ],
-        ],
-      ),
-    ),
-  );
+              if (badge != null) ...[
+                const SizedBox(width: 5),
+                CircleAvatar(
+                  radius: 9,
+                  backgroundColor: const Color(0xFFE8F1EB),
+                  child: Text(
+                    badge,
+                    style: const TextStyle(fontSize: 10, color: _green),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      );
 
   Widget _personalDetails() => _card(
-    color: _editing ? Colors.white : const Color(0xFF23433A),
-    child: _editing
-        ? Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const Text(
-                'Personal details',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+        color: _editing ? Colors.white : const Color(0xFF23433A),
+        child: _editing
+            ? Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const Text(
+                    'Personal details',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 16),
+                  _input(_name, 'Full name', Icons.person_outline),
+                  _input(
+                    _contact,
+                    'Contact number',
+                    Icons.phone_outlined,
+                    keyboard: TextInputType.phone,
+                  ),
+                  _input(_matric, 'Matric number', Icons.badge_outlined),
+                  TextFormField(
+                    initialValue: _category,
+                    readOnly: true,
+                    enabled: false,
+                    decoration: const InputDecoration(
+                      labelText: 'Student category (Managed by Admin)',
+                      prefixIcon: Icon(Icons.school_outlined),
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    initialValue: widget.email,
+                    readOnly: true,
+                    decoration: const InputDecoration(
+                      labelText: 'Email address',
+                      prefixIcon: Icon(Icons.email_outlined),
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  _input(_password, 'Password', Icons.lock_outline, obscure: true),
+                  _input(
+                    _confirm,
+                    'Confirm password',
+                    Icons.lock_outline,
+                    obscure: true,
+                  ),
+                  CheckboxListTile(
+                    contentPadding: EdgeInsets.zero,
+                    value: _verified,
+                    onChanged: (value) =>
+                        setState(() => _verified = value ?? false),
+                    controlAffinity: ListTileControlAffinity.leading,
+                    title: const Text(
+                      'I confirm that the information provided is accurate.',
+                      style: TextStyle(fontSize: 13),
+                    ),
+                  ),
+                  FilledButton(
+                    onPressed: _saveProfile,
+                    style: FilledButton.styleFrom(
+                      backgroundColor: _lime,
+                      foregroundColor: _green,
+                      minimumSize: const Size.fromHeight(50),
+                    ),
+                    child: const Text('Save profile'),
+                  ),
+                ],
+              )
+            : Column(
+                children: [
+                  _info(Icons.person_outline, 'Full Name', _name.text),
+                  _info(
+                    Icons.phone_outlined,
+                    'Contact',
+                    _contact.text.isEmpty ? 'Not provided' : _contact.text,
+                  ),
+                  _info(
+                    Icons.badge_outlined,
+                    'Matric',
+                    _matric.text.isEmpty ? 'Not provided' : _matric.text,
+                  ),
+                  _info(Icons.school_outlined, 'Category', _category),
+                  _info(Icons.email_outlined, 'Email', widget.email),
+                ],
               ),
-              const SizedBox(height: 16),
-              _input(_name, 'Full name', Icons.person_outline),
-              _input(
-                _contact,
-                'Contact number',
-                Icons.phone_outlined,
-                keyboard: TextInputType.phone,
-              ),
-              _input(_matric, 'Matric number', Icons.badge_outlined),
-           // 🌟 Replaced Dropdown with a locked, read-only field
-              TextFormField(
-                initialValue: _category,
-                readOnly: true,
-                enabled: false, // Greys it out to show it's fixed
-                decoration: const InputDecoration(
-                  labelText: 'Student category (Managed by Admin)',
-                  prefixIcon: Icon(Icons.school_outlined),
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 12),
-              const SizedBox(height: 12),
-              TextFormField(
-                initialValue: widget.email,
-                readOnly: true,
-                decoration: const InputDecoration(
-                  labelText: 'Email address',
-                  prefixIcon: Icon(Icons.email_outlined),
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 12),
-              _input(_password, 'Password', Icons.lock_outline, obscure: true),
-              _input(
-                _confirm,
-                'Confirm password',
-                Icons.lock_outline,
-                obscure: true,
-              ),
-              CheckboxListTile(
-                contentPadding: EdgeInsets.zero,
-                value: _verified,
-                onChanged: (value) =>
-                    setState(() => _verified = value ?? false),
-                controlAffinity: ListTileControlAffinity.leading,
-                title: const Text(
-                  'I confirm that the information provided is accurate.',
-                  style: TextStyle(fontSize: 13),
-                ),
-              ),
-              FilledButton(
-                onPressed: _saveProfile,
-                style: FilledButton.styleFrom(
-                  backgroundColor: _lime,
-                  foregroundColor: _green,
-                  minimumSize: const Size.fromHeight(50),
-                ),
-                child: const Text('Save profile'),
-              ),
-            ],
-          )
-        : Column(
-            children: [
-              _info(Icons.person_outline, 'Full Name', _name.text),
-              _info(
-                Icons.phone_outlined,
-                'Contact',
-                _contact.text.isEmpty ? 'Not provided' : _contact.text,
-              ),
-              _info(
-                Icons.badge_outlined,
-                'Matric',
-                _matric.text.isEmpty ? 'Not provided' : _matric.text,
-              ),
-              _info(Icons.school_outlined, 'Category', _category),
-              _info(Icons.email_outlined, 'Email', widget.email),
-            ],
-          ),
-  );
+      );
 
- // 🌟 Updated with 'void' to avoid Future<void>
-void _saveProfile() async {
+  void _saveProfile() async {
     if (!_verified) {
       _message('Please confirm your information first.');
       return;
@@ -430,13 +438,12 @@ void _saveProfile() async {
     try {
       final supabase = Supabase.instance.client;
       final user = supabase.auth.currentUser;
-      
+
       if (user == null) {
         _message('No active user found. Please log in again.');
         return;
       }
 
-      // Update public.profiles table in Supabase (Removed 'updated_at')
       await supabase.from('profiles').update({
         'full_name': _name.text.trim(),
         'phone_number': _contact.text.trim(),
@@ -445,7 +452,6 @@ void _saveProfile() async {
 
       setState(() => _editing = false);
       _message('Profile updated successfully in database!');
-
     } catch (e) {
       _message('Error updating profile: $e');
     }
@@ -457,31 +463,32 @@ void _saveProfile() async {
     IconData icon, {
     bool obscure = false,
     TextInputType? keyboard,
-  }) => Padding(
-    padding: const EdgeInsets.only(bottom: 12),
-    child: TextFormField(
-      controller: controller,
-      obscureText: obscure,
-      keyboardType: keyboard,
-      decoration: InputDecoration(
-        labelText: label,
-        labelStyle: const TextStyle(color: _muted),
-        prefixIconColor: _lime,
-        enabledBorder: const OutlineInputBorder(
-          borderSide: BorderSide(color: _divider),
+  }) =>
+      Padding(
+        padding: const EdgeInsets.only(bottom: 12),
+        child: TextFormField(
+          controller: controller,
+          obscureText: obscure,
+          keyboardType: keyboard,
+          decoration: InputDecoration(
+            labelText: label,
+            labelStyle: const TextStyle(color: _muted),
+            prefixIconColor: _lime,
+            enabledBorder: const OutlineInputBorder(
+              borderSide: BorderSide(color: _divider),
+            ),
+            focusedBorder: const OutlineInputBorder(
+              borderSide: BorderSide(color: _lime, width: 2),
+            ),
+            hintStyle: const TextStyle(color: _muted),
+            prefixIcon: Icon(icon),
+            border: const OutlineInputBorder(
+              borderSide: BorderSide(color: _divider),
+            ),
+          ),
+          style: const TextStyle(color: _green),
         ),
-        focusedBorder: const OutlineInputBorder(
-          borderSide: BorderSide(color: _lime, width: 2),
-        ),
-        hintStyle: const TextStyle(color: _muted),
-        prefixIcon: Icon(icon),
-        border: const OutlineInputBorder(
-          borderSide: BorderSide(color: _divider),
-        ),
-      ),
-      style: const TextStyle(color: _green),
-    ),
-  );
+      );
 
   Widget _myBookings() {
     if (_isLoadingBookings) {
@@ -490,7 +497,7 @@ void _saveProfile() async {
         child: Center(child: CircularProgressIndicator(color: _green)),
       );
     }
-    
+
     final bookings = _bookings;
     if (bookings.isEmpty) {
       return _empty(
@@ -503,135 +510,135 @@ void _saveProfile() async {
   }
 
   Widget _bookingCard(Booking booking) => _card(
-    margin: const EdgeInsets.only(bottom: 12),
-    child: Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Container(
-          width: 54,
-          padding: const EdgeInsets.symmetric(vertical: 10),
-          decoration: BoxDecoration(
-            color: _pale,
-            borderRadius: BorderRadius.circular(11),
-          ),
-          child: Column(
-            children: [
-              Text(
-                '${booking.date.day}',
-                style: const TextStyle(
-                  color: _green,
-                  fontSize: 24,
-                  fontWeight: FontWeight.bold,
-                ),
+        margin: const EdgeInsets.only(bottom: 12),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 54,
+              padding: const EdgeInsets.symmetric(vertical: 10),
+              decoration: BoxDecoration(
+                color: _pale,
+                borderRadius: BorderRadius.circular(11),
               ),
-              Text(
-                _month(booking.date.month),
-                style: const TextStyle(
-                  color: _green,
-                  fontSize: 11,
-                  fontWeight: FontWeight.bold,
-                ),
+              child: Column(
+                children: [
+                  Text(
+                    '${booking.date.day}',
+                    style: const TextStyle(
+                      color: _green,
+                      fontSize: 24,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  Text(
+                    _month(booking.date.month),
+                    style: const TextStyle(
+                      color: _green,
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
               ),
-            ],
-          ),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _badge(booking.status.toUpperCase(), _pale, _green),
-              const SizedBox(height: 8),
-              Text(
-                booking.facilityName,
-                style: const TextStyle(
-                  fontWeight: FontWeight.bold,
-                  fontSize: 15,
-                ),
-              ),
-              const SizedBox(height: 5),
-              Text(
-                '${booking.date.day} ${_month(booking.date.month)} ${booking.date.year} • ${_bookingTime(booking)}',
-                style: const TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w700,
-                  color: _green,
-                ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                'Booking ID: ${booking.id}',
-                style: const TextStyle(color: Colors.black54, fontSize: 11),
-              ),
-              const SizedBox(height: 7),
-              Text(
-                'RM ${booking.totalPrice.toStringAsFixed(2)}',
-                style: const TextStyle(fontWeight: FontWeight.bold),
-              ),
-              TextButton(
-                onPressed: () => showDialog<void>(
-                  context: context,
-                  builder: (dialogContext) => AlertDialog(
-                    title: const Text('Booking details'),
-                    content: SizedBox(
-                      width: 420,
-                      child: SingleChildScrollView(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              booking.facilityName,
-                              style: const TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.bold,
-                                color: _green,
-                              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _badge(booking.status.toUpperCase(), _pale, _green),
+                  const SizedBox(height: 8),
+                  Text(
+                    booking.facilityName,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 15,
+                    ),
+                  ),
+                  const SizedBox(height: 5),
+                  Text(
+                    '${booking.date.day} ${_month(booking.date.month)} ${booking.date.year} • ${_bookingTime(booking)}',
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      color: _green,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Booking ID: ${booking.id}',
+                    style: const TextStyle(color: Colors.black54, fontSize: 11),
+                  ),
+                  const SizedBox(height: 7),
+                  Text(
+                    'RM ${booking.totalPrice.toStringAsFixed(2)}',
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  TextButton(
+                    onPressed: () => showDialog<void>(
+                      context: context,
+                      builder: (dialogContext) => AlertDialog(
+                        title: const Text('Booking details'),
+                        content: SizedBox(
+                          width: 420,
+                          child: SingleChildScrollView(
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  booking.facilityName,
+                                  style: const TextStyle(
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.bold,
+                                    color: _green,
+                                  ),
+                                ),
+                                const SizedBox(height: 16),
+                                Text(
+                                  'Date: ${booking.date.day} '
+                                  '${_month(booking.date.month)} '
+                                  '${booking.date.year}',
+                                ),
+                                const SizedBox(height: 10),
+                                Text('Time: ${_bookingTime(booking)}'),
+                                const SizedBox(height: 10),
+                                SelectableText('Booking ID: ${booking.id}'),
+                                const SizedBox(height: 10),
+                                Text('Booking status: ${booking.status}'),
+                                const Divider(height: 28),
+                                Text(
+                                  'Total: RM ${booking.totalPrice.toStringAsFixed(2)}',
+                                  style: const TextStyle(
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.bold,
+                                    color: _green,
+                                  ),
+                                ),
+                              ],
                             ),
-                            const SizedBox(height: 16),
-                            Text(
-                              'Date: ${booking.date.day} '
-                              '${_month(booking.date.month)} '
-                              '${booking.date.year}',
-                            ),
-                            const SizedBox(height: 10),
-                            Text('Time: ${_bookingTime(booking)}'),
-                            const SizedBox(height: 10),
-                            SelectableText('Booking ID: ${booking.id}'),
-                            const SizedBox(height: 10),
-                            Text('Booking status: ${booking.status}'),
-                            const Divider(height: 28),
-                            Text(
-                              'Total: RM ${booking.totalPrice.toStringAsFixed(2)}',
-                              style: const TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.bold,
-                                color: _green,
-                              ),
-                            ),
-                          ],
+                          ),
                         ),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.pop(dialogContext),
+                            child: const Text('Close'),
+                          ),
+                        ],
                       ),
                     ),
-                    actions: [
-                      TextButton(
-                        onPressed: () => Navigator.pop(dialogContext),
-                        child: const Text('Close'),
-                      ),
-                    ],
+                    style: TextButton.styleFrom(
+                      padding: EdgeInsets.zero,
+                      minimumSize: const Size(0, 28),
+                      alignment: Alignment.centerLeft,
+                    ),
+                    child: const Text('View details'),
                   ),
-                ),
-                style: TextButton.styleFrom(
-                  padding: EdgeInsets.zero,
-                  minimumSize: const Size(0, 28),
-                  alignment: Alignment.centerLeft,
-                ),
-                child: const Text('View details'),
+                ],
               ),
-            ],
-          ),
+            ),
+          ],
         ),
-      ],
-    ),
-  );
+      );
 }
