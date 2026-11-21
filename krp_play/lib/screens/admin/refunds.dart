@@ -1,623 +1,846 @@
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 class AdminRefundsTab extends StatefulWidget {
   const AdminRefundsTab({super.key});
+
   @override
   State<AdminRefundsTab> createState() => _AdminRefundsTabState();
 }
 
 class _AdminRefundsTabState extends State<AdminRefundsTab> {
   static const _green = Color(0xFF173F32);
-  final _search = TextEditingController();
-  String _filter = 'All';
-  
-  final List<_DisruptionRefund> _records = [
-    _DisruptionRefund(
-      id: 'DEMO-RF-003',
-      booking: 'DEMO-1842',
-      student: 'Sample Student A',
-      facility: 'Badminton Court 01',
-      session: '14 Nov 2026 · 8:00 PM–9:00 PM',
-      reason: 'Facility closed by KRP Management for maintenance.',
-      amount: 600,
-      status: 'Awaiting action',
-    ),
-    _DisruptionRefund(
-      id: 'DEMO-RF-002',
-      booking: 'DEMO-1841',
-      student: 'Sample Student B',
-      facility: 'Ping Pong Table 02',
-      session: '14 Nov 2026 · 6:00 PM–7:00 PM',
-      reason: 'Facility made unavailable by KRP Management for an event.',
-      amount: 600,
-      status: 'Processing',
-    ),
-    _DisruptionRefund(
-      id: 'DEMO-RF-001',
-      booking: 'DEMO-1839',
-      student: 'Sample Student D',
-      facility: 'Dart Board',
-      session: '15 Nov 2026 · 10:00 PM–11:00 PM',
-      reason: 'Session cancelled by KRP Management for a safety inspection.',
-      amount: 300,
-      status: 'Refunded',
-    ),
-  ];
+  static const _lime = Color(0xFFD2F865);
+  static const _bgLight = Color(0xFFF7F9F7);
+  final supabase = Supabase.instance.client;
 
-  List<_DisruptionRefund> get _visible {
-    final query = _search.text.trim().toLowerCase();
-    return _records.where((r) {
-      return (_filter == 'All' || r.status == _filter) &&
-          '${r.id} ${r.booking} ${r.student} ${r.facility}'
-              .toLowerCase()
-              .contains(query);
-    }).toList();
-  }
+  bool _isLoading = true;
+  String _selectedFilter = 'All';
+  List _refunds = [];
 
   @override
-  void dispose() {
-    _search.dispose();
-    super.dispose();
+  void initState() {
+    super.initState();
+    _fetchRefunds();
   }
 
-  String _money(int cents) => 'RM ${(cents / 100).toStringAsFixed(2)}';
+  double _parseAmount(dynamic raw) {
+    if (raw == null) return 0;
+    if (raw is num) return raw.toDouble();
+    return double.tryParse(raw.toString()) ?? 0;
+  }
 
-  Widget _badge(String status) {
-    final color = switch (status) {
-      'Refunded' => const Color(0xFF237346),
-      'Failed' => const Color(0xFFB13D35),
-      'Processing' => const Color(0xFF2665A6),
-      _ => const Color(0xFF946000),
+  Future<void> _insertRefundSafely(Map basePayload) async {
+    const candidateMethods = [
+      'bank_transfer',
+      'fpx',
+      'touch_n_go_ewallet',
+      'tng_ewallet',
+      'cash',
+      'manual',
+      'other',
+      null,
+    ];
+
+    Object? lastError;
+    for (final method in candidateMethods) {
+      try {
+        final attempt = Map.from(basePayload);
+        attempt['refund_method'] = method;
+        await supabase.from('refunds').insert(attempt);
+        return;
+      } catch (e) {
+        lastError = e;
+        if (!e.toString().toLowerCase().contains('refunds_refund_method_check')) {
+          rethrow;
+        }
+      }
+    }
+    if (lastError != null) throw lastError;
+  }
+
+  Future<void> _syncClosedBookingsToRefunds() async {
+    final allBookings = await supabase.from('bookings').select();
+    final existingRefunds = await supabase.from('refunds').select('booking_id');
+
+    final refundedBookingIds = <String>{};
+    for (final r in (existingRefunds as List)) {
+      final bid = (r as Map)['booking_id']?.toString().trim();
+      if (bid != null && bid.isNotEmpty) {
+        refundedBookingIds.add(bid);
+      }
+    }
+
+    for (final rawRow in (allBookings as List)) {
+      final b = Map.from(rawRow as Map);
+      final status = (b['status'] ?? '').toString().trim().toLowerCase();
+      final refCodeBooking =
+          (b['booking_reference'] ?? '').toString().trim().toUpperCase();
+      final bookingId = b['id']?.toString().trim() ?? '';
+      if (bookingId.isEmpty) continue;
+
+      final isClosedBooking = status.startsWith('closed');
+      final isEmptyAdminBlock = refCodeBooking.startsWith('ADMIN-');
+
+      if (isClosedBooking &&
+          !isEmptyAdminBlock &&
+          !refundedBookingIds.contains(bookingId)) {
+        final amount = _parseAmount(b['total_amount'] ?? b['amount']);
+        final nowIso = DateTime.now().toIso8601String();
+        final adminId = supabase.auth.currentUser?.id;
+        final shortSuffix = bookingId.length >= 6
+            ? bookingId.substring(0, 6).toUpperCase()
+            : bookingId.toUpperCase();
+
+        String? paymentId = b['payment_id']?.toString().trim();
+        if (paymentId == null || paymentId.isEmpty) {
+          try {
+            final payRow = await supabase
+                .from('payments')
+                .select('id')
+                .eq('booking_id', bookingId)
+                .limit(1)
+                .maybeSingle();
+            paymentId = payRow?['id']?.toString().trim();
+          } catch (_) {}
+        }
+
+        final payload = {
+          'refund_reference': 'RF-$shortSuffix',
+          'booking_id': bookingId,
+          'amount': amount,
+          'reason':
+              'Facility closed by KRP Management (${b['status'] ?? 'Closed'})',
+          'refund_channel': 'bank_transfer',
+          'status': 'awaiting_action',
+          if (paymentId != null && paymentId.isNotEmpty)
+            'payment_id': paymentId,
+          if (adminId != null) 'processed_by': adminId,
+          'created_at': nowIso,
+          'updated_at': nowIso,
+        };
+
+        await _insertRefundSafely(payload);
+        refundedBookingIds.add(bookingId);
+      }
+    }
+  }
+
+  Map _extractBookingDetails(Map? b, Map profile) {
+    if (b == null) {
+      return {
+        'studentName':
+            (profile['full_name'] ?? 'Unknown Student').toString().trim(),
+        'matric': (profile['matric_number'] ?? '').toString().trim(),
+        'facility': 'Unknown Facility',
+        'date': '-',
+        'time': '-',
+      };
+    }
+
+    Map? firstCartItem;
+    final rawPayload = b['checkout_payload'];
+    if (rawPayload is List &&
+        rawPayload.isNotEmpty &&
+        rawPayload.first is Map) {
+      firstCartItem = Map.from(rawPayload.first as Map);
+    }
+
+    final facility = (b['facility_name'] ??
+            firstCartItem?['facility_name'] ??
+            '')
+        .toString()
+        .trim();
+    final date = (b['booking_date'] ??
+            firstCartItem?['booking_date'] ??
+            firstCartItem?['date'] ??
+            '')
+        .toString()
+        .trim();
+    String time = (b['start_time'] ?? firstCartItem?['start_time'] ?? '')
+        .toString()
+        .trim();
+    if (time.isEmpty &&
+        firstCartItem?['start_times'] is List &&
+        (firstCartItem!['start_times'] as List).isNotEmpty) {
+      time = (firstCartItem['start_times'] as List).join(', ');
+    }
+
+    final studentName = (profile['full_name'] ??
+            b['student_name'] ??
+            b['full_name'] ??
+            'Unknown Student')
+        .toString()
+        .trim();
+    final matric = (profile['matric_number'] ?? b['matric_number'] ?? '')
+        .toString()
+        .trim();
+
+    return {
+      'studentName': studentName.isNotEmpty ? studentName : 'Unknown Student',
+      'matric': matric,
+      'facility': facility.isNotEmpty ? facility : 'Unknown Facility',
+      'date': date.isNotEmpty ? date : '-',
+      'time': time.isNotEmpty ? time : '-',
     };
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-      decoration: BoxDecoration(
-        color: color.withAlpha(22),
-        borderRadius: BorderRadius.circular(6),
-      ),
-      child: Text(status, style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.bold)),
-    );
   }
 
-  void _details(_DisruptionRefund r) {
-    showDialog<void>(
+  Future<void> _fetchRefunds() async {
+    setState(() => _isLoading = true);
+    try {
+      try {
+        await _syncClosedBookingsToRefunds();
+      } catch (syncError) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Sync refund warning: $syncError')),
+          );
+        }
+      }
+
+      final rows = await supabase
+          .from('refunds')
+          .select()
+          .order('created_at', ascending: false);
+
+      final bookingsRows = await supabase.from('bookings').select();
+      final bookingById = <String, Map>{};
+      final userIds = <String>{};
+
+      for (final rawB in (bookingsRows as List)) {
+        final b = Map.from(rawB as Map);
+        final id = b['id']?.toString().trim() ?? '';
+        if (id.isNotEmpty) bookingById[id] = b;
+
+        final uid = (b['user_id'] ?? b['student_id'] ?? '').toString().trim();
+        if (uid.isNotEmpty) userIds.add(uid);
+      }
+
+      final profileById = <String, Map>{};
+      if (userIds.isNotEmpty) {
+        try {
+          final profRows = await supabase
+              .from('profiles')
+              .select('id, full_name, matric_number')
+              .inFilter('id', userIds.toList());
+          for (final rawP in (profRows as List)) {
+            final p = Map.from(rawP as Map);
+            final pid = p['id']?.toString().trim() ?? '';
+            if (pid.isNotEmpty) profileById[pid] = p;
+          }
+        } catch (_) {}
+      }
+
+      final enriched = (rows as List).map((rawR) {
+        final r = Map.from(rawR as Map);
+        final bid = r['booking_id']?.toString().trim() ?? '';
+        final b = bookingById[bid];
+        final uid = b != null
+            ? (b['user_id'] ?? b['student_id'] ?? '').toString().trim()
+            : '';
+        final profile = uid.isNotEmpty ? (profileById[uid] ?? {}) : {};
+        final details = _extractBookingDetails(b, profile);
+
+        return {
+          ...r,
+          '_details': details,
+        };
+      }).toList();
+
+      if (mounted) {
+        setState(() => _refunds = enriched);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error loading refunds: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<String?> _askTextInput({
+    required String title,
+    required String prompt,
+    required String label,
+    required String initialValue,
+    required String confirmLabel,
+  }) async {
+    final controller = TextEditingController(text: initialValue);
+    final result = await showDialog<String>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: Text(r.id),
-        content: SizedBox(
-          width: 460,
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Booking: ${r.booking}'),
-                Text('Student: ${r.student}'),
-                Text('Facility: ${r.facility}'),
-                Text(r.session),
-                const Divider(height: 28),
-                const Text(
-                  'Management disruption reason',
-                  style: TextStyle(fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 4),
-                Text(r.reason),
-                const SizedBox(height: 14),
-                const Text('Initiated by: KRP Management (demo)'),
-                const Text('Booking status: Cancelled by management'),
-                Text('Original payment: ${_money(r.amount)}'),
-                Text('Payment status: ${r.status == 'Refunded' ? 'Refunded' : 'Paid'}'),
-                Text('Refund amount: ${_money(r.amount)}'),
-                Text('Refund status: ${r.status}'),
-                const Divider(height: 28),
-                const Text(
-                  'Demo activity history',
-                  style: TextStyle(fontWeight: FontWeight.bold),
-                ),
-                ...r.history.map(
-                  (entry) => Padding(
-                    padding: const EdgeInsets.only(top: 10),
-                    child: Text(entry, style: const TextStyle(fontSize: 13)),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                const Text(
-                  'No bank transaction or student notification is sent. '
-                  'History uses this device’s local time.',
-                  style: TextStyle(fontSize: 12, color: Colors.grey),
-                ),
-              ],
+      builder: (ctx) => AlertDialog(
+        title: Text(title),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(prompt, style: const TextStyle(fontSize: 13)),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              maxLines: 2,
+              autofocus: true,
+              decoration: InputDecoration(
+                labelText: label,
+                border: const OutlineInputBorder(),
+              ),
             ),
-          ),
+          ],
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Close'),
+            onPressed: () => Navigator.pop(ctx, null),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: _green,
+              foregroundColor: _lime,
+            ),
+            onPressed: () {
+              final trimmed = controller.text.trim();
+              if (trimmed.isEmpty) return;
+              Navigator.pop(ctx, trimmed);
+            },
+            child: Text(confirmLabel),
           ),
         ],
       ),
     );
+    controller.dispose();
+    return result;
   }
 
-  Future<void> _transition(_DisruptionRefund r, String next) async {
-    final previous = r.status;
-    final allowed = switch (previous) {
-      'Awaiting action' => next == 'Processing',
-      'Processing' => next == 'Refunded' || next == 'Failed',
-      'Failed' => next == 'Processing',
-      _ => false,
-    };
-    if (!allowed) return;
-    
-    final note = await showDialog<String>(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => _RefundSimulationDialog(
-        id: r.id,
-        next: next,
-        amount: _money(r.amount),
-        reason: r.reason,
-      ),
-    );
-    
-    if (!mounted || note == null || r.status != previous) return;
-    
-    setState(() {
-      r.status = next;
-      final now = DateTime.now();
-      final stamp =
-          '${now.day}/${now.month}/${now.year} '
-          '${now.hour.toString().padLeft(2, '0')}:'
-          '${now.minute.toString().padLeft(2, '0')}';
-      r.history.add(
-        '$stamp · Demo admin: $previous → $next'
-        '${note.isEmpty ? '' : '\n$note'}',
+  Future<void> _updateStatus(Map refund, String newStatus) async {
+    final id = refund['id'];
+    if (id == null) return;
+
+    final refCode =
+        (refund['refund_reference'] ?? refund['id'] ?? 'REF').toString();
+
+    String? manualRemark;
+    String? failureReason;
+
+    if (newStatus == 'refunded') {
+      manualRemark = await _askTextInput(
+        title: 'Manual Completion Remark',
+        prompt: 'Enter manual_remark before marking $refCode as Refunded:',
+        label: 'Manual Remark',
+        initialValue:
+            (refund['manual_remark'] ?? 'Refunded manually via bank transfer').toString(),
+        confirmLabel: 'Confirm Refunded',
       );
-    });
-    
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Demo status: $next. No money transferred or notification sent.'),
-      ),
-    );
-  }
-
-  Widget _actions(_DisruptionRefund r) {
-    final buttons = <Widget>[
-      OutlinedButton(
-        onPressed: () => _details(r),
-        child: const Text('Details / History'),
-      ),
-    ];
-    void add(String label, String next) => buttons.add(
-      FilledButton(onPressed: () => _transition(r, next), style: FilledButton.styleFrom(backgroundColor: _green), child: Text(label)),
-    );
-    switch (r.status) {
-      case 'Awaiting action':
-        add('Simulate initiating refund', 'Processing');
-        break;
-      case 'Processing':
-        add('Simulate completion', 'Refunded');
-        add('Simulate failure', 'Failed');
-        break;
-      case 'Failed':
-        add('Simulate retry', 'Processing');
-        break;
+      if (manualRemark == null || manualRemark.isEmpty) return;
+    } else if (newStatus == 'failed') {
+      failureReason = await _askTextInput(
+        title: 'Failure Reason',
+        prompt: 'Enter failure_reason for marking $refCode as Failed:',
+        label: 'Failure Reason',
+        initialValue:
+            (refund['failure_reason'] ?? 'Transfer failed during processing').toString(),
+        confirmLabel: 'Confirm Failed',
+      );
+      if (failureReason == null || failureReason.isEmpty) return;
     }
-    return Wrap(spacing: 10, runSpacing: 10, children: buttons);
+
+    setState(() => _isLoading = true);
+    try {
+      final previousStatus = refund['status']?.toString();
+      final nowIso = DateTime.now().toIso8601String();
+      final adminId = supabase.auth.currentUser?.id;
+
+      final updateMap = <String, dynamic>{
+        'status': newStatus,
+        'updated_at': nowIso,
+        if (adminId != null) 'processed_by': adminId,
+        if (newStatus == 'processing') 'initiated_at': nowIso,
+        if (newStatus == 'refunded') ...{
+          'manual_remark': manualRemark,
+          'completed_at': nowIso,
+        },
+        if (newStatus == 'failed') 'failure_reason': failureReason,
+      };
+
+      await supabase.from('refunds').update(updateMap).eq('id', id);
+
+      final bookingId = refund['booking_id']?.toString().trim();
+      if (newStatus == 'refunded' &&
+          bookingId != null &&
+          bookingId.isNotEmpty) {
+        try {
+          await supabase
+              .from('bookings')
+              .update({'status': 'Refunded'})
+              .eq('id', bookingId);
+        } catch (_) {}
+      }
+
+      try {
+        await supabase.from('refund_events').insert({
+          'refund_id': id.toString(),
+          'event_type': 'status_updated',
+          'previous_status': previousStatus,
+          'new_status': newStatus,
+          'note': manualRemark ??
+              failureReason ??
+              'Refund status changed to $newStatus by admin',
+          if (adminId != null) 'performed_by': adminId,
+        });
+      } catch (_) {}
+
+      await _fetchRefunds();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Refund updated to "${_formatStatusLabel(newStatus)}".',
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to update refund: $e')),
+        );
+        setState(() => _isLoading = false);
+      }
+    }
   }
 
-  Widget _summary(String title, String value) => Container(
-    padding: const EdgeInsets.all(20),
-    decoration: BoxDecoration(
-      color: Colors.white,
-      border: Border.all(color: const Color(0xFFE2E8E3)),
-      borderRadius: BorderRadius.circular(12),
-    ),
-    child: Column(
+  String _formatStatusLabel(String status) {
+    switch (status.trim().toLowerCase()) {
+      case 'awaiting_action':
+        return 'Awaiting Action';
+      case 'processing':
+        return 'Processing';
+      case 'refunded':
+        return 'Refunded';
+      case 'failed':
+        return 'Failed';
+      default:
+        return status;
+    }
+  }
+
+  List _getFilteredRefunds() {
+    if (_selectedFilter == 'All') return _refunds;
+    final target = _selectedFilter.toLowerCase().replaceAll(' ', '_');
+    return _refunds.where((raw) {
+      final st = ((raw as Map)['status'] ?? '').toString().trim().toLowerCase();
+      return st == target;
+    }).toList();
+  }
+
+  Color _badgeBgColor(String status) {
+    switch (status.trim().toLowerCase()) {
+      case 'refunded':
+        return const Color(0xFFE6F4EA);
+      case 'processing':
+        return const Color(0xFFE8F0FE);
+      case 'failed':
+        return const Color(0xFFFCE8E6);
+      default:
+        return const Color(0xFFFEF7E0);
+    }
+  }
+
+  Color _badgeTextColor(String status) {
+    switch (status.trim().toLowerCase()) {
+      case 'refunded':
+        return const Color(0xFF137333);
+      case 'processing':
+        return const Color(0xFF1967D2);
+      case 'failed':
+        return const Color(0xFFC5221F);
+      default:
+        return const Color(0xFF9A6700);
+    }
+  }
+
+  Widget _detailCell(IconData icon, String label, String value) {
+    return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(title, style: const TextStyle(color: Colors.grey, fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 0.5)),
-        const SizedBox(height: 8),
-        Text(
-          value,
-          style: const TextStyle(
-            fontSize: 26,
-            fontWeight: FontWeight.bold,
-            color: _green,
+        Icon(icon, size: 16, color: _green),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 11,
+                  color: Colors.grey.shade600,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                value,
+                style: const TextStyle(
+                  fontSize: 13.5,
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFF1A251E),
+                ),
+              ),
+            ],
           ),
         ),
       ],
-    ),
-  );
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
-    final visible = _visible;
-    final total = _records
-        .where((r) => r.status == 'Refunded')
-        .fold<int>(0, (sum, r) => sum + r.amount);
+    final visibleList = _getFilteredRefunds();
+    const filters = [
+      'All',
+      'Awaiting Action',
+      'Processing',
+      'Refunded',
+      'Failed',
+    ];
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(24),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'PAYMENT OPERATIONS',
-            style: TextStyle(
-              color: _green,
-              fontSize: 12,
-              fontWeight: FontWeight.bold,
-              letterSpacing: 1.5,
-            ),
-          ),
-          const SizedBox(height: 8),
-          const Text(
-            'Refund Management',
-            style: TextStyle(
-              fontSize: 28,
-              fontWeight: FontWeight.w900,
-              color: _green,
-            ),
-          ),
-          const SizedBox(height: 8),
-          const Text('Management-initiated refunds for affected paid bookings.', style: TextStyle(fontSize: 14, color: Colors.grey)),
-          const SizedBox(height: 24),
-          
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: const Color(0xFFFFF4D6),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: const Text(
-              'Students cannot cancel bookings or submit refund requests. '
-              'KRP Management handles eligible refunds for facility closures, maintenance '
-              'or other management unavailability.\n\n'
-              'Demo only: these affected bookings are sample records. Slot closures do not '
-              'create these records automatically yet. No bank transactions, notifications '
-              'or cross-page updates occur. Changes reset when the app restarts.',
-              style: TextStyle(color: Color(0xFF705500)),
-            ),
-          ),
-          const SizedBox(height: 24),
-
-          // 🌟 Responsive 3-Column Summary Cards
-          LayoutBuilder(
-            builder: (context, constraints) {
-              final isMobile = constraints.maxWidth < 600;
-              if (isMobile) {
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _summary('AWAITING ADMIN ACTION', '${_records.where((r) => r.status == 'Awaiting action').length}'),
-                    const SizedBox(height: 12),
-                    _summary('PROCESSING', '${_records.where((r) => r.status == 'Processing').length}'),
-                    const SizedBox(height: 12),
-                    _summary('DEMO TOTAL REFUNDED', _money(total)),
-                  ],
-                );
-              } else {
-                return Row(
-                  children: [
-                    Expanded(child: _summary('AWAITING ADMIN ACTION', '${_records.where((r) => r.status == 'Awaiting action').length}')),
-                    const SizedBox(width: 16),
-                    Expanded(child: _summary('PROCESSING', '${_records.where((r) => r.status == 'Processing').length}')),
-                    const SizedBox(width: 16),
-                    Expanded(child: _summary('DEMO TOTAL REFUNDED', _money(total))),
-                  ],
-                );
-              }
-            }
-          ),
-          
-          const SizedBox(height: 32),
-          
-          // 🌟 Responsive Search & Filter Bar
-          LayoutBuilder(
-            builder: (context, constraints) {
-              final isMobile = constraints.maxWidth < 700;
-              
-              if (isMobile) {
-                return Column(
-                  children: [
-                    TextField(
-                      controller: _search,
-                      onChanged: (_) => setState(() {}),
-                      decoration: InputDecoration(
-                        labelText: 'Search refunds',
-                        hintText: 'Refund ID, booking, student...',
-                        prefixIcon: const Icon(Icons.search),
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                    Text(
+                      'REFUND & CANCELLATION QUEUE',
+                      style: TextStyle(
+                        color: _green,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 12,
+                        letterSpacing: 1.4,
                       ),
                     ),
-                    const SizedBox(height: 12),
+                    SizedBox(height: 6),
+                    Text(
+                      'Refund Management',
+                      style: TextStyle(
+                        fontSize: 28,
+                        fontWeight: FontWeight.w900,
+                        color: _green,
+                      ),
+                    ),
+                    SizedBox(height: 4),
+                    Text(
+                      'Review refunds triggered by closed sports sessions.',
+                      style: TextStyle(fontSize: 13.5, color: Colors.grey),
+                    ),
+                  ],
+                ),
+              ),
+              Container(
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: const Color(0xFFDCE4DF)),
+                ),
+                child: IconButton(
+                  icon: const Icon(Icons.refresh, color: _green),
+                  onPressed: _fetchRefunds,
+                  tooltip: 'Refresh refunds',
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 18),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: filters.map((f) {
+              final active = _selectedFilter == f;
+              return ChoiceChip(
+                label: Text(f),
+                selected: active,
+                selectedColor: _green,
+                backgroundColor: Colors.white,
+                labelStyle: TextStyle(
+                  color: active ? Colors.white : const Color(0xFF2C3E34),
+                  fontWeight: FontWeight.w600,
+                  fontSize: 12.5,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(20),
+                  side: BorderSide(
+                    color: active ? _green : const Color(0xFFDCE4DF),
+                  ),
+                ),
+                onSelected: (_) => setState(() => _selectedFilter = f),
+              );
+            }).toList(),
+          ),
+          const SizedBox(height: 20),
+          if (_isLoading)
+            const Center(
+              child: Padding(
+                padding: EdgeInsets.all(48),
+                child: CircularProgressIndicator(color: _green),
+              ),
+            )
+          else if (visibleList.isEmpty)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(40),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: const Color(0xFFE2E8E3)),
+              ),
+              child: const Column(
+                children: [
+                  Icon(Icons.receipt_long_outlined, size: 36, color: Colors.grey),
+                  SizedBox(height: 10),
+                  Text(
+                    'No refund records found.',
+                    style: TextStyle(color: Colors.grey, fontSize: 15),
+                  ),
+                ],
+              ),
+            )
+          else
+            ...visibleList.map((rawRefund) {
+              final refund = rawRefund as Map;
+              final refCode =
+                  (refund['refund_reference'] ?? refund['id'] ?? 'REF')
+                      .toString();
+              final amountNum = _parseAmount(refund['amount']);
+              final status =
+                  (refund['status'] ?? 'awaiting_action').toString().trim();
+              final statusLower = status.toLowerCase();
+              final reason = (refund['reason'] ?? '').toString();
+              final manualRemark = (refund['manual_remark'] ?? '').toString();
+              final failureReason = (refund['failure_reason'] ?? '').toString();
+              final details = refund['_details'] is Map
+                  ? Map.from(refund['_details'] as Map)
+                  : {};
+
+              final studentName =
+                  (details['studentName'] ?? 'Unknown Student').toString();
+              final matric = (details['matric'] ?? '').toString();
+              final studentDisplay =
+                  matric.isNotEmpty ? '$studentName · $matric' : studentName;
+              final facility =
+                  (details['facility'] ?? 'Unknown Facility').toString();
+              final dateBooked = (details['date'] ?? '-').toString();
+              final timeBooked = (details['time'] ?? '-').toString();
+
+              final isRefunded = statusLower == 'refunded';
+
+              return Container(
+                margin: const EdgeInsets.only(bottom: 14),
+                padding: const EdgeInsets.all(18),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: const Color(0xFFE2E8E3)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
                     Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Expanded(
-                          child: DropdownButtonFormField<String>(
-                            key: ValueKey(_filter),
-                            initialValue: _filter,
-                            decoration: InputDecoration(
-                              labelText: 'Refund status',
-                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                        Row(
+                          children: [
+                            Text(
+                              refCode,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w800,
+                                fontSize: 16,
+                                color: _green,
+                              ),
                             ),
-                            items: ['All', 'Awaiting action', 'Processing', 'Refunded', 'Failed']
-                                .map((s) => DropdownMenuItem(value: s, child: Text(s, overflow: TextOverflow.ellipsis)))
-                                .toList(),
-                            onChanged: (s) {
-                              if (s != null) setState(() => _filter = s);
-                            },
+                            const SizedBox(width: 10),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 4,
+                              ),
+                              decoration: BoxDecoration(
+                                color: _badgeBgColor(status),
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                              child: Text(
+                                _formatStatusLabel(status),
+                                style: TextStyle(
+                                  fontSize: 11.5,
+                                  fontWeight: FontWeight.w700,
+                                  color: _badgeTextColor(status),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 6,
+                          ),
+                          decoration: BoxDecoration(
+                            color: _bgLight,
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Text(
+                            'RM ${amountNum.toStringAsFixed(2)}',
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w800,
+                              color: _green,
+                              fontSize: 15,
+                            ),
                           ),
                         ),
-                        const SizedBox(width: 8),
-                        TextButton.icon(
-                          onPressed: () => setState(() {
-                            _search.clear();
-                            _filter = 'All';
-                          }),
-                          icon: const Icon(Icons.clear, size: 18),
-                          label: const Text('Clear'),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+                    Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: _bgLight,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Column(
+                        children: [
+                          Row(
+                            children: [
+                              Expanded(
+                                child: _detailCell(
+                                  Icons.person_outline,
+                                  'Student',
+                                  studentDisplay,
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: _detailCell(
+                                  Icons.sports_tennis_outlined,
+                                  'Facility Booked',
+                                  facility,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 12),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: _detailCell(
+                                  Icons.calendar_today_outlined,
+                                  'Date Booked',
+                                  dateBooked,
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: _detailCell(
+                                  Icons.schedule_outlined,
+                                  'Time Booked',
+                                  timeBooked,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (reason.isNotEmpty) ...[
+                      const SizedBox(height: 10),
+                      Text(
+                        reason,
+                        style: TextStyle(
+                          color: Colors.grey.shade600,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                    if (manualRemark.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        'Remark: $manualRemark',
+                        style: const TextStyle(
+                          color: Color(0xFF137333),
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                    if (failureReason.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        'Failure Reason: $failureReason',
+                        style: TextStyle(
+                          color: Colors.red.shade700,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 14),
+                    Wrap(
+                      alignment: WrapAlignment.end,
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        if (statusLower == 'awaiting_action')
+                          OutlinedButton(
+                            onPressed: () =>
+                                _updateStatus(refund, 'processing'),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: const Color(0xFF1967D2),
+                              side: const BorderSide(color: Color(0xFFD2E3FC)),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                            ),
+                            child: const Text('Start Processing'),
+                          ),
+                        if (statusLower != 'failed' && !isRefunded)
+                          TextButton(
+                            onPressed: () => _updateStatus(refund, 'failed'),
+                            style: TextButton.styleFrom(
+                              foregroundColor: Colors.red.shade700,
+                            ),
+                            child: const Text('Mark Failed'),
+                          ),
+                        FilledButton.icon(
+                          onPressed: isRefunded
+                              ? null
+                              : () => _updateStatus(refund, 'refunded'),
+                          style: FilledButton.styleFrom(
+                            backgroundColor: _green,
+                            foregroundColor: _lime,
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                          ),
+                          icon: const Icon(Icons.check_circle_outline, size: 18),
+                          label: Text(
+                            isRefunded ? 'Refunded' : 'Mark Refunded',
+                          ),
                         ),
                       ],
                     ),
                   ],
-                );
-              } else {
-                return Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      flex: 3,
-                      child: TextField(
-                        controller: _search,
-                        onChanged: (_) => setState(() {}),
-                        decoration: InputDecoration(
-                          labelText: 'Search refunds',
-                          hintText: 'Refund ID, booking, student or facility',
-                          prefixIcon: const Icon(Icons.search),
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      flex: 2,
-                      child: DropdownButtonFormField<String>(
-                        key: ValueKey(_filter),
-                        initialValue: _filter,
-                        decoration: InputDecoration(
-                          labelText: 'Refund status',
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                        ),
-                        items: ['All', 'Awaiting action', 'Processing', 'Refunded', 'Failed']
-                            .map((s) => DropdownMenuItem(value: s, child: Text(s)))
-                            .toList(),
-                        onChanged: (s) {
-                          if (s != null) setState(() => _filter = s);
-                        },
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Padding(
-                      padding: const EdgeInsets.only(top: 8.0),
-                      child: TextButton.icon(
-                        onPressed: () => setState(() {
-                          _search.clear();
-                          _filter = 'All';
-                        }),
-                        style: TextButton.styleFrom(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16)),
-                        icon: const Icon(Icons.filter_alt_off_outlined),
-                        label: const Text('Clear filters', style: TextStyle(fontWeight: FontWeight.bold)),
-                      ),
-                    ),
-                  ],
-                );
-              }
-            }
-          ),
-          
-          const SizedBox(height: 24),
-          Text('${visible.length} management refund record(s)', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.grey)),
-          const SizedBox(height: 16),
-          
-          if (visible.isEmpty)
-            const Padding(
-              padding: EdgeInsets.all(28),
-              child: Text('No refunds match your filters.', style: TextStyle(fontSize: 16, color: Colors.grey)),
-            ),
-            
-          // 🌟 Responsive 2-Column Grid for Refund Cards
-          LayoutBuilder(
-            builder: (context, constraints) {
-              int columns = constraints.maxWidth > 850 ? 2 : 1;
-              double width = (constraints.maxWidth - ((columns - 1) * 16)) / columns;
-              
-              return Wrap(
-                spacing: 16,
-                runSpacing: 16,
-                children: visible.map((r) => SizedBox(
-                  width: width,
-                  child: Card(
-                    elevation: 0,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(16),
-                      side: BorderSide(color: Colors.grey.shade300)
-                    ),
-                    color: Colors.white,
-                    child: Padding(
-                      padding: const EdgeInsets.all(20),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Text(
-                                r.id,
-                                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                              ),
-                              _badge(r.status),
-                            ],
-                          ),
-                          const Divider(height: 24),
-                          Text('${r.student} · ${r.booking}', style: const TextStyle(fontWeight: FontWeight.bold)),
-                          const SizedBox(height: 4),
-                          Text(r.facility, style: TextStyle(color: Colors.grey.shade700)),
-                          Text(r.session, style: TextStyle(color: Colors.grey.shade700, fontSize: 12)),
-                          
-                          const SizedBox(height: 16),
-                          Container(
-                            width: double.infinity,
-                            padding: const EdgeInsets.all(12),
-                            decoration: BoxDecoration(color: Colors.grey.shade50, borderRadius: BorderRadius.circular(8)),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Text('MANAGEMENT REASON', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.grey)),
-                                const SizedBox(height: 4),
-                                Text(r.reason, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-                              ],
-                            ),
-                          ),
-                          
-                          const SizedBox(height: 16),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  const Text('Payment', style: TextStyle(color: Colors.grey, fontSize: 12)),
-                                  Text(r.status == 'Refunded' ? 'Refunded' : 'Paid', style: const TextStyle(fontWeight: FontWeight.bold)),
-                                ],
-                              ),
-                              Column(
-                                crossAxisAlignment: CrossAxisAlignment.end,
-                                children: [
-                                  const Text('Refund Amount', style: TextStyle(color: Colors.grey, fontSize: 12)),
-                                  Text(
-                                    _money(r.amount),
-                                    style: const TextStyle(fontSize: 18, color: _green, fontWeight: FontWeight.bold),
-                                  ),
-                                ],
-                              )
-                            ],
-                          ),
-                          const SizedBox(height: 20),
-                          _actions(r),
-                        ],
-                      ),
-                    ),
-                  ),
-                )).toList(),
+                ),
               );
-            },
-          ),
+            }),
         ],
       ),
     );
   }
-}
-
-class _DisruptionRefund {
-  final String id, booking, student, facility, session, reason;
-  final int amount;
-  String status;
-  final List<String> history;
-  _DisruptionRefund({
-    required this.id,
-    required this.booking,
-    required this.student,
-    required this.facility,
-    required this.session,
-    required this.reason,
-    required this.amount,
-    required this.status,
-  }) : history = [
-         'Sample affected paid booking loaded. Refund status: $status.',
-       ];
-}
-
-class _RefundSimulationDialog extends StatefulWidget {
-  final String id, next, amount, reason;
-  const _RefundSimulationDialog({
-    required this.id,
-    required this.next,
-    required this.amount,
-    required this.reason,
-  });
-  @override
-  State<_RefundSimulationDialog> createState() => _RefundSimulationDialogState();
-}
-
-class _RefundSimulationDialogState extends State<_RefundSimulationDialog> {
-  final _form = GlobalKey<FormState>();
-  final _note = TextEditingController();
-  @override
-  void dispose() {
-    _note.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) => AlertDialog(
-    title: Text('${widget.next} · ${widget.id}'),
-    content: SizedBox(
-      width: 440,
-      child: SingleChildScrollView(
-        child: Form(
-          key: _form,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('Amount: ${widget.amount}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-              const SizedBox(height: 12),
-              const Text('Management reason:', style: TextStyle(color: Colors.grey, fontSize: 12)),
-              Text(widget.reason, style: const TextStyle(fontWeight: FontWeight.w600)),
-              const SizedBox(height: 16),
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(color: Colors.orange.shade50, borderRadius: BorderRadius.circular(8)),
-                child: const Row(
-                  children: [
-                    Icon(Icons.info_outline, color: Colors.orange, size: 20),
-                    SizedBox(width: 8),
-                    Expanded(child: Text('This simulates a management refund. No actual money is moved.', style: TextStyle(fontSize: 12, color: Colors.orange))),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: _note,
-                minLines: 2,
-                maxLines: 4,
-                decoration: InputDecoration(
-                  labelText: widget.next == 'Failed' ? 'Failure reason (required)' : 'Admin note',
-                  border: const OutlineInputBorder(),
-                ),
-                validator: (value) => widget.next == 'Failed' && (value == null || value.trim().isEmpty) ? 'Enter a failure reason.' : null,
-              ),
-            ],
-          ),
-        ),
-      ),
-    ),
-    actions: [
-      TextButton(onPressed: () => Navigator.pop(context), child: const Text('Back')),
-      FilledButton(
-        style: FilledButton.styleFrom(backgroundColor: const Color(0xFF173F32)),
-        onPressed: () {
-          if (_form.currentState!.validate()) {
-            Navigator.pop(context, _note.text.trim());
-          }
-        },
-        child: const Text('Confirm simulation'),
-      ),
-    ],
-  );
 }
