@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -26,6 +28,10 @@ class FacilitiesScreen extends StatefulWidget {
 class _FacilitiesScreenState extends State<FacilitiesScreen> {
   late final BookingService _bookingService =
       widget.bookingService ?? BookingService();
+  final SupabaseClient _supabase = Supabase.instance.client;
+  RealtimeChannel? _bookingsChannel;
+  Timer? _availabilityTimer;
+
   List _facilities = [];
   bool _loadingPrices = true;
   bool _priceLoadFailed = false;
@@ -34,6 +40,47 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
   void initState() {
     super.initState();
     _loadPrices();
+    _bookingsChannel = _supabase
+        .channel('student:facilities_bookings')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'bookings',
+          callback: (_) {
+            if (mounted && currentStep == 2) {
+              _fetchAvailability(showLoader: false);
+            }
+          },
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'time_slots',
+          callback: (_) {
+            if (mounted && currentStep == 2) {
+              _fetchAvailability(showLoader: false);
+            }
+          },
+        )
+        .subscribe();
+
+    _availabilityTimer = Timer.periodic(const Duration(seconds: 3), (_) {
+      if (mounted &&
+          currentStep == 2 &&
+          !_isLoadingAvailability &&
+          !_isReserving) {
+        _fetchAvailability(showLoader: false);
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _availabilityTimer?.cancel();
+    if (_bookingsChannel != null) {
+      _supabase.removeChannel(_bookingsChannel!);
+    }
+    super.dispose();
   }
 
   Future<void> _loadPrices() async {
@@ -51,11 +98,12 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
         _loadingPrices = false;
       });
     } catch (_) {
-      if (mounted)
+      if (mounted) {
         setState(() {
           _loadingPrices = false;
           _priceLoadFailed = true;
         });
+      }
     }
   }
 
@@ -138,19 +186,40 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
     return '$selectedSport $suffix';
   }
 
-  // 🌟 FIX: Reads exact "Closed" status string
+  String _normalizeFacilityKey(String raw) {
+    var s = raw
+        .trim()
+        .toLowerCase()
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .replaceFirstMapped(RegExp(r' 0+(\d+)$'), (m) => ' ${m[1]}');
+    if (s == 'dart board' || s == 'dart' || s == 'board 1' || s == 'dart 1') {
+      return 'dart 1';
+    }
+    if (s == 'snooker table' ||
+        s == 'snooker' ||
+        s == 'table 1' ||
+        s == 'snooker 1') {
+      return 'snooker 1';
+    }
+    return s;
+  }
+
+  bool _sameFacility(String a, String b) {
+    if (a.trim().isEmpty || b.trim().isEmpty) return false;
+    return _normalizeFacilityKey(a) == _normalizeFacilityKey(b);
+  }
+
   String _getCourtStatus(String facilityName, List<String> requestedSlots) {
     if (_availabilityError != null) return 'Unavailable';
     for (final booking in _dayBookings) {
-      if (booking.facilityName == facilityName &&
+      final stat = booking.status.trim().toLowerCase();
+      if (_sameFacility(booking.facilityName, facilityName) &&
           booking.timeSlots.any((slot) => requestedSlots.contains(slot))) {
-        
-        final stat = booking.status.toLowerCase();
         if (stat.contains('closed') || stat.contains('maintenance')) {
-          return booking.status; // Returns "Closed (Maintenance)"
+          return 'Closed';
         }
-
         return switch (stat) {
+          'booked' => 'Booked',
           'reserved' => 'Reserved',
           'past' => 'Session ended',
           _ => 'Booked',
@@ -160,7 +229,7 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
 
     if (cartItems.any(
       (item) =>
-          item.facilityName == facilityName &&
+          _sameFacility(item.facilityName, facilityName) &&
           DateUtils.isSameDay(item.date, selectedDate) &&
           item.timeSlots.any((slot) => requestedSlots.contains(slot)),
     )) {
@@ -170,19 +239,22 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
     return 'Available';
   }
 
-  Future<void> _fetchAvailability() async {
+  Future<void> _fetchAvailability({bool showLoader = true}) async {
     final request = ++_availabilityRequest;
     final date = selectedDate;
-    setState(() {
-      _isLoadingAvailability = true;
-      _availabilityError = null;
-    });
+    if (showLoader && mounted) {
+      setState(() {
+        _isLoadingAvailability = true;
+        _availabilityError = null;
+      });
+    }
     try {
       final bookings = await _bookingService.getBookingsForDate(date);
       if (!mounted || request != _availabilityRequest) return;
       setState(() {
         _dayBookings = bookings;
         _isLoadingAvailability = false;
+        _availabilityError = null;
         _autoSelectFirstAvailableCourt();
       });
     } catch (error, stackTrace) {
@@ -414,7 +486,7 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
                 selectedCourt = _currentCourts.first;
                 currentStep = 2;
               });
-              _fetchAvailability(); 
+              _fetchAvailability();
             },
       borderRadius: BorderRadius.circular(12),
       child: Container(
@@ -603,7 +675,6 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
                         Color surfaceTint;
                         bool isSelectable = false;
 
-                        // 🌟 GREY UI Styling logic
                         if (status == 'Available') {
                           statusColor = const Color(0xFF2E7D32);
                           surfaceTint = const Color(0xFFF3FAF5);
@@ -612,8 +683,8 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
                           statusColor = const Color(0xFFD32F2F);
                           surfaceTint = const Color(0xFFFDF2F2);
                         } else {
-                          statusColor = const Color(0xFF757575); // Grey Color
-                          surfaceTint = const Color(0xFFF5F5F5); // Grey BG
+                          statusColor = const Color(0xFF757575);
+                          surfaceTint = const Color(0xFFF5F5F5);
                         }
 
                         return Expanded(
@@ -625,8 +696,7 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
                             ),
                             child: _courtCard(
                               courtName: courtSuffix,
-                              // 🌟 Format the text to fit the box
-                              statusLabel: status.contains('Closed') ? status.replaceFirst(' (', '\n(') : status,
+                              statusLabel: status,
                               statusColor: statusColor,
                               surfaceTint: surfaceTint,
                               isSelectable: isSelectable,
@@ -732,7 +802,7 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
           ? () => setState(() => selectedCourt = courtName)
           : () {
               ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text('$courtName is ${statusLabel.replaceAll('\n', ' ')}.')),
+                SnackBar(content: Text('$courtName is $statusLabel.')),
               );
             },
       borderRadius: BorderRadius.circular(10),
@@ -779,9 +849,7 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
                 fontSize: 11,
                 fontWeight: FontWeight.bold,
                 color: statusColor,
-                height: 1.2
               ),
-              textAlign: TextAlign.center,
             ),
           ],
         ),
@@ -1177,71 +1245,71 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
                     const SizedBox(height: 20),
                     _buildPayNowButton(),
                   ] else ...[
-                  const Text('Prototype demo: Pay Now simulates payment. No money is charged.'),
-                  const SizedBox(height: 12),
-                  const Text(
-                    'Select payment method',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 10),
-                  _buildPaymentMethodOption(
-                    title: 'FPX Online Banking',
-                    subtitle: 'All Malaysian banks',
-                    icon: Icons.account_balance_outlined,
-                    selected: selectedPaymentMethod == 'FPX',
-                    onTap: () => setState(() => selectedPaymentMethod = 'FPX'),
-                    expandedContent: DropdownButtonFormField<String>(
-                      key: ValueKey<String?>(selectedBank),
-                      initialValue: selectedBank,
-                      decoration: InputDecoration(
-                        labelText: 'Choose your bank',
-                        border: OutlineInputBorder(
+                    const Text('Prototype demo: Pay Now simulates payment. No money is charged.'),
+                    const SizedBox(height: 12),
+                    const Text(
+                      'Select payment method',
+                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 10),
+                    _buildPaymentMethodOption(
+                      title: 'FPX Online Banking',
+                      subtitle: 'All Malaysian banks',
+                      icon: Icons.account_balance_outlined,
+                      selected: selectedPaymentMethod == 'FPX',
+                      onTap: () => setState(() => selectedPaymentMethod = 'FPX'),
+                      expandedContent: DropdownButtonFormField<String>(
+                        key: ValueKey<String?>(selectedBank),
+                        initialValue: selectedBank,
+                        decoration: InputDecoration(
+                          labelText: 'Choose your bank',
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                        ),
+                        items: malaysianBanks
+                            .map(
+                              (bank) => DropdownMenuItem(
+                                value: bank,
+                                child: Text(bank),
+                              ),
+                            )
+                            .toList(),
+                        onChanged: (bank) => setState(() => selectedBank = bank),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    _buildPaymentMethodOption(
+                      title: 'E-Wallet',
+                      subtitle: "Touch 'n Go eWallet",
+                      icon: Icons.account_balance_wallet_outlined,
+                      selected: selectedPaymentMethod == 'E-Wallet',
+                      onTap: () =>
+                          setState(() => selectedPaymentMethod = 'E-Wallet'),
+                      expandedContent: Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF8FAF8),
                           borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: subtleBorder),
+                        ),
+                        child: const Row(
+                          children: [
+                            Icon(Icons.wallet_outlined, color: Color(0xFF315A3B)),
+                            SizedBox(width: 10),
+                            Expanded(
+                              child: Text(
+                                "Touch 'n Go eWallet",
+                                style: TextStyle(fontWeight: FontWeight.w600),
+                              ),
+                            ),
+                            Icon(Icons.check_circle, color: Color(0xFF315A3B)),
+                          ],
                         ),
                       ),
-                      items: malaysianBanks
-                          .map(
-                            (bank) => DropdownMenuItem(
-                              value: bank,
-                              child: Text(bank),
-                            ),
-                          )
-                          .toList(),
-                      onChanged: (bank) => setState(() => selectedBank = bank),
                     ),
-                  ),
-                  const SizedBox(height: 10),
-                  _buildPaymentMethodOption(
-                    title: 'E-Wallet',
-                    subtitle: "Touch 'n Go eWallet",
-                    icon: Icons.account_balance_wallet_outlined,
-                    selected: selectedPaymentMethod == 'E-Wallet',
-                    onTap: () =>
-                        setState(() => selectedPaymentMethod = 'E-Wallet'),
-                    expandedContent: Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFF8FAF8),
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: subtleBorder),
-                      ),
-                      child: const Row(
-                        children: [
-                          Icon(Icons.wallet_outlined, color: Color(0xFF315A3B)),
-                          SizedBox(width: 10),
-                          Expanded(
-                            child: Text(
-                              "Touch 'n Go eWallet",
-                              style: TextStyle(fontWeight: FontWeight.w600),
-                            ),
-                          ),
-                          Icon(Icons.check_circle, color: Color(0xFF315A3B)),
-                        ],
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-                  _buildPayNowButton(),
+                    const SizedBox(height: 20),
+                    _buildPayNowButton(),
                   ],
                 ],
                 if (reservationCreated) ...[
@@ -1557,13 +1625,13 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
             await _bookingService.getBookingsForDate(date);
         final requestedSlots = List<String>.from(item.timeSlots as List);
         final blocked = bookings.any((booking) {
-          if (booking.facilityName != item.facilityName) return false;
+          if (!_sameFacility(booking.facilityName, item.facilityName)) return false;
           final occupiedSlots = List<String>.from(booking.timeSlots as List);
           return occupiedSlots.any(requestedSlots.contains);
         });
         if (blocked) unavailable.add(item);
       }
-    } catch (error, stackTrace) {
+    } catch (error) {
       debugPrint('Cart conflict cleanup failed: $error');
       if (!mounted) return;
       _showMessage(
@@ -1689,10 +1757,11 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
     } on PaymentException catch (e) {
       if (mounted) _showMessage(e.message);
     } catch (_) {
-      if (mounted)
+      if (mounted) {
         _showMessage(
           'Connection interrupted. Retry Pay with the same cart to recover your reservation.',
         );
+      }
     } finally {
       if (mounted) setState(() => _isReserving = false);
     }
@@ -1740,7 +1809,7 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
           selectedStartTime = availableStartTimes.first;
         }
       });
-      _fetchAvailability(); 
+      _fetchAvailability();
     }
   }
 

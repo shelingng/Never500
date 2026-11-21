@@ -190,51 +190,154 @@ class BookingService {
     return _unpackBookings(response);
   }
 
-  getBookingsForDate(DateTime date) async {
-    final response = await _supabase.rpc(
-      'slot_availability',
-      params: {'p_date': _date(date)},
-    );
+  String _facilityMatchKey(String raw) {
+    var s = raw
+        .trim()
+        .toLowerCase()
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .replaceFirstMapped(RegExp(r' 0+(\d+)$'), (m) => ' ${m[1]}');
+    if (s == 'dart board' ||
+        s == 'dart board 1' ||
+        s == 'dart' ||
+        s == 'board 1' ||
+        s == 'dart 1') {
+      return 'dart 1';
+    }
+    if (s == 'snooker table' ||
+        s == 'snooker table 1' ||
+        s == 'snooker' ||
+        s == 'table 1' ||
+        s == 'snooker 1') {
+      return 'snooker 1';
+    }
+    return s;
+  }
 
-    final bookings = (response as List)
-        .where((r) => r['status'] != 'available')
-        .map(
-          (r) => Booking(
-            id: '${r['facility_name']}:${r['start_time']}',
-            userId: '',
-            facilityName: _displayFacility(r['facility_name'].toString()),
-            date: DateTime.parse(r['slot_date'].toString()),
-            timeSlots: [_displayTime(r['start_time'].toString())],
-            pricePerSession: 0,
-            totalPrice: 0,
-            status: r['status'],
-          ),
-        )
-        .toList();
+  String _formatTimeFlexible(String raw) {
+    final trimmed = raw.trim();
+    if (trimmed.isEmpty) return '';
+    final ampmMatch = RegExp(
+      r'^(\d{1,2}):(\d{2})(?::\d{2})?\s*(AM|PM)$',
+      caseSensitive: false,
+    ).firstMatch(trimmed);
+    if (ampmMatch != null) {
+      final hour = int.parse(ampmMatch[1]!);
+      final min = ampmMatch[2]!;
+      final period = ampmMatch[3]!.toUpperCase();
+      return '$hour:$min $period';
+    }
+    final isoMatch = RegExp(r'^(\d{1,2}):(\d{2})').firstMatch(trimmed);
+    if (isoMatch != null) {
+      final hour = int.parse(isoMatch[1]!);
+      final min = isoMatch[2]!;
+      final h12 = hour % 12 == 0 ? 12 : hour % 12;
+      final period = hour < 12 ? 'AM' : 'PM';
+      return '$h12:$min $period';
+    }
+    return trimmed;
+  }
 
-    try {
-      final closures = await _supabase
-          .from('bookings')
-          .select('id, facility_name, start_time, status')
-          .eq('booking_date', _date(date))
-          .ilike('status', '%Closed%');
+  bool _isInactiveStatus(String stLower) {
+    if (stLower.contains('closed') || stLower.contains('maintenance')) {
+      return false;
+    }
+    return stLower.contains('cancel') ||
+        stLower.contains('expir') ||
+        stLower.contains('fail') ||
+        stLower.contains('refund');
+  }
 
-      for (var c in closures) {
-        final rawTime = c['start_time'].toString();
-        final formattedTime =
-            rawTime.contains('M') ? rawTime : _displayTime(rawTime);
+  Future<List<Booking>> getBookingsForDate(DateTime date) async {
+    final dateStr = _date(date);
+    final bookings = <Booking>[];
 
+    void addOrUpgrade(
+      String facilityRaw,
+      String timeRaw,
+      String statusRaw, {
+      bool forceUpgrade = false,
+    }) {
+      final fClean = facilityRaw.trim();
+      final tClean = _formatTimeFlexible(timeRaw);
+      final stClean = statusRaw.trim().toLowerCase();
+      if (fClean.isEmpty || tClean.isEmpty) return;
+      if (stClean == 'available' ||
+          stClean == 'open' ||
+          _isInactiveStatus(stClean)) {
+        return;
+      }
+
+      final displayFac = _displayFacility(fClean);
+      final matchFac = _facilityMatchKey(fClean);
+      final idx = bookings.indexWhere(
+        (b) =>
+            _facilityMatchKey(b.facilityName) == matchFac &&
+            b.timeSlots.contains(tClean),
+      );
+
+      final normalizedStatus =
+          (stClean.contains('closed') || stClean.contains('maintenance'))
+              ? 'closed'
+              : (stClean == 'reserved' || stClean == 'pending_payment'
+                  ? 'reserved'
+                  : 'booked');
+
+      if (idx == -1) {
         bookings.add(
           Booking(
-            id: c['id'].toString(),
-            userId: 'admin',
-            facilityName: c['facility_name'].toString(),
+            id: '$matchFac:$tClean',
+            userId: '',
+            facilityName: displayFac,
             date: date,
-            timeSlots: [formattedTime],
+            timeSlots: [tClean],
             pricePerSession: 0,
             totalPrice: 0,
-            status: c['status'].toString(),
+            status: normalizedStatus,
           ),
+        );
+      } else if (forceUpgrade &&
+          bookings[idx].status != 'closed' &&
+          normalizedStatus == 'closed') {
+        bookings[idx] = Booking(
+          id: bookings[idx].id,
+          userId: bookings[idx].userId,
+          facilityName: bookings[idx].facilityName,
+          date: bookings[idx].date,
+          timeSlots: bookings[idx].timeSlots,
+          pricePerSession: bookings[idx].pricePerSession,
+          totalPrice: bookings[idx].totalPrice,
+          status: normalizedStatus,
+        );
+      }
+    }
+
+    try {
+      final response = await _supabase.rpc(
+        'slot_availability',
+        params: {'p_date': dateStr},
+      );
+      for (final r in (response as List)) {
+        final map = Map<String, dynamic>.from(r as Map);
+        addOrUpgrade(
+          (map['facility_name'] ?? '').toString(),
+          (map['start_time'] ?? '').toString(),
+          (map['status'] ?? '').toString(),
+        );
+      }
+    } catch (_) {}
+
+    try {
+      final bookingRows = await _supabase
+          .from('bookings')
+          .select('id, facility_name, booking_date, start_time, status')
+          .eq('booking_date', dateStr);
+      for (final r in (bookingRows as List)) {
+        final row = Map<String, dynamic>.from(r as Map);
+        addOrUpgrade(
+          (row['facility_name'] ?? '').toString(),
+          (row['start_time'] ?? '').toString(),
+          (row['status'] ?? '').toString(),
+          forceUpgrade: true,
         );
       }
     } catch (_) {}

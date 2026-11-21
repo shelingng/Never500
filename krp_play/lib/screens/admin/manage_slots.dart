@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -69,19 +71,92 @@ class _AdminSlotsTabState extends State<AdminSlotsTab> {
   String _facility = _facilities.first;
 
   bool _isLoading = true;
+  String? _lastQueryError;
   List<_Slot> _liveSlots = [];
+  RealtimeChannel? _slotsChannel;
+  Timer? _syncTimer;
 
   @override
   void initState() {
     super.initState();
-    _fetchLiveSlots();
+    _fetchLiveSlots(showLoader: true);
+    _slotsChannel = supabase
+        .channel('admin:manage_slots_sync')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'bookings',
+          callback: (_) {
+            if (mounted) _fetchLiveSlots(showLoader: false);
+          },
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'booking_items',
+          callback: (_) {
+            if (mounted) _fetchLiveSlots(showLoader: false);
+          },
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'time_slots',
+          callback: (_) {
+            if (mounted) _fetchLiveSlots(showLoader: false);
+          },
+        )
+        .subscribe();
+
+    _syncTimer = Timer.periodic(const Duration(seconds: 2), (_) {
+      if (mounted && !_isLoading) {
+        _fetchLiveSlots(showLoader: false);
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _syncTimer?.cancel();
+    if (_slotsChannel != null) {
+      supabase.removeChannel(_slotsChannel!);
+    }
+    super.dispose();
   }
 
   String _normalizeFacilityName(String raw) {
-    return raw
+    var s = raw
         .trim()
         .toLowerCase()
+        .replaceAll(RegExp(r'\s+'), ' ')
         .replaceFirstMapped(RegExp(r' 0+(\d+)$'), (m) => ' ${m[1]}');
+    if (s == 'dart board' ||
+        s == 'dart board 1' ||
+        s == 'dart' ||
+        s == 'board 1' ||
+        s == 'dart 1') {
+      return 'dart';
+    }
+    if (s == 'snooker table' ||
+        s == 'snooker table 1' ||
+        s == 'snooker' ||
+        s == 'table 1' ||
+        s == 'snooker 1') {
+      return 'snooker';
+    }
+    if (s == 'badminton court 1' || s == 'badminton 1') {
+      return 'badminton court 1';
+    }
+    if (s == 'badminton court 2' || s == 'badminton 2') {
+      return 'badminton court 2';
+    }
+    if (s == 'ping pong table 1' || s == 'ping pong 1') {
+      return 'ping pong table 1';
+    }
+    if (s == 'ping pong table 2' || s == 'ping pong 2') {
+      return 'ping pong table 2';
+    }
+    return s;
   }
 
   bool _sameFacility(String a, String b) {
@@ -89,67 +164,224 @@ class _AdminSlotsTabState extends State<AdminSlotsTab> {
     return _normalizeFacilityName(a) == _normalizeFacilityName(b);
   }
 
+  String _normalizeDate(String raw) {
+    final trimmed = raw.trim();
+    if (trimmed.length >= 10) return trimmed.substring(0, 10);
+    return trimmed;
+  }
+
+  int? _parseHour(String rawTime) {
+    final t = rawTime.trim().toUpperCase();
+    if (t.isEmpty) return null;
+
+    final ampmMatch = RegExp(
+      r'^(\d{1,2}):(\d{2})(?::\d{2})?\s*(AM|PM)$',
+    ).firstMatch(t);
+    if (ampmMatch != null) {
+      var hour = int.parse(ampmMatch[1]!);
+      final period = ampmMatch[3]!;
+      if (period == 'PM' && hour != 12) hour += 12;
+      if (period == 'AM' && hour == 12) hour = 0;
+      return hour;
+    }
+
+    final isoMatch = RegExp(r'^(\d{1,2}):(\d{2})').firstMatch(t);
+    if (isoMatch != null) {
+      return int.parse(isoMatch[1]!);
+    }
+
+    return null;
+  }
+
   bool _matchesHour(String rawTime, int hour) {
+    final parsed = _parseHour(rawTime);
+    if (parsed != null) return parsed == hour;
+
     final t = rawTime.trim().toUpperCase();
     if (t.isEmpty) return false;
     final hour12 = hour > 12 ? hour - 12 : (hour == 0 ? 12 : hour);
     final ampm = hour >= 12 ? 'PM' : 'AM';
-    final str24 = '${hour.toString().padLeft(2, '0')}:00:00';
-    final str12 = '$hour12:00 $ampm';
-    final hour24Padded = hour.toString().padLeft(2, '0');
-    return t.contains(str24) ||
-        t.contains(str12.toUpperCase()) ||
-        t.startsWith('$hour24Padded:') ||
-        t.contains('$hour12:00');
+    return t.contains('$hour12:00 $ampm') ||
+        t.contains('${hour.toString().padLeft(2, '0')}:00');
   }
 
-  bool _bookingMatchesFacilityAndDate(Map b, String dateStr) {
+  bool _isClosedStatus(String status) {
+    final s = status.trim().toLowerCase();
+    return s.contains('closed') || s.contains('maintenance');
+  }
+
+  bool _isInactiveStatus(String status) {
+    final s = status.trim().toLowerCase();
+    if (_isClosedStatus(s)) return false;
+    return s.contains('cancel') ||
+        s.contains('expir') ||
+        s.contains('fail') ||
+        s.contains('refund');
+  }
+
+  List _extractItemsFromBookingMap(Map b, String dateStr) {
+    final found = [];
+    final status = (b['status'] ?? '').toString();
+    final isClosed = _isClosedStatus(status);
+    if (!isClosed && _isInactiveStatus(status)) return found;
+
+    final id = (b['id'] ?? '').toString();
+    final rawAmt = b['total_amount'] ?? b['amount'];
+    int amountCents = 0;
+    if (rawAmt is num) {
+      amountCents = (rawAmt * 100).round();
+    } else if (rawAmt is String) {
+      amountCents = ((double.tryParse(rawAmt) ?? 0) * 100).round();
+    }
+    final isPaid =
+        status.toLowerCase() == 'paid' ||
+        status.toLowerCase() == 'confirmed' ||
+        status.toLowerCase() == 'booked';
+
     final topFacility = (b['facility_name'] ?? '').toString().trim();
-    final topDate = (b['booking_date'] ?? '').toString().trim();
+    final topDate = _normalizeDate((b['booking_date'] ?? '').toString());
+    final topTime = (b['start_time'] ?? '').toString().trim();
 
-    bool facilityOk = _sameFacility(topFacility, _facility);
-    bool dateOk = topDate == dateStr;
-
-    final rawPayload = b['checkout_payload'];
-    if (rawPayload is List) {
-      for (final item in rawPayload) {
-        if (item is Map) {
-          final itemFac = (item['facility_name'] ?? '').toString().trim();
-          final itemDate =
-              (item['booking_date'] ?? item['date'] ?? '').toString().trim();
-          if (_sameFacility(itemFac, _facility)) facilityOk = true;
-          if (itemDate == dateStr) dateOk = true;
-        }
-      }
+    if (_sameFacility(topFacility, _facility) &&
+        topDate == dateStr &&
+        topTime.isNotEmpty) {
+      found.add({
+        'id': id,
+        'time': topTime,
+        'status': status,
+        'amount': amountCents,
+        'paid': isPaid,
+      });
     }
 
-    return facilityOk && dateOk;
-  }
-
-  bool _bookingMatchesHour(Map b, int hour) {
-    if (_matchesHour((b['start_time'] ?? '').toString(), hour)) return true;
-
     final rawPayload = b['checkout_payload'];
     if (rawPayload is List) {
       for (final item in rawPayload) {
         if (item is Map) {
-          if (_matchesHour((item['start_time'] ?? '').toString(), hour)) {
-            return true;
-          }
-          if (item['start_times'] is List) {
-            for (final st in (item['start_times'] as List)) {
-              if (_matchesHour(st.toString(), hour)) return true;
+          final f = (item['facility_name'] ?? topFacility).toString().trim();
+          final d = _normalizeDate(
+            (item['booking_date'] ?? item['date'] ?? topDate).toString(),
+          );
+          if (_sameFacility(f, _facility) && d == dateStr) {
+            if (item['start_times'] is List) {
+              for (final st in (item['start_times'] as List)) {
+                found.add({
+                  'id': id,
+                  'time': st.toString().trim(),
+                  'status': status,
+                  'amount': amountCents,
+                  'paid': isPaid,
+                });
+              }
+            } else {
+              final t = (item['start_time'] ?? topTime).toString().trim();
+              if (t.isNotEmpty) {
+                found.add({
+                  'id': id,
+                  'time': t,
+                  'status': status,
+                  'amount': amountCents,
+                  'paid': isPaid,
+                });
+              }
             }
           }
         }
       }
     }
-    return false;
+
+    final bookingItems = b['booking_items'];
+    if (bookingItems is List) {
+      for (final rawItem in bookingItems) {
+        if (rawItem is Map) {
+          final itemStatus = (rawItem['status'] ?? status).toString();
+          final itemClosed = _isClosedStatus(itemStatus) || isClosed;
+          if (!itemClosed && _isInactiveStatus(itemStatus)) continue;
+          final slot = rawItem['time_slots'] as Map?;
+          if (slot != null) {
+            final facName =
+                ((slot['facilities'] as Map?)?['name'] ?? topFacility)
+                    .toString()
+                    .trim();
+            final slotDate = _normalizeDate(
+              (slot['slot_date'] ?? topDate).toString(),
+            );
+            final slotTime = (slot['start_time'] ?? topTime).toString().trim();
+            if (_sameFacility(facName, _facility) &&
+                slotDate == dateStr &&
+                slotTime.isNotEmpty) {
+              final itemPrice = rawItem['price'];
+              int itemCents = amountCents;
+              if (itemPrice is num) {
+                itemCents = (itemPrice * 100).round();
+              }
+              found.add({
+                'id': id,
+                'time': slotTime,
+                'status': itemClosed
+                    ? (isClosed ? status : itemStatus)
+                    : itemStatus,
+                'amount': itemCents,
+                'paid': true,
+              });
+            }
+          }
+        }
+      }
+    }
+
+    return found;
   }
 
-  bool _isInactiveBookingStatus(String status) {
-    final s = status.trim().toLowerCase();
-    return s.contains('cancel') || s.contains('expir') || s.contains('fail');
+  Future<void> _syncTimeSlotsAvailability(
+    String dateStr,
+    int hour, {
+    required bool available,
+  }) async {
+    final rows = await supabase
+        .from('time_slots')
+        .select('id, start_time, facilities(name)')
+        .eq('slot_date', dateStr);
+
+    var updatedCount = 0;
+    for (final r in (rows as List)) {
+      final row = r as Map;
+      final facName = ((row['facilities'] as Map?)?['name'] ?? '')
+          .toString()
+          .trim();
+      final startTime = (row['start_time'] ?? '').toString().trim();
+      if (_sameFacility(facName, _facility) && _matchesHour(startTime, hour)) {
+        await supabase
+            .from('time_slots')
+            .update({'is_available': available})
+            .eq('id', row['id']);
+        updatedCount++;
+      }
+    }
+
+    if (updatedCount == 0) {
+      final facilitiesRows = await supabase.from('facilities').select('id, name');
+      String? facilityId;
+      for (final f in (facilitiesRows as List)) {
+        final fMap = f as Map;
+        if (_sameFacility((fMap['name'] ?? '').toString(), _facility)) {
+          facilityId = fMap['id']?.toString();
+          break;
+        }
+      }
+      if (facilityId != null) {
+        final startStr = '${hour.toString().padLeft(2, '0')}:00:00';
+        final endHour = (hour + 1) % 24;
+        final endStr = '${endHour.toString().padLeft(2, '0')}:00:00';
+        await supabase.from('time_slots').insert({
+          'facility_id': facilityId,
+          'slot_date': dateStr,
+          'start_time': startStr,
+          'end_time': endStr,
+          'is_available': available,
+        });
+      }
+    }
   }
 
   Future<String?> _resolvePaymentId(Map bookingRecord, String bookingId) async {
@@ -174,63 +406,61 @@ class _AdminSlotsTabState extends State<AdminSlotsTab> {
     return null;
   }
 
-  Future<void> _fetchLiveSlots() async {
-    setState(() => _isLoading = true);
+  Future<void> _fetchLiveSlots({bool showLoader = true}) async {
+    if (showLoader && mounted) {
+      setState(() {
+        _isLoading = true;
+        _lastQueryError = null;
+      });
+    }
     try {
       final dateStr =
           '${_selectedDate.year}-${_selectedDate.month.toString().padLeft(2, '0')}-${_selectedDate.day.toString().padLeft(2, '0')}';
 
-      final allRows = await supabase.from('bookings').select();
-      final liveData = (allRows as List)
-          .map((r) => Map.from(r as Map))
-          .where((b) => _bookingMatchesFacilityAndDate(b, dateStr))
-          .toList();
+      final List occupiedRecords = [];
+      String? errMsg;
 
-      List availabilityRows = [];
       try {
-        final rpcRes = await supabase.rpc(
-          'slot_availability',
-          params: {'p_date': dateStr},
-        );
-        if (rpcRes is List) {
-          availabilityRows = rpcRes;
+        final joinedRows = await supabase
+            .from('bookings')
+            .select(
+              '*, booking_items(price, status, time_slots(slot_date, start_time, facilities(name)))',
+            );
+        for (final r in (joinedRows as List)) {
+          occupiedRecords.addAll(
+            _extractItemsFromBookingMap(Map.from(r as Map), dateStr),
+          );
         }
-      } catch (_) {}
+      } catch (e) {
+        errMsg = e.toString();
+        try {
+          final plainRows = await supabase.from('bookings').select();
+          for (final r in (plainRows as List)) {
+            occupiedRecords.addAll(
+              _extractItemsFromBookingMap(Map.from(r as Map), dateStr),
+            );
+          }
+          errMsg = null;
+        } catch (e2) {
+          errMsg = e2.toString();
+        }
+      }
 
       final weekend =
           _selectedDate.weekday == DateTime.saturday ||
           _selectedDate.weekday == DateTime.sunday;
       final hours = weekend
-          ? [10, 11, 12, 14, 15, 16, 17, 18, 20, 21, 22]
-          : [17, 18, 20, 21, 22];
+          ? [10, 11, 12, 15, 16, 17, 18, 21, 22]
+          : [17, 18, 21, 22];
 
       final List<_Slot> fetchedSlots = [];
 
       for (int hour in hours) {
-        final hour12 = hour > 12 ? hour - 12 : (hour == 0 ? 12 : hour);
-        final ampm = hour >= 12 ? 'PM' : 'AM';
-        final str12 = '$hour12:00 $ampm';
-
-        final matchingBookings = liveData
-            .where(
-              (b) =>
-                  _bookingMatchesHour(b, hour) &&
-                  !_isInactiveBookingStatus((b['status'] ?? '').toString()),
-            )
+        final hourMatches = occupiedRecords
+            .where((rec) => _matchesHour((rec['time'] ?? '').toString(), hour))
             .toList();
 
-        final matchingSlots = availabilityRows.where((r) {
-          final row = r as Map;
-          final status = (row['status']?.toString() ?? '').toLowerCase();
-          if (status == 'available' || _isInactiveBookingStatus(status)) {
-            return false;
-          }
-          final rowFacility = (row['facility_name'] ?? '').toString().trim();
-          if (!_sameFacility(rowFacility, _facility)) return false;
-          return _matchesHour((row['start_time'] ?? '').toString(), hour);
-        }).toList();
-
-        if (matchingBookings.isEmpty && matchingSlots.isEmpty) {
+        if (hourMatches.isEmpty) {
           fetchedSlots.add(
             _Slot(
               start: DateTime(
@@ -243,104 +473,99 @@ class _AdminSlotsTabState extends State<AdminSlotsTab> {
               bookings: [],
             ),
           );
-        } else if (matchingBookings.isNotEmpty) {
-          final b = matchingBookings.firstWhere(
-            (row) => (row['status']?.toString() ?? '')
-                .toLowerCase()
-                .contains('closed'),
-            orElse: () => matchingBookings.first,
-          );
-          final status = (b['status']?.toString() ?? '').toLowerCase();
-          final isClosed =
-              status.contains('closed') || status.contains('maintenance');
-
-          final rawId = b['id']?.toString() ?? 'UNKNOWN';
-          final safeId = rawId.length > 8
-              ? rawId.substring(0, 8).toUpperCase()
-              : rawId.toUpperCase();
-
-          final rawAmt = b['total_amount'] ?? b['amount'];
-          int safeAmt = 0;
-          if (rawAmt != null) {
-            if (rawAmt is num) {
-              safeAmt = rawAmt.toInt();
-            } else if (rawAmt is String) {
-              safeAmt = double.tryParse(rawAmt)?.toInt() ?? 0;
+        } else {
+          Map? closedMatch;
+          for (final m in hourMatches) {
+            if (_isClosedStatus((m['status'] ?? '').toString())) {
+              closedMatch = m;
+              break;
             }
           }
 
-          fetchedSlots.add(
-            _Slot(
-              start: DateTime(
-                _selectedDate.year,
-                _selectedDate.month,
-                _selectedDate.day,
-                hour,
-              ),
-              status: isClosed ? _SlotStatus.closed : _SlotStatus.reserved,
-              closureReason: isClosed
-                  ? status
-                        .replaceAll('closed', '')
-                        .replaceAll('(', '')
-                        .replaceAll(')', '')
-                        .trim()
-                  : null,
-              bookings: isClosed
-                  ? []
-                  : [
-                      _DemoBooking(
-                        id: safeId,
-                        amount: safeAmt,
-                        paid:
-                            status == 'paid' ||
-                            status == 'confirmed' ||
-                            status == 'booked',
-                      ),
-                    ],
-            ),
-          );
-        } else {
-          final slotRow = matchingSlots.first as Map;
-          final slotStatus =
-              (slotRow['status']?.toString() ?? 'reserved').toLowerCase();
-          final refId = '${slotRow['facility_name'] ?? _facility}-$str12';
-          final safeId = refId.length > 12
-              ? refId.substring(0, 12).toUpperCase()
-              : refId.toUpperCase();
-
-          fetchedSlots.add(
-            _Slot(
-              start: DateTime(
-                _selectedDate.year,
-                _selectedDate.month,
-                _selectedDate.day,
-                hour,
-              ),
-              status: _SlotStatus.reserved,
-              closureReason: null,
-              bookings: [
-                _DemoBooking(
-                  id: safeId,
-                  amount: 0,
-                  paid:
-                      slotStatus == 'paid' ||
-                      slotStatus == 'confirmed' ||
-                      slotStatus == 'booked',
+          if (closedMatch != null) {
+            final rawStatus = (closedMatch['status'] ?? '').toString();
+            final reason = rawStatus
+                .toLowerCase()
+                .replaceAll('closed', '')
+                .replaceAll('(', '')
+                .replaceAll(')', '')
+                .trim();
+            fetchedSlots.add(
+              _Slot(
+                start: DateTime(
+                  _selectedDate.year,
+                  _selectedDate.month,
+                  _selectedDate.day,
+                  hour,
                 ),
-              ],
-            ),
-          );
+                status: _SlotStatus.closed,
+                closureReason: reason.isEmpty ? 'Management closure' : reason,
+                bookings: [],
+              ),
+            );
+          } else {
+            final activeOnly = hourMatches
+                .where((m) => !_isInactiveStatus((m['status'] ?? '').toString()))
+                .toList();
+
+            if (activeOnly.isEmpty) {
+              fetchedSlots.add(
+                _Slot(
+                  start: DateTime(
+                    _selectedDate.year,
+                    _selectedDate.month,
+                    _selectedDate.day,
+                    hour,
+                  ),
+                  status: _SlotStatus.open,
+                  bookings: [],
+                ),
+              );
+            } else {
+              final demoBookings = activeOnly.map((m) {
+                final rawId = (m['id'] ?? 'BOOKING').toString();
+                final safeId = rawId.length > 8
+                    ? rawId.substring(0, 8).toUpperCase()
+                    : rawId.toUpperCase();
+                return _DemoBooking(
+                  id: safeId,
+                  amount: (m['amount'] as int?) ?? 0,
+                  paid: (m['paid'] as bool?) ?? true,
+                );
+              }).toList();
+
+              fetchedSlots.add(
+                _Slot(
+                  start: DateTime(
+                    _selectedDate.year,
+                    _selectedDate.month,
+                    _selectedDate.day,
+                    hour,
+                  ),
+                  status: _SlotStatus.reserved,
+                  closureReason: null,
+                  bookings: demoBookings,
+                ),
+              );
+            }
+          }
         }
       }
 
-      setState(() {
-        _liveSlots = fetchedSlots;
-        _selected.clear();
-      });
+      if (mounted) {
+        setState(() {
+          _lastQueryError = errMsg;
+          _liveSlots = fetchedSlots;
+          _selected.clear();
+        });
+      }
     } catch (e) {
       debugPrint('Error fetching slots: $e');
+      if (mounted) {
+        setState(() => _lastQueryError = e.toString());
+      }
     } finally {
-      if (mounted) setState(() => _isLoading = false);
+      if (showLoader && mounted) setState(() => _isLoading = false);
     }
   }
 
@@ -432,7 +657,7 @@ class _AdminSlotsTabState extends State<AdminSlotsTab> {
       final allRows = await supabase.from('bookings').select();
       final records = (allRows as List)
           .map((r) => Map.from(r as Map))
-          .where((b) => _bookingMatchesFacilityAndDate(b, dateStr))
+          .where((b) => _extractItemsFromBookingMap(b, dateStr).isNotEmpty)
           .toList();
 
       for (final slot in targets) {
@@ -444,13 +669,16 @@ class _AdminSlotsTabState extends State<AdminSlotsTab> {
 
         final matchingRecords = records.where((record) {
           final stat = (record['status']?.toString() ?? '').toLowerCase();
-          return _bookingMatchesHour(record, slot.start.hour) &&
-              !stat.contains('closed') &&
-              !_isInactiveBookingStatus(stat);
+          final items = _extractItemsFromBookingMap(record, dateStr);
+          return items.any(
+                (it) =>
+                    _matchesHour((it['time'] ?? '').toString(), slot.start.hour),
+              ) &&
+              !_isClosedStatus(stat) &&
+              !_isInactiveStatus(stat);
         }).toList();
 
         if (slot.status == _SlotStatus.reserved || matchingRecords.isNotEmpty) {
-          bool updatedExisting = false;
           for (var record in matchingRecords) {
             final bookingId = record['id']?.toString().trim();
             if (bookingId == null || bookingId.isEmpty) continue;
@@ -464,7 +692,13 @@ class _AdminSlotsTabState extends State<AdminSlotsTab> {
                 .from('bookings')
                 .update({'status': 'Closed ($reason)'})
                 .eq('id', bookingId);
-            updatedExisting = true;
+
+            try {
+              await supabase
+                  .from('booking_items')
+                  .update({'status': 'Closed ($reason)'})
+                  .eq('booking_id', bookingId);
+            } catch (_) {}
 
             final existingRefund = await supabase
                 .from('refunds')
@@ -484,7 +718,7 @@ class _AdminSlotsTabState extends State<AdminSlotsTab> {
                 'booking_id': bookingId,
                 'amount': refundAmount,
                 'reason': 'Facility closed by KRP Management: $reason',
-                'refund_method': 'bank_transfer',
+                'refund_method': 'manual',
                 'refund_channel': 'bank_transfer',
                 'status': 'awaiting_action',
                 if (paymentId != null) 'payment_id': paymentId,
@@ -517,33 +751,21 @@ class _AdminSlotsTabState extends State<AdminSlotsTab> {
               createdRefundCount++;
             }
           }
-
-          if (!updatedExisting) {
-            final uniqueRef =
-                'ADMIN-${slot.start.hour}-${DateTime.now().millisecondsSinceEpoch}';
-            await supabase.from('bookings').insert({
-              'user_id': supabase.auth.currentUser?.id,
-              'facility_name': _facility,
-              'booking_date': dateStr,
-              'start_time': slotTime,
-              'status': 'Closed ($reason)',
-              'total_amount': 0,
-              'booking_reference': uniqueRef,
-            });
-          }
-        } else {
-          final uniqueRef =
-              'ADMIN-${slot.start.hour}-${DateTime.now().millisecondsSinceEpoch}';
-          await supabase.from('bookings').insert({
-            'user_id': supabase.auth.currentUser?.id,
-            'facility_name': _facility,
-            'booking_date': dateStr,
-            'start_time': slotTime,
-            'status': 'Closed ($reason)',
-            'total_amount': 0,
-            'booking_reference': uniqueRef,
-          });
         }
+
+        final uniqueRef =
+            'ADMIN-${slot.start.hour}-${DateTime.now().millisecondsSinceEpoch}';
+        await supabase.from('bookings').insert({
+          'user_id': supabase.auth.currentUser?.id,
+          'facility_name': _facility,
+          'booking_date': dateStr,
+          'start_time': slotTime,
+          'status': 'Closed ($reason)',
+          'total_amount': 0,
+          'booking_reference': uniqueRef,
+        });
+
+        await _syncTimeSlotsAvailability(dateStr, slot.start.hour, available: false);
       }
 
       if (createdRefundCount > 0) {
@@ -593,18 +815,34 @@ class _AdminSlotsTabState extends State<AdminSlotsTab> {
           '${_selectedDate.year}-${_selectedDate.month.toString().padLeft(2, '0')}-${_selectedDate.day.toString().padLeft(2, '0')}';
 
       final allRows = await supabase.from('bookings').select();
-      final records = (allRows as List)
-          .map((r) => Map.from(r as Map))
-          .where((b) => _bookingMatchesFacilityAndDate(b, dateStr))
-          .toList();
-
-      for (var record in records) {
+      for (final r in (allRows as List)) {
+        final record = Map.from(r as Map);
         final stat = (record['status']?.toString() ?? '').toLowerCase();
-        if (stat.contains('closed') &&
-            _bookingMatchesHour(record, slot.start.hour)) {
-          await supabase.from('bookings').delete().eq('id', record['id']);
+        if (!_isClosedStatus(stat)) continue;
+        final items = _extractItemsFromBookingMap(record, dateStr);
+        final matchesHour = items.any(
+          (it) => _matchesHour((it['time'] ?? '').toString(), slot.start.hour),
+        );
+        if (matchesHour) {
+          final refCode = (record['booking_reference'] ?? '').toString();
+          if (refCode.startsWith('ADMIN-')) {
+            await supabase.from('bookings').delete().eq('id', record['id']);
+          } else {
+            await supabase
+                .from('bookings')
+                .update({'status': 'Refunded'})
+                .eq('id', record['id']);
+            try {
+              await supabase
+                  .from('booking_items')
+                  .update({'status': 'Refunded'})
+                  .eq('booking_id', record['id']);
+            } catch (_) {}
+          }
         }
       }
+
+      await _syncTimeSlotsAvailability(dateStr, slot.start.hour, available: true);
 
       _message('Session reopened in live database.');
     } catch (e) {
@@ -887,7 +1125,7 @@ class _AdminSlotsTabState extends State<AdminSlotsTab> {
                   Expanded(
                     flex: isMobile ? 0 : 2,
                     child: DropdownButtonFormField<String>(
-                      value: _facility,
+                      initialValue: _facility,
                       isExpanded: true,
                       decoration: const InputDecoration(
                         labelText: 'Facility',
@@ -913,6 +1151,13 @@ class _AdminSlotsTabState extends State<AdminSlotsTab> {
               );
             },
           ),
+          if (_lastQueryError != null) ...[
+            const SizedBox(height: 8),
+            Text(
+              'Query notice: $_lastQueryError',
+              style: const TextStyle(fontSize: 12, color: Colors.red),
+            ),
+          ],
           const SizedBox(height: 16),
           const Text(
             'Reserved sessions closed by management automatically create a refund record and navigate to Refund Management.',

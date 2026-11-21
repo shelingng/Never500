@@ -106,21 +106,24 @@ class _AdminOverviewTabState extends State<AdminOverviewTab> {
       int dailyActive = 0, weeklyActive = 0, monthlyActive = 0;
 
       for (var b in bookingRows) {
-        final status = (b['status']?.toString() ?? '').toLowerCase();
-        final isActive = (status == 'confirmed' || status == 'paid');
+        final status = (b['status']?.toString() ?? '').toLowerCase().trim();
+        final isActive =
+            status == 'confirmed' || status == 'paid' || status == 'booked';
 
         final rawPayload = b['checkout_payload'];
         Map<String, dynamic>? firstCartItem;
-        if (rawPayload is List && rawPayload.isNotEmpty) {
-          firstCartItem = rawPayload.first as Map<String, dynamic>?;
+        if (rawPayload is List &&
+            rawPayload.isNotEmpty &&
+            rawPayload.first is Map) {
+          firstCartItem = Map<String, dynamic>.from(rawPayload.first as Map);
         }
 
-        final String dateString =
-            b['booking_date'] ??
-            firstCartItem?['booking_date'] ??
-            firstCartItem?['date'] ??
-            b['created_at']?.toString() ??
-            now.toString();
+        final String dateString = (b['booking_date'] ??
+                firstCartItem?['booking_date'] ??
+                firstCartItem?['date'] ??
+                b['created_at'] ??
+                now)
+            .toString();
 
         final bDateRaw = DateTime.tryParse(dateString) ?? now;
         final bDate = DateTime(bDateRaw.year, bDateRaw.month, bDateRaw.day);
@@ -135,7 +138,7 @@ class _AdminOverviewTabState extends State<AdminOverviewTab> {
           }
         }
 
-        final diffDays = today.difference(bDate).inDays.abs();
+        final diffDays = bDate.difference(today).inDays.abs();
 
         if (diffDays == 0) {
           dailyB++;
@@ -168,13 +171,22 @@ class _AdminOverviewTabState extends State<AdminOverviewTab> {
               rDateRaw.month,
               rDateRaw.day,
             );
-            final diffDays = today.difference(rDate).inDays.abs();
+            final diffDays = rDate.difference(today).inDays.abs();
 
             if (diffDays == 0) dailyRep++;
             if (diffDays <= 7) weeklyRep++;
             if (diffDays <= 30) monthlyRep++;
           }
         }
+      } catch (_) {}
+
+      int failedRefunds = 0;
+      try {
+        final failedRows = await supabase
+            .from('refunds')
+            .select('id, status')
+            .eq('status', 'failed');
+        failedRefunds = (failedRows as List).length;
       } catch (_) {}
 
       setState(() {
@@ -185,21 +197,21 @@ class _AdminOverviewTabState extends State<AdminOverviewTab> {
             'revenue': 'RM $dailyR',
             'active': '$dailyActive',
             'reports': '$dailyRep',
-            'failed': '0',
+            'failed': '$failedRefunds',
           },
           'Weekly': {
             'bookings': '$weeklyB',
             'revenue': 'RM $weeklyR',
             'active': '$weeklyActive',
             'reports': '$weeklyRep',
-            'failed': '0',
+            'failed': '$failedRefunds',
           },
           'Monthly': {
             'bookings': '$monthlyB',
             'revenue': 'RM $monthlyR',
             'active': '$monthlyActive',
             'reports': '$monthlyRep',
-            'failed': '0',
+            'failed': '$failedRefunds',
           },
         };
       });
@@ -235,23 +247,38 @@ class _AdminOverviewTabState extends State<AdminOverviewTab> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            '— ${DateTime.now().toString().split(' ')[0]}',
-            style: const TextStyle(
-              color: Color(0xFF173F32),
-              fontWeight: FontWeight.bold,
-              fontSize: 12,
-              letterSpacing: 1,
-            ),
-          ),
-          const SizedBox(height: 8),
-          const Text(
-            'Admin Dashboard',
-            style: TextStyle(
-              fontSize: 28,
-              fontWeight: FontWeight.w900,
-              color: Color(0xFF0D211A),
-            ),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '— ${DateTime.now().toString().split(' ')[0]}',
+                    style: const TextStyle(
+                      color: Color(0xFF173F32),
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12,
+                      letterSpacing: 1,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Admin Dashboard',
+                    style: TextStyle(
+                      fontSize: 28,
+                      fontWeight: FontWeight.w900,
+                      color: Color(0xFF0D211A),
+                    ),
+                  ),
+                ],
+              ),
+              IconButton(
+                icon: const Icon(Icons.refresh, color: Color(0xFF173F32)),
+                onPressed: _fetchOverviewData,
+                tooltip: 'Refresh dashboard',
+              ),
+            ],
           ),
           const SizedBox(height: 8),
           const Text(
@@ -442,9 +469,11 @@ class _AdminOverviewTabState extends State<AdminOverviewTab> {
                       final rawPayload = b['checkout_payload'];
                       Map<String, dynamic>? firstCartItem;
 
-                      if (rawPayload is List && rawPayload.isNotEmpty) {
+                      if (rawPayload is List &&
+                          rawPayload.isNotEmpty &&
+                          rawPayload.first is Map) {
                         firstCartItem =
-                            rawPayload.first as Map<String, dynamic>?;
+                            Map<String, dynamic>.from(rawPayload.first as Map);
                       }
 
                       final String facility =
@@ -459,17 +488,28 @@ class _AdminOverviewTabState extends State<AdminOverviewTab> {
                       String bTime = b['start_time'] ?? 'No Time';
                       if (b['start_time'] == null &&
                           firstCartItem?['start_times'] is List &&
-                          (firstCartItem?['start_times'] as List).isNotEmpty) {
-                        bTime = (firstCartItem!['start_times'] as List).first
+                          (firstCartItem!['start_times'] as List).isNotEmpty) {
+                        bTime = (firstCartItem['start_times'] as List).first
                             .toString();
                       }
+
+                      final String displayName =
+                          (firstCartItem?['student_name'] ??
+                                  profile['full_name'] ??
+                                  'Unknown User')
+                              .toString();
+                      final String displayMatric =
+                          (firstCartItem?['matric_number'] ??
+                                  profile['matric_number'] ??
+                                  'N/A')
+                              .toString();
 
                       return Column(
                         children: [
                           _buildReservationRow(
-                            '#KRP-$shortId',
-                            profile['full_name'] ?? 'Unknown User',
-                            profile['matric_number'] ?? 'N/A',
+                            (b['booking_reference'] ?? '#KRP-$shortId').toString(),
+                            displayName,
+                            displayMatric,
                             facility,
                             '$bDate\n$bTime',
                           ),
@@ -606,43 +646,396 @@ class _ManualBookingSheet extends StatefulWidget {
 class _ManualBookingSheetState extends State<_ManualBookingSheet> {
   final supabase = Supabase.instance.client;
   bool _isSubmitting = false;
+  bool _isCheckingSlots = true;
 
+  final _studentNameController = TextEditingController();
+  final _matricOrEmailController = TextEditingController();
   final _dateController = TextEditingController(
     text: DateTime.now().toString().split(' ')[0],
   );
+
   String _selectedCategory = 'KRP Student';
   String _selectedFacility = 'Badminton Court 01';
-  String _selectedSlot = '5:00 PM';
+  String? _selectedSlot;
+  String? _matchedStudentLabel;
+
+  /// Only slots that are NOT booked or closed for the chosen facility + date.
+  List<String> _openSlots = [];
+
+  static const _facilities = [
+    'Badminton Court 01',
+    'Badminton Court 02',
+    'Ping Pong Table 01',
+    'Ping Pong Table 02',
+    'Snooker Table',
+    'Dart Board',
+    'Gym',
+  ];
+
+  static const _weekdaySlots = [
+    '5:00 PM',
+    '6:00 PM',
+    '9:00 PM',
+    '10:00 PM',
+  ];
+
+  static const _weekendSlots = [
+    '10:00 AM',
+    '11:00 AM',
+    '12:00 PM',
+    '3:00 PM',
+    '4:00 PM',
+    '5:00 PM',
+    '6:00 PM',
+    '9:00 PM',
+    '10:00 PM',
+  ];
+
+  List<String> get _operatingSlots {
+    final parsed =
+        DateTime.tryParse(_dateController.text.trim()) ?? DateTime.now();
+    final isWeekend =
+        parsed.weekday == DateTime.saturday || parsed.weekday == DateTime.sunday;
+    return isWeekend ? _weekendSlots : _weekdaySlots;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _openSlots = List<String>.from(_operatingSlots);
+    _selectedSlot = _openSlots.first;
+    _fetchAvailableSlots();
+  }
+
+  @override
+  void dispose() {
+    _studentNameController.dispose();
+    _matricOrEmailController.dispose();
+    _dateController.dispose();
+    super.dispose();
+  }
+
+  String _normalizeFacilityName(String raw) {
+    return raw
+        .trim()
+        .toLowerCase()
+        .replaceFirstMapped(RegExp(r' 0+(\d+)$'), (m) => ' ${m[1]}');
+  }
+
+  bool _sameFacility(String a, String b) {
+    if (a.trim().isEmpty || b.trim().isEmpty) return false;
+    final na = _normalizeFacilityName(a);
+    final nb = _normalizeFacilityName(b);
+    return na == nb || na.contains(nb) || nb.contains(na);
+  }
+
+  int? _parseHourFromSlotLabel(String label) {
+    final clean = label.trim().toUpperCase();
+    final match = RegExp(r'^(\d{1,2}):00\s*(AM|PM)$').firstMatch(clean);
+    if (match == null) return null;
+    int h = int.tryParse(match.group(1)!) ?? 0;
+    final period = match.group(2);
+    if (period == 'AM') {
+      if (h == 12) h = 0;
+    } else {
+      if (h != 12) h += 12;
+    }
+    return h;
+  }
+
+  String _endTimeForSlot(String startLabel) {
+    final h = _parseHourFromSlotLabel(startLabel);
+    if (h == null) return '';
+    final endH = (h + 1) % 24;
+    final hour12 = endH > 12 ? endH - 12 : (endH == 0 ? 12 : endH);
+    final ampm = endH >= 12 ? 'PM' : 'AM';
+    return '$hour12:00 $ampm';
+  }
+
+  bool _matchesHour(String rawTime, int hour) {
+    final t = rawTime.trim().toUpperCase();
+    if (t.isEmpty) return false;
+    final hour12 = hour > 12 ? hour - 12 : (hour == 0 ? 12 : hour);
+    final ampm = hour >= 12 ? 'PM' : 'AM';
+    final str24 = '${hour.toString().padLeft(2, '0')}:00';
+    final str12 = '$hour12:00 $ampm';
+    final hour24Padded = hour.toString().padLeft(2, '0');
+    return t.contains(str24) ||
+        t.contains(str12.toUpperCase()) ||
+        t.startsWith('$hour24Padded:') ||
+        t.startsWith('$hour12:00');
+  }
+
+  bool _isInactiveStatus(String status) {
+    final s = status.trim().toLowerCase();
+    return s.contains('cancel') || s.contains('expir') || s.contains('fail');
+  }
+
+  bool _bookingMatchesFacilityAndDate(Map b, String dateStr) {
+    final topFacility = (b['facility_name'] ?? '').toString().trim();
+    final topDate = (b['booking_date'] ?? '').toString().trim();
+
+    bool facilityOk = _sameFacility(topFacility, _selectedFacility);
+    bool dateOk = topDate.startsWith(dateStr);
+
+    final rawPayload = b['checkout_payload'];
+    if (rawPayload is List) {
+      for (final item in rawPayload) {
+        if (item is Map) {
+          final itemFac = (item['facility_name'] ?? '').toString().trim();
+          final itemDate =
+              (item['booking_date'] ?? item['date'] ?? '').toString().trim();
+          if (_sameFacility(itemFac, _selectedFacility)) facilityOk = true;
+          if (itemDate.startsWith(dateStr)) dateOk = true;
+        }
+      }
+    }
+
+    return facilityOk && dateOk;
+  }
+
+  bool _bookingMatchesHour(Map b, int hour) {
+    if (_matchesHour((b['start_time'] ?? '').toString(), hour)) return true;
+
+    final rawPayload = b['checkout_payload'];
+    if (rawPayload is List) {
+      for (final item in rawPayload) {
+        if (item is Map) {
+          if (_matchesHour((item['start_time'] ?? '').toString(), hour)) {
+            return true;
+          }
+          if (item['start_times'] is List) {
+            for (final st in (item['start_times'] as List)) {
+              if (_matchesHour(st.toString(), hour)) return true;
+            }
+          }
+        }
+      }
+    }
+    return false;
+  }
+
+  Future<void> _fetchAvailableSlots() async {
+    final dateStr = _dateController.text.trim();
+    if (DateTime.tryParse(dateStr) == null) return;
+
+    setState(() => _isCheckingSlots = true);
+    try {
+      final rows = await supabase.from('bookings').select();
+      final activeBookings = (rows as List)
+          .map((r) => Map.from(r as Map))
+          .where((b) =>
+              _bookingMatchesFacilityAndDate(b, dateStr) &&
+              !_isInactiveStatus((b['status'] ?? '').toString()))
+          .toList();
+
+      List availabilityRows = [];
+      try {
+        final rpcRes = await supabase.rpc(
+          'slot_availability',
+          params: {'p_date': dateStr},
+        );
+        if (rpcRes is List) {
+          availabilityRows = rpcRes;
+        }
+      } catch (_) {}
+
+      final Set<int> blockedHours = {};
+      for (final slotLabel in _operatingSlots) {
+        final hour = _parseHourFromSlotLabel(slotLabel);
+        if (hour == null) continue;
+
+        final bookedInTable =
+            activeBookings.any((b) => _bookingMatchesHour(b, hour));
+        final bookedInRpc = availabilityRows.any((r) {
+          final row = r as Map;
+          final status = (row['status'] ?? '').toString().toLowerCase();
+          if (status == 'available' || _isInactiveStatus(status)) return false;
+          final rowFac = (row['facility_name'] ?? '').toString();
+          if (!_sameFacility(rowFac, _selectedFacility)) return false;
+          return _matchesHour((row['start_time'] ?? '').toString(), hour);
+        });
+
+        if (bookedInTable || bookedInRpc) {
+          blockedHours.add(hour);
+        }
+      }
+
+      final available = _operatingSlots.where((slotLabel) {
+        final h = _parseHourFromSlotLabel(slotLabel);
+        return h != null && !blockedHours.contains(h);
+      }).toList();
+
+      if (!mounted) return;
+      setState(() {
+        _openSlots = available;
+        if (_openSlots.isEmpty) {
+          _selectedSlot = null;
+        } else if (_selectedSlot == null ||
+            !_openSlots.contains(_selectedSlot)) {
+          _selectedSlot = _openSlots.first;
+        }
+      });
+    } catch (e) {
+      debugPrint('Error checking slot availability: $e');
+      if (mounted) {
+        setState(() {
+          _openSlots = List<String>.from(_operatingSlots);
+          _selectedSlot ??= _openSlots.first;
+        });
+      }
+    } finally {
+      if (mounted) setState(() => _isCheckingSlots = false);
+    }
+  }
+
+  Future _lookupStudentProfile(String query) async {
+    final q = query.trim();
+    if (q.isEmpty) return null;
+
+    try {
+      if (q.contains('@')) {
+        return await supabase
+            .from('profiles')
+            .select('id, full_name, matric_number, student_category')
+            .ilike('email', q)
+            .limit(1)
+            .maybeSingle();
+      } else {
+        return await supabase
+            .from('profiles')
+            .select('id, full_name, matric_number, student_category')
+            .ilike('matric_number', q)
+            .limit(1)
+            .maybeSingle();
+      }
+    } catch (_) {
+      return null;
+    }
+  }
 
   int get _calculatedPrice {
-    bool isKRP = _selectedCategory == 'KRP Student';
+    final isKRP = _selectedCategory == 'KRP Student';
     if (_selectedFacility.contains('Badminton')) return isKRP ? 6 : 8;
     if (_selectedFacility.contains('Ping Pong')) return isKRP ? 4 : 6;
     if (_selectedFacility.contains('Snooker')) return isKRP ? 10 : 12;
     if (_selectedFacility.contains('Dart')) return isKRP ? 3 : 5;
+    if (_selectedFacility == 'Gym') return isKRP ? 3 : 5;
     return 6;
   }
 
+  Future<void> _pickDate() async {
+    final now = DateTime.now();
+    final initial = DateTime.tryParse(_dateController.text.trim()) ?? now;
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: initial,
+      firstDate: DateTime(now.year, now.month, now.day),
+      lastDate: now.add(const Duration(days: 60)),
+      builder: (context, child) => Theme(
+        data: Theme.of(context).copyWith(
+          colorScheme: const ColorScheme.light(
+            primary: Color(0xFF173F32),
+            onPrimary: Colors.white,
+          ),
+        ),
+        child: child!,
+      ),
+    );
+    if (picked != null) {
+      _dateController.text =
+          '${picked.year}-${picked.month.toString().padLeft(2, '0')}-${picked.day.toString().padLeft(2, '0')}';
+      await _fetchAvailableSlots();
+    }
+  }
+
   Future<void> _submitManualBooking() async {
+    if (_selectedSlot == null || !_openSlots.contains(_selectedSlot)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No available time slot selected.')),
+      );
+      return;
+    }
+
+    final dateStr = _dateController.text.trim();
+    if (DateTime.tryParse(dateStr) == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please enter a valid date (YYYY-MM-DD).')),
+      );
+      return;
+    }
+
     setState(() => _isSubmitting = true);
 
     try {
-      final user = supabase.auth.currentUser;
+      final adminUser = supabase.auth.currentUser;
+      final identifier = _matricOrEmailController.text.trim();
+      final matchedProfile = await _lookupStudentProfile(identifier);
 
-      await supabase.from('bookings').insert({
-        'user_id': user?.id,
+      final String? targetUserId =
+          matchedProfile?['id']?.toString() ?? adminUser?.id;
+
+      final resolvedName = _studentNameController.text.trim().isNotEmpty
+          ? _studentNameController.text.trim()
+          : (matchedProfile?['full_name']?.toString() ?? 'Walk-in Student');
+
+      final resolvedMatric = identifier.isNotEmpty && !identifier.contains('@')
+          ? identifier.toUpperCase()
+          : (matchedProfile?['matric_number']?.toString() ?? 'N/A');
+
+      final refCode =
+          'WALKIN-${DateTime.now().millisecondsSinceEpoch.toString().substring(6)}';
+      final endSlot = _endTimeForSlot(_selectedSlot!);
+
+      final payload = <String, dynamic>{
+        'user_id': targetUserId,
+        'booking_reference': refCode,
         'facility_name': _selectedFacility,
-        'booking_date': _dateController.text,
+        'booking_date': dateStr,
         'start_time': _selectedSlot,
-        'amount': _calculatedPrice,
-        'status': 'Paid',
-      });
+        'end_time': endSlot,
+        'total_amount': _calculatedPrice,
+        'status': 'confirmed',
+        'checkout_payload': [
+          {
+            'facility_name': _selectedFacility,
+            'booking_date': dateStr,
+            'date': dateStr,
+            'start_time': _selectedSlot,
+            'end_time': endSlot,
+            'start_times': [_selectedSlot],
+            'student_category': _selectedCategory,
+            'student_name': resolvedName,
+            'matric_number': resolvedMatric,
+            'amount': _calculatedPrice,
+            'is_manual_walkin': true,
+          }
+        ],
+      };
+
+      try {
+        await supabase.from('bookings').insert(payload);
+      } catch (e) {
+        final msg = e.toString().toLowerCase();
+        final fallbackPayload = Map<String, dynamic>.from(payload);
+        if (msg.contains('end_time')) {
+          fallbackPayload.remove('end_time');
+        }
+        if (msg.contains('status')) {
+          fallbackPayload['status'] = 'Paid';
+        }
+        await supabase.from('bookings').insert(fallbackPayload);
+      }
 
       if (mounted) {
         Navigator.pop(context);
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Manual booking added to Supabase successfully!'),
+          SnackBar(
+            content: Text(
+              matchedProfile != null
+                  ? 'Manual booking ($refCode) linked to ${matchedProfile['full_name']}!'
+                  : 'Manual booking ($refCode) added to Supabase!',
+            ),
           ),
         );
         widget.onBookingAdded();
@@ -718,23 +1111,84 @@ class _ManualBookingSheetState extends State<_ManualBookingSheet> {
                   ),
                   const SizedBox(height: 16),
 
+                  _buildLabel('Student Matric No. or Email (links to student app)'),
+                  TextField(
+                    controller: _matricOrEmailController,
+                    onChanged: (val) async {
+                      final profile = await _lookupStudentProfile(val);
+                      if (!mounted) return;
+                      setState(() {
+                        if (profile != null) {
+                          _matchedStudentLabel =
+                              'Matched: ${profile['full_name']} (${profile['matric_number'] ?? ''})';
+                          if (_studentNameController.text.trim().isEmpty &&
+                              profile['full_name'] != null) {
+                            _studentNameController.text =
+                                profile['full_name'].toString();
+                          }
+                        } else {
+                          _matchedStudentLabel = null;
+                        }
+                      });
+                    },
+                    decoration: InputDecoration(
+                      hintText: 'e.g. A24CS0285 or student@graduate.utm.my',
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 14,
+                      ),
+                    ),
+                  ),
+                  if (_matchedStudentLabel != null) ...[
+                    const SizedBox(height: 6),
+                    Text(
+                      _matchedStudentLabel!,
+                      style: const TextStyle(
+                        color: Color(0xFF173F32),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 16),
+
+                  _buildLabel('Student name (optional)'),
+                  TextField(
+                    controller: _studentNameController,
+                    decoration: InputDecoration(
+                      hintText: 'e.g. Ahmad Daniel',
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 14,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+
                   _buildLabel('Facility'),
                   _buildDropdown(
                     _selectedFacility,
-                    [
-                      'Badminton Court 01',
-                      'Badminton Court 02',
-                      'Ping Pong Table 01',
-                      'Snooker Table',
-                      'Dart Board',
-                    ],
-                    (val) => setState(() => _selectedFacility = val!),
+                    _facilities,
+                    (val) async {
+                      if (val != null) {
+                        setState(() => _selectedFacility = val);
+                        await _fetchAvailableSlots();
+                      }
+                    },
                   ),
                   const SizedBox(height: 16),
 
                   _buildLabel('Date (YYYY-MM-DD)'),
                   TextField(
                     controller: _dateController,
+                    readOnly: true,
+                    onTap: _pickDate,
                     decoration: InputDecoration(
                       suffixIcon: const Icon(Icons.calendar_today, size: 18),
                       border: OutlineInputBorder(
@@ -748,12 +1202,62 @@ class _ManualBookingSheetState extends State<_ManualBookingSheet> {
                   ),
                   const SizedBox(height: 16),
 
-                  _buildLabel('Time slot'),
-                  _buildDropdown(
-                    _selectedSlot,
-                    ['5:00 PM', '6:00 PM', '8:00 PM', '9:00 PM'],
-                    (val) => setState(() => _selectedSlot = val!),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      _buildLabel('Available time slot'),
+                      if (_isCheckingSlots)
+                        const Padding(
+                          padding: EdgeInsets.only(bottom: 8.0),
+                          child: Text(
+                            'Checking slots...',
+                            style: TextStyle(fontSize: 11, color: Colors.grey),
+                          ),
+                        ),
+                    ],
                   ),
+                  if (_openSlots.isEmpty && !_isCheckingSlots)
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: Colors.red.shade50,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.red.shade200),
+                      ),
+                      child: const Text(
+                        'All time slots for this facility and date are already booked or closed.',
+                        style: TextStyle(color: Colors.red, fontSize: 13),
+                      ),
+                    )
+                  else
+                    DropdownButtonFormField<String>(
+                      value: _openSlots.contains(_selectedSlot)
+                          ? _selectedSlot
+                          : (_openSlots.isNotEmpty ? _openSlots.first : null),
+                      decoration: InputDecoration(
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 14,
+                        ),
+                      ),
+                      items: _openSlots
+                          .map(
+                            (slot) => DropdownMenuItem<String>(
+                              value: slot,
+                              child: Text(slot),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: (val) {
+                        if (val != null) {
+                          setState(() => _selectedSlot = val);
+                        }
+                      },
+                    ),
                 ],
               ),
             ),
@@ -800,7 +1304,11 @@ class _ManualBookingSheetState extends State<_ManualBookingSheet> {
                         borderRadius: BorderRadius.circular(8),
                       ),
                     ),
-                    onPressed: _isSubmitting ? null : _submitManualBooking,
+                    onPressed: (_isSubmitting ||
+                            _isCheckingSlots ||
+                            _openSlots.isEmpty)
+                        ? null
+                        : _submitManualBooking,
                     child: _isSubmitting
                         ? const SizedBox(
                             height: 20,
@@ -846,7 +1354,7 @@ class _ManualBookingSheetState extends State<_ManualBookingSheet> {
     ValueChanged<String?> onChanged,
   ) {
     return DropdownButtonFormField<String>(
-      value: value,
+      value: items.contains(value) ? value : items.first,
       decoration: InputDecoration(
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
         contentPadding: const EdgeInsets.symmetric(
@@ -860,4 +1368,4 @@ class _ManualBookingSheetState extends State<_ManualBookingSheet> {
       onChanged: onChanged,
     );
   }
-} 
+}
