@@ -2,6 +2,7 @@ require('dotenv').config();
 const crypto = require('crypto');
 const express = require('express');
 const cors = require('cors');
+const nodemailer = require('nodemailer');
 const axios = require('axios');
 const { createClient } = require('@supabase/supabase-js');
 
@@ -54,6 +55,58 @@ async function getUserFromRequest(req) {
 // sorted case-insensitively, joined with "|", then HMAC-SHA256 with the
 // X Signature key. https://www.billplz.com/api#x-signature
 function isValidBillplzSignature(params) {
+    const mailer = nodemailer.createTransport({
+    service: 'gmail',
+    auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
+    });
+
+    // SCRUM-18: email the confirmation once. Runs after the booking is confirmed,
+    // so a failure here never undoes the payment; it can be retried later.
+    async function sendConfirmationEmail(bookingId) {
+        const { data: booking, error } = await supabase
+            .from('bookings')
+            .select(`id, user_id, booking_reference, total_amount, status, confirmation_email_sent_at,
+                    booking_items(price, time_slots(slot_date, start_time, facilities(name))),
+                    payments(status, paid_at, transaction_reference, billplz_id)`)
+            .eq('id', bookingId)
+            .maybeSingle();
+        if (error) throw error;
+        if (!booking || booking.status !== 'confirmed') return 'not_confirmed';
+        if (booking.confirmation_email_sent_at) return 'already_sent';
+
+        const { data: userData, error: userError } = await supabase.auth.admin.getUserById(booking.user_id);
+        if (userError || !userData?.user?.email) throw userError || new Error('User has no email');
+
+        const sessions = (booking.booking_items || [])
+            .map((item) => item.time_slots)
+            .filter(Boolean)
+            .sort((a, b) => `${a.slot_date} ${a.start_time}`.localeCompare(`${b.slot_date} ${b.start_time}`))
+            .map((s) => `- ${s.facilities?.name || 'Facility'}: ${s.slot_date}, ${String(s.start_time).slice(0, 5)} (1 hour)`)
+            .join('\n');
+        const paid = (booking.payments || []).find((p) => p.status === 'paid');
+
+        await mailer.sendMail({
+            from: `"KRP Play" <${process.env.SMTP_USER}>`,
+            to: userData.user.email,
+            subject: `Booking confirmed: ${booking.booking_reference}`,
+            text: [
+                `Your booking ${booking.booking_reference} is confirmed.`,
+                '',
+                'Sessions:',
+                sessions,
+                '',
+                `Amount paid: RM${Number(booking.total_amount).toFixed(2)}`,
+                `Payment ref: ${paid?.transaction_reference || paid?.billplz_id || '-'}`,
+                `Paid at: ${paid?.paid_at ? new Date(paid.paid_at).toLocaleString('en-MY') : '-'}`,
+            ].join('\n'),
+        });
+
+        await supabase
+            .from('bookings')
+            .update({ confirmation_email_sent_at: new Date().toISOString() })
+            .eq('id', booking.id);
+        return 'sent';
+    }
     const received = params.x_signature;
     if (typeof received !== 'string') return false;
 
@@ -223,15 +276,19 @@ app.post('/api/webhook', async (req, res) => {
             return res.status(200).send('OK');
         }
 
-        const { error: payUpdateError } = await supabase
+                // Only one callback can flip pending -> paid; duplicates update 0 rows and stop here.
+        const { data: claimed, error: payUpdateError } = await supabase
             .from('payments')
             .update({
                 status: 'paid',
                 paid_at: paidAt ? new Date(paidAt).toISOString() : new Date().toISOString(),
                 transaction_reference: transactionId || billplzId,
             })
-            .eq('id', payment.id);
+            .eq('id', payment.id)
+            .eq('status', 'pending')
+            .select('id');
         if (payUpdateError) throw payUpdateError;
+        if (!claimed?.length) return res.status(200).send('OK');
 
         // Only confirm a booking that is still holding its slots.
         const { data: confirmed, error: bookingUpdateError } = await supabase
@@ -256,6 +313,10 @@ app.post('/api/webhook', async (req, res) => {
 
         console.log(`✅ Booking ${payment.booking_id} CONFIRMED (bill ${billplzId}).`);
         res.status(200).send('OK');
+                // Send after replying to Billplz; an email failure only gets logged.
+        sendConfirmationEmail(payment.booking_id)
+            .then((result) => console.log(`📧 Confirmation email for ${payment.booking_id}: ${result}`))
+            .catch((err) => console.error(`❌ [EMAIL ERROR] booking ${payment.booking_id}:`, err.message));
     } catch (error) {
         console.error('❌ [WEBHOOK ERROR]:', error.message);
         // Non-2xx makes Billplz retry the callback later.
@@ -327,6 +388,27 @@ app.get('/payment/complete', (req, res) => {
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title></head>
 <body style="font-family:sans-serif;text-align:center;padding:48px 16px">
 <h1>${paid ? '✅' : '❌'} ${title}</h1><p>${message}</p></body></html>`);
+});
+
+// SCRUM-18: retry a confirmation email that failed earlier.
+app.post('/api/resend-confirmation/:bookingId', async (req, res) => {
+    const user = await getUserFromRequest(req);
+    if (!user) return res.status(401).json({ error: 'Not signed in' });
+
+    const { data: booking } = await supabase
+        .from('bookings')
+        .select('id')
+        .eq('id', req.params.bookingId)
+        .eq('user_id', user.id)
+        .maybeSingle();
+    if (!booking) return res.status(404).json({ error: 'Booking not found' });
+
+    try {
+        res.json({ result: await sendConfirmationEmail(booking.id) });
+    } catch (err) {
+        console.error('❌ [EMAIL ERROR]:', err.message);
+        res.status(502).json({ error: 'Email could not be sent. Try again later.' });
+    }
 });
 
 app.get('/health', (_req, res) => res.json({ ok: true }));

@@ -9,6 +9,8 @@ class Booking {
   final dynamic participants;
   final dynamic totalPrice;
   final dynamic status;
+  final dynamic paidAt;
+  final dynamic paymentRef;
 
   Booking({
     required this.id,
@@ -21,5 +23,7 @@ class Booking {
     this.participants = 1,
     required this.totalPrice,
     this.status = 'Pending Payment',
+    this.paidAt,
+    this.paymentRef,
   });
 }

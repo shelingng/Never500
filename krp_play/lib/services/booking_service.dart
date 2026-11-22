@@ -182,9 +182,7 @@ class BookingService {
     if (user == null) return <Booking>[];
     final response = await _supabase
         .from('bookings')
-        .select(
-          '*, booking_items(price,status,time_slots(slot_date,start_time,facilities(name)))',
-        )
+        .select('*, booking_items(price,status,time_slots(slot_date,start_time,facilities(name))), payments(status,paid_at,transaction_reference,billplz_id)')
         .eq('user_id', user.id)
         .order('created_at', ascending: false);
     return _unpackBookings(response);
@@ -470,6 +468,10 @@ class BookingService {
         'expired' => 'Expired - unpaid',
         _ => status,
       };
+      final paid = (row['payments'] as List? ?? [])
+      .cast<Map>()
+      .where((p) => p['status'] == 'paid')
+      .firstOrNull;
       final groups = <String, List>{};
       for (final raw in (row['booking_items'] as List? ?? [])) {
         final item = Map<String, dynamic>.from(raw as Map);
@@ -492,6 +494,8 @@ class BookingService {
           Booking(
             id: row['id'],
             reference: row['booking_reference'],
+            paidAt: paid?['paid_at'],
+            paymentRef: paid?['transaction_reference'] ?? paid?['billplz_id'],
             userId: row['user_id'],
             facilityName: _displayFacility(
               (first['facilities'] as Map)['name'].toString(),

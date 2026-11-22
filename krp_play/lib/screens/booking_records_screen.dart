@@ -89,6 +89,19 @@ class _BookingRecordsScreenState extends State<BookingRecordsScreen> {
                           Text(dateStr, style: const TextStyle(color: Colors.grey)),
                         ],
                       ),
+                      const SizedBox(height: 6),
+                      Text('${booking.facilityName} · ${(booking.timeSlots as List).join(', ')} (1 hour each)'),
+                      if (booking.paymentRef != null) ...[
+                        const SizedBox(height: 10),
+                        Text(
+                          'Payment ref: ${booking.paymentRef}',
+                          style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
+                        ),
+                        Text(
+                          'Paid at: ${DateTime.parse(booking.paidAt.toString()).toLocal()}',
+                          style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
+                        ),
+                      ],
                     ],
                   ),
                 ),
