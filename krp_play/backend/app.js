@@ -237,6 +237,7 @@ app.post('/api/create-payment', async (req, res) => {
 // SCRUM-18: Billplz callback (server-to-server)
 // ---------------------------------------------------------------------------
 app.post('/api/webhook', async (req, res) => {
+    // 1. Authenticity: the X Signature proves the callback came from Billplz.
     if (!isValidBillplzSignature(req.body)) {
         console.warn('⚠️ Rejected webhook with invalid X Signature');
         return res.status(403).send('Invalid signature');
@@ -244,6 +245,7 @@ app.post('/api/webhook', async (req, res) => {
 
     const {
         id: billplzId,
+        collection_id: collectionId,
         paid,
         state,
         paid_amount: paidAmount,
@@ -251,79 +253,63 @@ app.post('/api/webhook', async (req, res) => {
         transaction_id: transactionId,
     } = req.body;
 
+    // 2. Reference: only accept bills from our own collection.
+    if (collectionId !== process.env.BILLPLZ_COLLECTION_ID) {
+        console.warn(`⚠️ Ignored callback for bill ${billplzId} from another collection (${collectionId})`);
+        return res.status(200).send('OK');
+    }
+
+    // 3. Only trusted success changes anything. Failed/out-of-order callbacks are ignored.
     if (paid !== 'true' || state !== 'paid') {
-        return res.status(200).send('OK'); // Not paid (yet); nothing to do.
+        return res.status(200).send('OK');
     }
 
     try {
-        const { data: payment, error: paymentError } = await supabase
-            .from('payments')
-            .select('id, booking_id, amount, status')
-            .eq('billplz_id', billplzId)
-            .maybeSingle();
+        // 4. Amount check + payment + booking + items saved in ONE transaction
+        //    (database/confirm_payment.sql). Repeats return 'already_paid'.
+        const { data: result, error } = await supabase.rpc('confirm_billplz_payment', {
+            p_billplz_id: billplzId,
+            p_paid_cents: Number(paidAmount),
+            p_paid_at: paidAt ? new Date(paidAt).toISOString() : new Date().toISOString(),
+            p_transaction_ref: transactionId || billplzId,
+        });
+        if (error) throw error;
 
-        if (paymentError) throw paymentError;
-        if (!payment) {
+        if (result === 'confirmed') {
+            console.log(`✅ Booking for bill ${billplzId} CONFIRMED.`);
+        } else if (result === 'already_paid') {
+            console.log(`↩️ Repeated callback for bill ${billplzId}; already handled.`);
+        } else if (result === 'amount_mismatch') {
+            console.error(`❌ Bill ${billplzId}: paid ${paidAmount} cents does not match. Needs manual review.`);
+        } else if (result === 'paid_but_not_pending') {
+            console.error(`❌ Bill ${billplzId} paid but booking is no longer pending. Needs refund/manual review.`);
+        } else {
             console.warn(`⚠️ Paid callback for unknown bill ${billplzId}`);
-            return res.status(200).send('OK');
         }
-        if (payment.status === 'paid') {
-            return res.status(200).send('OK'); // Billplz retries callbacks; already handled.
-        }
-
-        const expectedCents = Math.round(Number(payment.amount) * 100);
-        if (Number(paidAmount) !== expectedCents) {
-            console.error(`❌ Bill ${billplzId}: paid ${paidAmount} cents, expected ${expectedCents}. Needs manual review.`);
-            return res.status(200).send('OK');
-        }
-
-                // Only one callback can flip pending -> paid; duplicates update 0 rows and stop here.
-        const { data: claimed, error: payUpdateError } = await supabase
-            .from('payments')
-            .update({
-                status: 'paid',
-                paid_at: paidAt ? new Date(paidAt).toISOString() : new Date().toISOString(),
-                transaction_reference: transactionId || billplzId,
-            })
-            .eq('id', payment.id)
-            .eq('status', 'pending')
-            .select('id');
-        if (payUpdateError) throw payUpdateError;
-        if (!claimed?.length) return res.status(200).send('OK');
-
-        // Only confirm a booking that is still holding its slots.
-        const { data: confirmed, error: bookingUpdateError } = await supabase
-            .from('bookings')
-            .update({ status: 'confirmed' })
-            .eq('id', payment.booking_id)
-            .eq('status', 'pending_payment')
-            .select('id');
-        if (bookingUpdateError) throw bookingUpdateError;
-
-        if (!confirmed?.length) {
-            console.error(`❌ Booking ${payment.booking_id} was paid (bill ${billplzId}) but is no longer pending. Needs refund/manual review.`);
-            return res.status(200).send('OK');
-        }
-
-        const { error: itemsUpdateError } = await supabase
-            .from('booking_items')
-            .update({ status: 'confirmed' })
-            .eq('booking_id', payment.booking_id)
-            .eq('status', 'pending_payment');
-        if (itemsUpdateError) throw itemsUpdateError;
-
-        console.log(`✅ Booking ${payment.booking_id} CONFIRMED (bill ${billplzId}).`);
         res.status(200).send('OK');
-                // Send after replying to Billplz; an email failure only gets logged.
-        sendConfirmationEmail(payment.booking_id)
-            .then((result) => console.log(`📧 Confirmation email for ${payment.booking_id}: ${result}`))
-            .catch((err) => console.error(`❌ [EMAIL ERROR] booking ${payment.booking_id}:`, err.message));
+
+        if (result === 'confirmed') {
+            sendConfirmationEmailForBill(billplzId);
+        }
     } catch (error) {
         console.error('❌ [WEBHOOK ERROR]:', error.message);
-        // Non-2xx makes Billplz retry the callback later.
+        // Non-2xx makes Billplz retry; the transaction means nothing was half-saved.
         res.status(500).send('Error');
     }
 });
+
+// SCRUM-18 email, sent after the reply; a failure only gets logged.
+async function sendConfirmationEmailForBill(billplzId) {
+    try {
+        const { data: payment } = await supabase
+            .from('payments').select('booking_id').eq('billplz_id', billplzId).maybeSingle();
+        if (!payment) return;
+        const result = await sendConfirmationEmail(payment.booking_id);
+        console.log(`📧 Confirmation email for ${payment.booking_id}: ${result}`);
+    } catch (err) {
+        console.error(`❌ [EMAIL ERROR] bill ${billplzId}:`, err.message);
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Payment status for the app's "check status" button
