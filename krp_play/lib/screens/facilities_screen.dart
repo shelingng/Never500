@@ -1539,7 +1539,7 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
       } else if (status == 'expired' || holdExpired) {
         _showMessage(
           lastAttempt == 'completed'
-              ? 'Payment arrived after your hold expired. Submit a Payment Issue report for a refund.'
+              ? 'Payment arrived after your hold expired and the session was no longer available. A refund has been opened for you automatically.'
               : 'Your 10-minute hold expired. Your cart is kept - check the slots and pay again.',
         );
         await _resetExpiredPayment();

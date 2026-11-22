@@ -129,3 +129,24 @@ Test tool: `node scripts/fake-callback.js <billplz_id> <cents> [paid|failed] [ba
 ### Limitations
 - Late payments after a hold has ended are recorded and logged for refund, but refunds are manual (SCRUM-80).
 - Tests are manual; there are no automated backend tests yet.
+
+## Pending, expired and late payments (SCRUM-80)
+
+A background job in `app.js` (`reconcilePayments`) runs at start-up and every 2 minutes.
+Database logic is in `database/confirm_payment.sql` (run it in the Supabase SQL Editor).
+
+| Outcome | What happens |
+|---|---|
+| Unpaid after 10 minutes | `expire_unpaid_bookings()` releases the hold; the Billplz bill is deleted so it cannot be paid late |
+| Paid but callback lost | The job asks Billplz for the bill; if paid, it confirms using Billplz's transaction as evidence |
+| Paid late, sessions still free | Sessions are re-claimed and the booking is confirmed (`confirmed_late`) |
+| Paid late, session taken / closed / started | The other user's booking is untouched; the payment stays `paid`; a refund `RF-LATE-…` is opened (`awaiting_action`) for the admin Refunds page |
+| Repeated result | `already_paid`, nothing changes |
+
+The unique index on active `booking_items` guarantees a late payment can never take a session another user holds.
+
+### Limitations
+- Refunds are opened automatically but paid back manually by an admin (no Billplz refund API).
+- The job only checks bills from the last 2 days, and only while the backend is running.
+- Closed (deleted) bills stay `pending` in `payments` and are skipped after 2 days.
+- Tests are manual; there are no automated backend tests yet.
