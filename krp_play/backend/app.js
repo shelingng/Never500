@@ -51,62 +51,63 @@ async function getUserFromRequest(req) {
     return data.user;
 }
 
+const mailer = nodemailer.createTransport({
+    service: 'gmail',
+    auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
+});
+
+// SCRUM-18: email the confirmation once. Runs after the booking is confirmed,
+// so a failure here never undoes the payment; it can be retried later.
+async function sendConfirmationEmail(bookingId) {
+    const { data: booking, error } = await supabase
+        .from('bookings')
+        .select(`id, user_id, booking_reference, total_amount, status, confirmation_email_sent_at,
+                booking_items(price, time_slots(slot_date, start_time, facilities(name))),
+                payments(status, paid_at, transaction_reference, billplz_id)`)
+        .eq('id', bookingId)
+        .maybeSingle();
+    if (error) throw error;
+    if (!booking || booking.status !== 'confirmed') return 'not_confirmed';
+    if (booking.confirmation_email_sent_at) return 'already_sent';
+
+    const { data: userData, error: userError } = await supabase.auth.admin.getUserById(booking.user_id);
+    if (userError || !userData?.user?.email) throw userError || new Error('User has no email');
+
+    const sessions = (booking.booking_items || [])
+        .map((item) => item.time_slots)
+        .filter(Boolean)
+        .sort((a, b) => `${a.slot_date} ${a.start_time}`.localeCompare(`${b.slot_date} ${b.start_time}`))
+        .map((s) => `- ${s.facilities?.name || 'Facility'}: ${s.slot_date}, ${String(s.start_time).slice(0, 5)} (1 hour)`)
+        .join('\n');
+    const paid = (booking.payments || []).find((p) => p.status === 'paid');
+
+    await mailer.sendMail({
+        from: `"KRP Play" <${process.env.SMTP_USER}>`,
+        to: userData.user.email,
+        subject: `Booking confirmed: ${booking.booking_reference}`,
+        text: [
+            `Your booking ${booking.booking_reference} is confirmed.`,
+            '',
+            'Sessions:',
+            sessions,
+            '',
+            `Amount paid: RM${Number(booking.total_amount).toFixed(2)}`,
+            `Payment ref: ${paid?.transaction_reference || paid?.billplz_id || '-'}`,
+            `Paid at: ${paid?.paid_at ? new Date(paid.paid_at).toLocaleString('en-MY') : '-'}`,
+        ].join('\n'),
+    });
+
+    await supabase
+        .from('bookings')
+        .update({ confirmation_email_sent_at: new Date().toISOString() })
+        .eq('id', booking.id);
+    return 'sent';
+}
+
 // Billplz X Signature: every param except x_signature becomes "key+value",
 // sorted case-insensitively, joined with "|", then HMAC-SHA256 with the
 // X Signature key. https://www.billplz.com/api#x-signature
 function isValidBillplzSignature(params) {
-    const mailer = nodemailer.createTransport({
-    service: 'gmail',
-    auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
-    });
-
-    // SCRUM-18: email the confirmation once. Runs after the booking is confirmed,
-    // so a failure here never undoes the payment; it can be retried later.
-    async function sendConfirmationEmail(bookingId) {
-        const { data: booking, error } = await supabase
-            .from('bookings')
-            .select(`id, user_id, booking_reference, total_amount, status, confirmation_email_sent_at,
-                    booking_items(price, time_slots(slot_date, start_time, facilities(name))),
-                    payments(status, paid_at, transaction_reference, billplz_id)`)
-            .eq('id', bookingId)
-            .maybeSingle();
-        if (error) throw error;
-        if (!booking || booking.status !== 'confirmed') return 'not_confirmed';
-        if (booking.confirmation_email_sent_at) return 'already_sent';
-
-        const { data: userData, error: userError } = await supabase.auth.admin.getUserById(booking.user_id);
-        if (userError || !userData?.user?.email) throw userError || new Error('User has no email');
-
-        const sessions = (booking.booking_items || [])
-            .map((item) => item.time_slots)
-            .filter(Boolean)
-            .sort((a, b) => `${a.slot_date} ${a.start_time}`.localeCompare(`${b.slot_date} ${b.start_time}`))
-            .map((s) => `- ${s.facilities?.name || 'Facility'}: ${s.slot_date}, ${String(s.start_time).slice(0, 5)} (1 hour)`)
-            .join('\n');
-        const paid = (booking.payments || []).find((p) => p.status === 'paid');
-
-        await mailer.sendMail({
-            from: `"KRP Play" <${process.env.SMTP_USER}>`,
-            to: userData.user.email,
-            subject: `Booking confirmed: ${booking.booking_reference}`,
-            text: [
-                `Your booking ${booking.booking_reference} is confirmed.`,
-                '',
-                'Sessions:',
-                sessions,
-                '',
-                `Amount paid: RM${Number(booking.total_amount).toFixed(2)}`,
-                `Payment ref: ${paid?.transaction_reference || paid?.billplz_id || '-'}`,
-                `Paid at: ${paid?.paid_at ? new Date(paid.paid_at).toLocaleString('en-MY') : '-'}`,
-            ].join('\n'),
-        });
-
-        await supabase
-            .from('bookings')
-            .update({ confirmation_email_sent_at: new Date().toISOString() })
-            .eq('id', booking.id);
-        return 'sent';
-    }
     const received = params.x_signature;
     if (typeof received !== 'string') return false;
 
