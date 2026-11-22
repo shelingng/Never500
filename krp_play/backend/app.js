@@ -26,7 +26,8 @@ if (missing.length) {
 
 const PORT = Number(process.env.PORT) || 3000;
 const BILLPLZ_API_BASE_URL = (process.env.BILLPLZ_API_BASE_URL || 'https://www.billplz-sandbox.com/api/v3').replace(/\/+$/, '');
-
+const billplzAuth = { auth: { username: process.env.BILLPLZ_SECRET_KEY, password: '' } };
+const RECONCILE_EVERY_MS = 2 * 60 * 1000; // SCRUM-80: check uncertain payments every 2 minutes
 // Service-role client: bypasses RLS, so it must only ever live on this server.
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY, {
     auth: { persistSession: false, autoRefreshToken: false },
@@ -102,6 +103,24 @@ async function sendConfirmationEmail(bookingId) {
         .update({ confirmation_email_sent_at: new Date().toISOString() })
         .eq('id', booking.id);
     return 'sent';
+}
+
+// Log what confirm_billplz_payment decided (used by the webhook and the reconcile job).
+function logPaymentResult(billplzId, result, paidAmount) {
+    switch (result) {
+        case 'confirmed':
+            return console.log(`✅ Booking for bill ${billplzId} CONFIRMED.`);
+        case 'confirmed_late':
+            return console.log(`✅ Late payment for bill ${billplzId}: sessions still free, booking CONFIRMED.`);
+        case 'refund_required':
+            return console.error(`💸 Late payment for bill ${billplzId}: session no longer available. Refund opened.`);
+        case 'already_paid':
+            return console.log(`↩️ Repeated result for bill ${billplzId}; already handled.`);
+        case 'amount_mismatch':
+            return console.error(`❌ Bill ${billplzId}: paid ${paidAmount} cents does not match. Needs manual review.`);
+        default:
+            return console.warn(`⚠️ Paid result for unknown bill ${billplzId}`);
+    }
 }
 
 // Billplz X Signature: every param except x_signature becomes "key+value",
@@ -275,20 +294,10 @@ app.post('/api/webhook', async (req, res) => {
         });
         if (error) throw error;
 
-        if (result === 'confirmed') {
-            console.log(`✅ Booking for bill ${billplzId} CONFIRMED.`);
-        } else if (result === 'already_paid') {
-            console.log(`↩️ Repeated callback for bill ${billplzId}; already handled.`);
-        } else if (result === 'amount_mismatch') {
-            console.error(`❌ Bill ${billplzId}: paid ${paidAmount} cents does not match. Needs manual review.`);
-        } else if (result === 'paid_but_not_pending') {
-            console.error(`❌ Bill ${billplzId} paid but booking is no longer pending. Needs refund/manual review.`);
-        } else {
-            console.warn(`⚠️ Paid callback for unknown bill ${billplzId}`);
-        }
+        logPaymentResult(billplzId, result, paidAmount);
         res.status(200).send('OK');
 
-        if (result === 'confirmed') {
+        if (result === 'confirmed' || result === 'confirmed_late') {
             sendConfirmationEmailForBill(billplzId);
         }
     } catch (error) {
@@ -398,8 +407,73 @@ app.post('/api/resend-confirmation/:bookingId', async (req, res) => {
     }
 });
 
+// ---------------------------------------------------------------------------
+// SCRUM-80: resolve pending, expired and late-success payments
+// ---------------------------------------------------------------------------
+// Callbacks can be lost (backend or tunnel down), so we also ask Billplz
+// directly. Billplz's own bill record is the evidence; the app's word is never used.
+let reconciling = false;
+
+async function reconcilePayments() {
+    if (reconciling) return; // the previous run is still going
+    reconciling = true;
+    try {
+        // 1. Release holds whose 10 minutes are over.
+        const { data: released, error: expireError } = await supabase.rpc('expire_unpaid_bookings');
+        if (expireError) throw expireError;
+        if (released) console.log(`⏰ Released ${released} expired hold(s).`);
+
+        // 2. Check every bill we still think is unpaid (last 2 days).
+        const since = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
+        const { data: pending, error } = await supabase
+            .from('payments')
+            .select('billplz_id, bookings(status)')
+            .eq('status', 'pending')
+            .not('billplz_id', 'is', null)
+            .gte('created_at', since);
+        if (error) throw error;
+
+        for (const p of pending || []) {
+            try {
+                const { data: bill } = await axios.get(`${BILLPLZ_API_BASE_URL}/bills/${p.billplz_id}`, billplzAuth);
+
+                if (bill.paid) {
+                    // Paid on Billplz but we never got the callback.
+                    const { data: tx } = await axios.get(
+                        `${BILLPLZ_API_BASE_URL}/bills/${bill.id}/transactions`, billplzAuth);
+                    const done = (tx.transactions || []).find((t) => t.status === 'completed');
+                    const { data: result, error: rpcError } = await supabase.rpc('confirm_billplz_payment', {
+                        p_billplz_id: bill.id,
+                        p_paid_cents: Number(bill.paid_amount),
+                        p_paid_at: done?.completed_at ? new Date(done.completed_at).toISOString() : new Date().toISOString(),
+                        p_transaction_ref: done?.id || bill.id,
+                    });
+                    if (rpcError) throw rpcError;
+                    console.log(`🔎 Recovered missed callback for bill ${bill.id}`);
+                    logPaymentResult(bill.id, result, bill.paid_amount);
+                    if (result === 'confirmed' || result === 'confirmed_late') {
+                        sendConfirmationEmailForBill(bill.id);
+                    }
+                } else if (bill.state === 'due' && p.bookings?.status !== 'pending_payment') {
+                    // Hold is gone: close the bill so nobody can pay for it late.
+                    await axios.delete(`${BILLPLZ_API_BASE_URL}/bills/${bill.id}`, billplzAuth);
+                    console.log(`🗑️ Closed unpaid bill ${bill.id} (booking is ${p.bookings?.status}).`);
+                }
+            } catch (err) {
+                console.error(`❌ [RECONCILE] bill ${p.billplz_id}:`, err.response?.data || err.message);
+            }
+        }
+    } catch (err) {
+        console.error('❌ [RECONCILE ERROR]:', err.message);
+    } finally {
+        reconciling = false;
+    }
+}
+
 app.get('/health', (_req, res) => res.json({ ok: true }));
 
 app.listen(PORT, () => {
     console.log(`🚀 Payment backend listening on port ${PORT}`);
+    reconcilePayments(); // once at start-up, then every 2 minutes
+    setInterval(reconcilePayments, RECONCILE_EVERY_MS);
 });
