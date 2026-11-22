@@ -109,3 +109,23 @@ ngrok URL instead: `.\run_web.ps1 https://<your-ngrok-domain>`.
 - `payment_method` is always saved as `fpx`; the method the user actually picks on Billplz is not recorded.
 - Tests are manual; there are no automated backend tests yet.
 - CORS allows any website, and there is no rate limiting.
+
+## Payment callback verification (SCRUM-79)
+
+`POST /api/webhook` in `app.js` + `confirm_billplz_payment` in `database/confirm_payment.sql`:
+
+| Check | How | Test |
+|---|---|---|
+| Callback is really from Billplz | X Signature (HMAC-SHA256) | Tampered signature → 403 |
+| Bill belongs to us | `collection_id` must match ours | Other collection → ignored |
+| One bill = one payment | Unique index on `payments.billplz_id` | — |
+| Amount matches | Paid cents vs `payments.amount` | Wrong amount → not confirmed |
+| Only success counts | `paid=true` and `state=paid` | Failed callback → no change |
+| Atomic save | Payment, booking and items updated in one DB transaction | — |
+| Repeated / out-of-order | Row lock + `already_paid`; failed after paid is ignored | Repeat → no change |
+
+Test tool: `node scripts/fake-callback.js <billplz_id> <cents> [paid|failed] [badsig|othercollection]`
+
+### Limitations
+- Late payments after a hold has ended are recorded and logged for refund, but refunds are manual (SCRUM-80).
+- Tests are manual; there are no automated backend tests yet.
