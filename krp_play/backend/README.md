@@ -92,3 +92,20 @@ ngrok URL instead: `.\run_web.ps1 https://<your-ngrok-domain>`.
 | `Rejected webhook with invalid X Signature` | Wrong X Signature key, or X Signature is off in Billplz |
 | Paid but booking stays `pending_payment` | ngrok not running, or wrong `BILLPLZ_CALLBACK_URL`; restart `npm start` after editing `.env` |
 | `ERR_NGROK_...` when starting ngrok | The `--url` domain is not the one claimed on your ngrok account |
+
+## Payment request security (SCRUM-77)
+
+`POST /api/create-payment` in `app.js`:
+
+| Check | Code | Tested result |
+|---|---|---|
+| Must be signed in | app.js line 84 | No token → 401 |
+| Only the booking owner can pay | app.js line 93 | Other user's booking → 404 |
+| Hold must not be expired | app.js line 104 | Expired booking → 409 |
+| Amount calculated by server | app.js line 108, from `bookings.total_amount` set by `reserve_cart` (database/atomic_checkout.sql) | Sent `"amount": 1` → ignored, Billplz showed the real price |
+| Payment method and gateway reference saved | app.js lines 161-164 | payments row has billplz_id, payment_method = fpx, payment_gateway = billplz |
+
+### Limitations
+- `payment_method` is always saved as `fpx`; the method the user actually picks on Billplz is not recorded.
+- Tests are manual; there are no automated backend tests yet.
+- CORS allows any website, and there is no rate limiting.
