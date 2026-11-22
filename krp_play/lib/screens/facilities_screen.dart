@@ -35,11 +35,15 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
   List _facilities = [];
   bool _loadingPrices = true;
   bool _priceLoadFailed = false;
+  late final AppLifecycleListener _lifecycleListener;
 
   @override
   void initState() {
     super.initState();
     _loadPrices();
+    // The Billplz page opens in another tab. When the user comes back,
+    // check the payment automatically instead of waiting for a button press.
+    _lifecycleListener = AppLifecycleListener(onResume: _onAppResumed);
     _bookingsChannel = _supabase
         .channel('student:facilities_bookings')
         .onPostgresChanges(
@@ -74,8 +78,15 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
     });
   }
 
+  void _onAppResumed() {
+    if (_paymentUrl != null && !reservationCreated) {
+      _checkPaymentStatus(quiet: true);
+    }
+  }
+
   @override
   void dispose() {
+    _lifecycleListener.dispose();
     _availabilityTimer?.cancel();
     if (_bookingsChannel != null) {
       _supabase.removeChannel(_bookingsChannel!);
@@ -1489,7 +1500,22 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
     }
   }
 
-  Future<void> _checkPaymentStatus() async {
+  // The hold is gone, so drop the old bill and send the user back to pick
+  // slots again. The cart is kept so they can pay with one more tap.
+  Future<void> _resetExpiredPayment() async {
+    setState(() {
+      _paymentUrl = null;
+      _pendingBookingId = null;
+      _checkoutRequestId = null;
+      _reservedTotal = null;
+      currentStep = 2;
+    });
+    await _fetchAvailability();
+  }
+
+  /// quiet = true when the user returns from Billplz on their own:
+  /// only show a message when something actually changed.
+  Future<void> _checkPaymentStatus({bool quiet = false}) async {
     final bookingId = _pendingBookingId;
     if (bookingId == null || _checkingPayment) return;
     setState(() => _checkingPayment = true);
@@ -1514,8 +1540,9 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
         _showMessage(
           lastAttempt == 'completed'
               ? 'Payment arrived after your hold expired. Submit a Payment Issue report for a refund.'
-              : 'Your 10-minute hold expired. Go back and book again.',
+              : 'Your 10-minute hold expired. Your cart is kept - check the slots and pay again.',
         );
+        await _resetExpiredPayment();
       } else if (lastAttempt == 'failed') {
         _showMessage(
           'Payment failed. No money was taken. Tap "Open Billplz payment page" to try again.',
@@ -1524,15 +1551,17 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
         _showMessage(
           'Payment received. Confirming your booking - check again in a few seconds.',
         );
-      } else {
+      } else if (!quiet) {
         _showMessage(
           'Payment not received yet. Complete it on the Billplz page, then check again.',
         );
       }
     } on PaymentException catch (e) {
-      if (mounted) _showMessage(e.message);
+      if (mounted && !quiet) _showMessage(e.message);
     } catch (_) {
-      if (mounted) _showMessage('Could not check the payment status. Try again.');
+      if (mounted && !quiet) {
+        _showMessage('Could not check the payment status. Try again.');
+      }
     } finally {
       if (mounted) setState(() => _checkingPayment = false);
     }
