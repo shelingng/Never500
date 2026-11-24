@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../models/student_category.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class AdminOverviewTab extends StatefulWidget {
@@ -914,8 +915,11 @@ class _ManualBookingSheetState extends State<_ManualBookingSheet> {
     }
   }
 
-  int get _calculatedPrice {
-    final isKRP = _selectedCategory == 'KRP Student';
+  int get _calculatedPrice => _priceForCategory(_selectedCategory);
+
+  int _priceForCategory(String categoryLabel) {
+    // SCRUM-38: only a recognised KRP category gets the KRP rate.
+    final isKRP = StudentCategory.parse(categoryLabel) == StudentCategory.krp;
     if (_selectedFacility.contains('Badminton')) return isKRP ? 6 : 8;
     if (_selectedFacility.contains('Ping Pong')) return isKRP ? 4 : 6;
     if (_selectedFacility.contains('Snooker')) return isKRP ? 10 : 12;
@@ -983,6 +987,17 @@ class _ManualBookingSheetState extends State<_ManualBookingSheet> {
           ? identifier.toUpperCase()
           : (matchedProfile?['matric_number']?.toString() ?? 'N/A');
 
+      // SCRUM-38: a registered student is charged by the category stored in
+      // their profile, not by the dropdown, so the KRP discount cannot be
+      // given to a non-KRP student by mistake.
+      final profileCategory =
+          StudentCategory.parse(matchedProfile?['student_category']);
+      final categoryLabel = profileCategory?.label ?? _selectedCategory;
+      final price = _priceForCategory(categoryLabel);
+      final storedCategory = profileCategory?.value ??
+          StudentCategory.parse(categoryLabel)?.value ??
+          'public';
+
       final refCode =
           'WALKIN-${DateTime.now().millisecondsSinceEpoch.toString().substring(6)}';
       final endSlot = _endTimeForSlot(_selectedSlot!);
@@ -994,7 +1009,8 @@ class _ManualBookingSheetState extends State<_ManualBookingSheet> {
         'booking_date': dateStr,
         'start_time': _selectedSlot,
         'end_time': endSlot,
-        'total_amount': _calculatedPrice,
+        'total_amount': price,
+        if (storedCategory != 'public') 'customer_category': storedCategory,
         'status': 'confirmed',
         'checkout_payload': [
           {
@@ -1004,10 +1020,10 @@ class _ManualBookingSheetState extends State<_ManualBookingSheet> {
             'start_time': _selectedSlot,
             'end_time': endSlot,
             'start_times': [_selectedSlot],
-            'student_category': _selectedCategory,
+            'student_category': storedCategory,
             'student_name': resolvedName,
             'matric_number': resolvedMatric,
-            'amount': _calculatedPrice,
+            'amount': price,
             'is_manual_walkin': true,
           }
         ],
@@ -1033,8 +1049,9 @@ class _ManualBookingSheetState extends State<_ManualBookingSheet> {
           SnackBar(
             content: Text(
               matchedProfile != null
-                  ? 'Manual booking ($refCode) linked to ${matchedProfile['full_name']}!'
-                  : 'Manual booking ($refCode) added to Supabase!',
+                  ? 'Manual booking ($refCode) linked to ${matchedProfile['full_name']}, '
+                      'charged RM$price as $categoryLabel.'
+                  : 'Manual booking ($refCode) added, charged RM$price as $categoryLabel.',
             ),
           ),
         );

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../models/student_category.dart';
 import '../services/auth_service.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -27,7 +28,7 @@ class _AuthScreenState extends State<AuthScreen> {
   bool acceptedDeclaration = false;
   bool showPassword = false;
   bool isLoading = false;
-  String category = 'krp';
+  StudentCategory category = StudentCategory.krp;
   String message = '';
 
   final Color primaryGreen = const Color(0xFF103B2B);
@@ -78,7 +79,7 @@ class _AuthScreenState extends State<AuthScreen> {
           fullName: nameController.text.trim(),
           matricNumber: matricController.text.trim(),
           contactNumber: contactController.text.trim(),
-          studentCategory: category,
+          studentCategory: category.value,
         );
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -146,20 +147,22 @@ class _AuthScreenState extends State<AuthScreen> {
                         _field(contactController, 'Contact number', Icons.phone_outlined),
                         _field(matricController, 'Matric number', Icons.badge_outlined),
                         const SizedBox(height: 12),
-                        DropdownButtonFormField(
+                        // SCRUM-38: options come from StudentCategory, so the
+                        // dropdown can only hold a stored value it knows.
+                        DropdownButtonFormField<StudentCategory>(
                           isExpanded: true,
-                          value: category,
+                          initialValue: category,
                           decoration: InputDecoration(
                             labelText: 'Student category',
                             prefixIcon: Icon(Icons.school_outlined, color: primaryGreen),
                             border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                           ),
-                          items: const [
-                            DropdownMenuItem(value: 'krp', child: Text('KRP Student')),
-                            DropdownMenuItem(value: 'non_krp', child: Text('Non-KRP Student')),
+                          items: [
+                            for (final c in StudentCategory.values)
+                              DropdownMenuItem(value: c, child: Text(c.label)),
                           ],
                           onChanged: (value) {
-                            if (value != null) setState(() => category = value.toString());
+                            if (value != null) setState(() => category = value);
                           },
                         ),
                         const SizedBox(height: 16),

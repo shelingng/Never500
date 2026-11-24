@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'models/student_category.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'screens/login_screen.dart';
 import 'screens/facility_info_screen.dart';
@@ -86,7 +87,8 @@ class AuthWrapper extends StatelessWidget {
               return AdminHomeScreen(onLogout: () => AuthService().signOut());
             } else {
               return FacilityInfoScreen(
-                category: profile['student_category'] ?? 'Student',
+                // SCRUM-38: pass the stored value (krp / non_krp), or '' if not set.
+                category: StudentCategory.parse(profile['student_category'])?.value ?? '',
                 email: profile['email'] ?? '',
                 studentName: profile['full_name'] ?? '',
                 contact: profile['phone_number'] ?? '',

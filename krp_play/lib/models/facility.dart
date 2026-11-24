@@ -1,3 +1,5 @@
+import 'student_category.dart';
+
 class Facility {
   final String name;
   final String type;
@@ -13,7 +15,9 @@ class Facility {
     required this.unit,
   });
 
-  int priceFor(String category) {
-    return category == 'KRP Student' ? krpPrice : nonKrpPrice;
-  }
+  /// SCRUM-38: only a recognised KRP category gets the KRP rate.
+  int priceFor(String category) =>
+      StudentCategory.parse(category) == StudentCategory.krp
+      ? krpPrice
+      : nonKrpPrice;
 }
