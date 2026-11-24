@@ -17,6 +17,7 @@ Developed by **Team Never500**.
 - [Project Objectives](#-project-objectives)
 - [Proposed Solution](#-proposed-solution)
 - [Key Features](#-key-features)
+- [Supported Sports Facilities](#️-supported-sports-facilities)
 - [Target Users](#-target-users)
 - [Technology Stack](#-technology-stack)
 - [System Architecture](#-system-architecture)
@@ -28,6 +29,7 @@ Developed by **Team Never500**.
 - [Team Members and Roles](#-team-members-and-roles)
 - [GitHub Collaboration](#-github-collaboration)
 - [Project Status](#-project-status)
+- [Project Vision](#-project-vision)
 
 ---
 
@@ -56,8 +58,9 @@ The application will support both mobile devices and web browsers, improving acc
 | Application Type | Cross-platform Booking System |
 | Target Users | UTM Students and KRP Administrators |
 | Frontend | Flutter |
-| Backend | Node.js and Express (proposed) |
-| Database | PostgreSQL (proposed) |
+| Backend | Node.js and Express (payment backend) |
+| Database | Supabase (PostgreSQL) |
+| Payment Gateway | Billplz (sandbox) |
 | Development Period | 2–3 Months |
 
 ---
@@ -194,7 +197,7 @@ The initial project scope is based on the sports facilities identified during ou
 | Badminton Courts | Racket Sports |
 | Ping Pong Tables | Table Tennis |
 | Snooker | Indoor Sports |
-| Draft | Indoor Games |
+| Darts | Indoor Games |
 | Gym Facilities | Fitness |
 
 Facility availability, operating hours, pricing and booking rules will be configured according to KRP administrative requirements.
@@ -234,11 +237,11 @@ They can:
 
 ## 🛠️ Technology Stack
 
-The following technologies are proposed for the development of the system.
+The following technologies are used to develop the system.
 
 ### Frontend — Flutter
 
-Flutter will be used to develop the mobile and web interfaces from a shared codebase.
+Flutter is used to develop the mobile and web interfaces from a shared codebase (`krp_play/lib`).
 
 Responsibilities:
 
@@ -252,51 +255,46 @@ Website: https://flutter.dev/
 
 ### Backend — Node.js and Express
 
-Node.js with Express is proposed for backend API development.
+A small Node.js and Express server (`krp_play/backend`) handles everything that needs secret keys, so the Flutter app never sees them.
 
 Responsibilities:
 
-- Handle application requests.
-- Process booking operations.
-- Implement authentication and authorization.
-- Validate booking availability.
-- Prevent overlapping reservations.
-- Integrate payment gateway APIs.
-- Manage booking and payment notifications.
+- Create Billplz bills from the booking amount stored in the database.
+- Verify signed Billplz payment callbacks.
+- Confirm paid bookings.
+- Run a background job that expires unpaid holds and handles missed or late payments.
 
 Websites:
 
 - https://nodejs.org/
 - https://expressjs.com/
 
-### Database — PostgreSQL
+### Database — Supabase (PostgreSQL)
 
-PostgreSQL is proposed as the relational database management system.
+Supabase provides the PostgreSQL database and user authentication.
 
 Responsibilities:
 
-- Store student and administrator records.
-- Manage sports facility information.
-- Store booking details.
-- Track payment transactions.
-- Maintain data relationships and integrity.
+- Store student and administrator profiles.
+- Manage sports facility information and time slots.
+- Store bookings, booking items, payments and refunds.
+- Enforce Row Level Security so students only see their own records.
+- Calculate prices and reserve slots atomically (`reserve_cart`) to prevent double-booking.
 
-Website: https://www.postgresql.org/
+Websites:
 
-### Payment Gateway
+- https://supabase.com/
+- https://www.postgresql.org/
 
-A suitable online payment gateway will be integrated to support digital payment processing.
+### Payment Gateway — Billplz
 
-Potential options:
+Billplz is used for online payment (FPX). Development and testing use the Billplz sandbox, which does not take real money.
 
-- Billplz: https://www.billplz.com/
-- ToyyibPay: https://toyyibpay.com/
-
-The final provider will depend on API availability, testing support and project requirements.
+Website: https://www.billplz.com/
 
 ### Version Control — Git and GitHub
 
-Git and GitHub will support collaborative development, version tracking, branch management and code review.
+Git and GitHub support collaborative development, version tracking, branch management and code review.
 
 Website: https://github.com/
 
@@ -304,50 +302,29 @@ Website: https://github.com/
 
 ## 🏗️ System Architecture
 
-The proposed system follows a client-server architecture.
+The system follows a client-server architecture. The full reference (schema, API contract and state transitions) is in [docs/architecture.md](docs/architecture.md).
 
 ```text
-                UTM KRP COMMUNITY
-                        |
-              +---------+---------+
-              |                   |
            STUDENTS          ADMINISTRATORS
               |                   |
               +---------+---------+
                         |
-                 FLUTTER FRONTEND
-               +--------+--------+
-               |                 |
-          MOBILE APP         WEB APP
-               |                 |
-               +--------+--------+
-                        |
-                    REST API
-                        |
-                NODE.JS + EXPRESS
-                        |
-          +-------------+-------------+
-          |             |             |
-    AUTHENTICATION   BOOKING       PAYMENT
-                     MANAGEMENT    PROCESSING
-          |             |             |
-          +-------------+-------------+
-                        |
-                  POSTGRESQL
-                    DATABASE
-                        |
-             +----------+----------+
-             |          |          |
-           USERS      COURTS     BOOKINGS
-                                   |
-                                PAYMENTS
-                        |
-              EXTERNAL INTEGRATIONS
-                        |
-              +---------+---------+
-              |                   |
-         PAYMENT GATEWAY     EMAIL SERVICE
+                 FLUTTER APP (krp_play/lib)
+                 mobile and web
+                   |            |
+   Supabase Auth,  |            |  HTTPS + user token
+   reads, RPCs     |            |  (create payment, status)
+                   v            v
+     SUPABASE (POSTGRESQL)  <--  PAYMENT BACKEND
+     auth, RLS, bookings,        Node.js + Express
+     payments, refunds           (krp_play/backend)
+                                    |        ^
+                     create / read  |        |  signed callback
+                     bills          v        |  (via ngrok)
+                                 BILLPLZ (sandbox)
 ```
+
+**Trust rule:** money, price, student category, role and payment success are decided by the database or the backend, never by the app.
 
 ### Important System Requirements
 
@@ -375,31 +352,42 @@ The system should automatically notify relevant users and administrators when im
 
 ## 🗄️ Database Design
 
-The following tables are proposed for the initial database design.
+The database is hosted on Supabase. The main tables are listed below; see [docs/architecture.md](docs/architecture.md) for the full ERD.
 
 | Table | Purpose |
 |---|---|
-| `users` | Store student and administrator accounts |
-| `facilities` | Store sports facility information |
-| `time_slots` | Manage facility booking schedules |
-| `bookings` | Store reservation records |
-| `booking_items` | Store individual facilities or time slots in a booking |
-| `payments` | Store payment transaction details |
-| `notifications` | Store booking-related notification records |
+| `profiles` | Student and administrator accounts (`role`: `student` / `admin`; `student_category`: `krp` / `non_krp`) |
+| `facilities` | Sports facility information and pricing |
+| `time_slots` | Bookable sessions for each facility |
+| `bookings` | Reservation records |
+| `booking_items` | Individual sessions in a booking |
+| `payments` | Payment attempts and Billplz references |
+| `refunds` / `refund_events` | Refund requests and their history |
+| `reports` | Student reports (facility, payment or booking issues) |
 
-### Proposed Booking Status
+### Booking Status
 
-- `pending_payment`
+- `pending_payment` (10-minute hold while waiting for payment)
 - `confirmed`
-- `cancelled`
 - `expired`
+- `closed` (session closed by an admin; refund needed)
+- `refunded`
 
-### Proposed Payment Status
+### Payment Status
 
 - `pending`
 - `paid`
-- `failed`
-- `refunded`
+- `simulated_success` (demo mode only)
+
+### SQL Files
+
+Schema changes are SQL files in [database/](database/), run by hand in **Supabase → SQL Editor**:
+
+| Order | File | Purpose |
+|---|---|---|
+| 1 | `database/atomic_checkout.sql` | All-or-nothing cart reservation (`reserve_cart`) |
+| 2 | `database/confirm_payment.sql` | Payment confirmation, expiry and late payments |
+| 3 | `database/student_category.sql` | Standard `krp` / `non_krp` student category values |
 
 ### Database Security
 
@@ -505,81 +493,52 @@ View Reports
 
 ## 📂 Project Structure
 
-The following is the proposed Flutter project structure.
-
 ```text
 Never500/
 │
 ├── README.md
 │
-└── krp_play/
+├── database/                   # SQL files run in the Supabase SQL Editor
+│   ├── atomic_checkout.sql
+│   ├── confirm_payment.sql
+│   ├── student_category.sql
+│   └── tests/                  # Checkout tests against a disposable PostgreSQL database
+│
+├── docs/                       # Architecture and test evidence
+│   ├── architecture.md
+│   ├── atomic-checkout.md
+│   ├── cart-checkout-evidence.md
+│   └── cart-review-evidence.md
+│
+└── krp_play/                   # Flutter application
     │
-    ├── android/
-    ├── ios/
-    ├── web/
-    ├── windows/
-    ├── macos/
+    ├── android/ ios/ web/ windows/ macos/ linux/
     │
     ├── lib/
     │   ├── main.dart
-    │   │
-    │   ├── models/
-    │   │   ├── user_model.dart
-    │   │   ├── facility_model.dart
-    │   │   ├── booking_model.dart
-    │   │   └── payment_model.dart
-    │   │
-    │   ├── screens/
-    │   │   ├── auth/
-    │   │   ├── home/
-    │   │   ├── facilities/
-    │   │   ├── booking/
-    │   │   ├── cart/
-    │   │   ├── payment/
-    │   │   ├── profile/
-    │   │   └── admin/
-    │   │
-    │   ├── widgets/
-    │   │
-    │   ├── services/
-    │   │   ├── api_service.dart
-    │   │   ├── auth_service.dart
-    │   │   ├── facility_service.dart
-    │   │   ├── booking_service.dart
-    │   │   └── payment_service.dart
-    │   │
-    │   └── utils/
+    │   ├── models/             # booking, facility, reservation, student account, ...
+    │   ├── screens/            # student screens
+    │   │   └── admin/          # admin dashboard, slots, reservations, refunds, reports
+    │   ├── services/           # auth_service.dart, booking_service.dart
+    │   └── widgets/            # sidebar, top bar, booking history, facility card, ...
     │
     ├── assets/
-    │   ├── images/
-    │   └── icons/
+    │   ├── facilities/
+    │   └── images/
     │
+    ├── test/                   # Flutter widget tests
+    │
+    ├── backend/                # Node.js + Express payment backend (Billplz)
+    │   ├── app.js
+    │   ├── scripts/fake-callback.js
+    │   ├── .env.example
+    │   └── README.md
+    │
+    ├── frontend/               # Early React (Vite) UI prototype
+    │
+    ├── run_web.ps1             # Runs the Flutter web app against the payment backend
     └── pubspec.yaml
 ```
-
-The backend will be maintained separately when implemented.
-
-```text
-backend/
-│
-├── src/
-│   ├── config/
-│   ├── controllers/
-│   ├── middleware/
-│   ├── models/
-│   ├── routes/
-│   ├── services/
-│   └── app.js
-│
-├── database/
-│   └── migrations/
-│
-├── .env.example
-├── package.json
-└── server.js
-```
-
-*The structure is a proposed organization and will be updated as the project develops.*
 
 ---
 
@@ -623,11 +582,27 @@ flutter pub get
 
 ### 5. Run the Flutter Application
 
+On Windows, use the helper script. It runs the app in Chrome and points checkout at the payment backend (default `http://localhost:3000`):
+
+```powershell
+.\run_web.ps1
+```
+
+Or run Flutter directly:
+
 ```bash
 flutter run -d chrome
 ```
 
-### 6. Build the Web Application
+### 6. Run the Tests
+
+```bash
+flutter test
+```
+
+Database checkout tests are in [database/tests/](database/tests/). They need an **empty, disposable** PostgreSQL database; never point them at the hosted Supabase project.
+
+### 7. Build the Web Application
 
 ```bash
 flutter build web
@@ -639,9 +614,13 @@ The generated web files will be located in:
 build/web/
 ```
 
+### Database Setup
+
+Run the SQL files in [database/](database/) in the Supabase SQL Editor, in the order listed in [SQL Files](#sql-files).
+
 ### Backend Setup
 
-Backend installation instructions will be added when the Node.js backend is established.
+The payment backend needs a Billplz sandbox account, an ngrok domain and a `.env` file. Follow [krp_play/backend/README.md](krp_play/backend/README.md).
 
 ---
 
@@ -651,15 +630,15 @@ The project is planned for completion within approximately 2–3 months.
 
 | Phase | Development Activities | Status |
 |---|---|---|
-| 1 | Requirement analysis and system planning | In Progress |
-| 2 | UI/UX design and responsive Flutter development | Planned |
-| 3 | Student authentication and role management | Planned |
-| 4 | Backend API and database implementation | Planned |
-| 5 | Facility and real-time booking management | Planned |
-| 6 | Multi-facility booking and cart functionality | Planned |
-| 7 | Online payment integration | Planned |
-| 8 | Admin dashboard and notifications | Planned |
-| 9 | System testing and stakeholder feedback | Planned |
+| 1 | Requirement analysis and system planning | Completed |
+| 2 | UI/UX design and responsive Flutter development | In Progress |
+| 3 | Student authentication and role management | In Progress |
+| 4 | Backend API and database implementation | In Progress |
+| 5 | Facility and real-time booking management | In Progress |
+| 6 | Multi-facility booking and cart functionality | In Progress |
+| 7 | Online payment integration | In Progress |
+| 8 | Admin dashboard and notifications | In Progress |
+| 9 | System testing and stakeholder feedback | In Progress |
 | 10 | Deployment and final documentation | Planned |
 
 ---
@@ -684,18 +663,21 @@ The project uses Git and GitHub to support collaborative development.
 
 ### Branch Naming Convention
 
+Work is tracked in Jira. Name each branch after its Jira issue:
+
 ```text
-feature/<developer-name>/<feature-name>
+SCRUM-<issue-number>-<short-description>
 ```
 
 Examples:
 
 ```text
-feature/tanjiayie/flutter-setup
-feature/member1/login-page
-feature/member2/facility-listing
-feature/member3/booking-system
+SCRUM-38-student-category
+SCRUM-48-booking-history
+SCRUM-80-payment-outcomes
 ```
+
+Start commit messages with the same Jira key, for example `SCRUM-48: Load booking history`.
 
 ### Development Workflow
 
@@ -712,13 +694,13 @@ feature/member3/booking-system
 ```bash
 git pull origin main
 
-git switch -c feature/your-name/feature-name
+git switch -c SCRUM-<issue-number>-<short-description>
 
 git add .
 
-git commit -m "Add feature description"
+git commit -m "SCRUM-<issue-number>: Describe the change"
 
-git push -u origin feature/your-name/feature-name
+git push -u origin SCRUM-<issue-number>-<short-description>
 ```
 
 Team members should avoid committing directly to the main branch without agreement.
@@ -729,39 +711,36 @@ Never commit passwords, private API keys, payment secrets or environment files t
 
 ## 📊 Project Status
 
-**Current Stage: Initial Setup and Requirement Analysis**
+**Current Stage: Feature Development and Testing**
 
 Completed:
 
 - Project proposal and requirement analysis.
 - Community engagement with KRP JKP representatives.
 - Identification of existing booking system challenges.
-- Initial Flutter development environment setup.
-- Initial Flutter application testing in Chrome.
-- GitHub repository and feature branch setup.
+- Flutter, Supabase and payment backend setup.
+- Architecture, schema and state transition reference ([docs/architecture.md](docs/architecture.md)).
 
 In Progress:
 
-- System architecture planning.
-- UI/UX design.
-- Technology selection.
-- Frontend development.
+- Student sign-in and KRP / Non-KRP student categories.
+- Facility listing and slot availability.
+- All-or-nothing cart checkout ([docs/atomic-checkout.md](docs/atomic-checkout.md)).
+- Billplz sandbox payment, callback verification, expiry and late payments.
+- Booking history.
+- Administrator dashboard, slot management, reservations, refunds and reports.
+- Automated and manual testing.
 
 Planned:
 
-- Student authentication.
-- Real-time availability.
-- Booking and cart management.
-- Backend and database integration.
-- Online payment integration.
-- Administrator dashboard.
-- System testing and deployment.
+- Stakeholder feedback sessions.
+- Deployment and final documentation.
 
 ---
 
 ## 🌱 Project Vision
 
-CourtMate aims to transform the existing KRP sports facility booking experience through a more accessible, secure and efficient digital platform.
+The application aims to transform the existing KRP sports facility booking experience through a more accessible, secure and efficient digital platform.
 
 By addressing real challenges identified through community engagement, the application seeks to reduce administrative workload, improve booking transparency, eliminate scheduling conflicts and provide students with a more convenient way to access sports facilities.
 
@@ -772,7 +751,7 @@ By addressing real challenges identified through community engagement, the appli
 ---
 
 <p align="center">
-  **Developed by Team Never500**  
-  Universiti Teknologi Malaysia (UTM)  
+  <strong>Developed by Team Never500</strong><br>
+  Universiti Teknologi Malaysia (UTM)<br>
   2026
 </p>
