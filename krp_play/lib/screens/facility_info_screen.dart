@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import '../models/student_category.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -402,7 +403,7 @@ class _FacilityInfoScreenState extends State<FacilityInfoScreen> {
                       ),
                     ),
                     Text(
-                      widget.category,
+                      StudentCategory.labelFor(widget.category),
                       style: TextStyle(
                         color: Colors.white.withValues(alpha: 0.8),
                         fontSize: 12,

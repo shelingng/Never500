@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../models/student_category.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class AdminBookingsTab extends StatefulWidget {
@@ -48,19 +49,12 @@ class _AdminBookingsTabState extends State<AdminBookingsTab> {
     super.dispose();
   }
 
+  // SCRUM-38: shared mapping; walk-in members of the public keep "Public".
   String _normalizeCategoryLabel(dynamic rawCategory) {
+    final student = StudentCategory.parse(rawCategory);
+    if (student != null) return student.label;
     final c = (rawCategory?.toString() ?? '').trim().toLowerCase();
-    if (c == 'krp' || c == 'krp student') return 'KRP Student';
-    if (c == 'non_krp' ||
-        c == 'non-krp' ||
-        c == 'non-krp student' ||
-        c == 'non krp') {
-      return 'Non-KRP Student';
-    }
-    if (c == 'public') return 'Public';
-    return rawCategory?.toString().trim().isNotEmpty == true
-        ? rawCategory.toString().trim()
-        : 'Public';
+    return c == 'public' ? 'Public' : StudentCategory.notSetLabel;
   }
 
   String _normalizeStatusFilterValue(String rawStatus) {

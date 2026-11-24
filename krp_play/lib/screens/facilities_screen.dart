@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import '../models/student_category.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -324,11 +325,11 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
     return _priceFor(rows.first);
   }
 
+  // SCRUM-38: a missing or unknown category is never given the KRP rate.
+  StudentCategory? get _studentCategory => StudentCategory.parse(widget.category);
+
   num _priceFor(Map<String, dynamic> facility) {
-    final category = widget.category.trim().toLowerCase();
-    return facility[category == 'krp' || category == 'krp student'
-            ? 'krp_price'
-            : 'non_krp_price']
+    return facility[(_studentCategory ?? StudentCategory.nonKrp).priceColumn]
         as num;
   }
 
@@ -908,7 +909,10 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
                       const SizedBox(height: 10),
                       _summaryRow('Total hours', '$cartTotalHours'),
                       const SizedBox(height: 10),
-                      _summaryRow('Student category', widget.category),
+                      _summaryRow(
+                        'Student category',
+                        StudentCategory.labelFor(widget.category),
+                      ),
                       const Divider(height: 24),
                       Row(
                         children: [
@@ -1722,6 +1726,11 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
 
   Future<void> _reserveSelectedCart() async {
     if (_isReserving || cartItems.isEmpty || reservationCreated) return;
+    if (_studentCategory == null) {
+      // The server would refuse with PROFILE_CATEGORY_REQUIRED anyway.
+      _showMessage(StudentCategory.notSetHelp);
+      return;
+    }
     setState(() => _isReserving = true);
     final key = _checkoutRequestId ??= BookingService.newCheckoutRequestId();
     try {
@@ -1793,6 +1802,8 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
         _showMessage(
           'Checkout is not configured yet. The reviewed database script must be deployed first.',
         );
+      } else if (e.message.contains('PROFILE_CATEGORY_REQUIRED')) {
+        _showMessage(StudentCategory.notSetHelp);
       } else {
         _showMessage(
           'Could not reserve this cart. Check the session times and account category.',

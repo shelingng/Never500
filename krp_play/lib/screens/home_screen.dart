@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/student_account.dart';
 import '../services/booking_service.dart';
+import '../models/student_category.dart';
 import 'facility_info_screen.dart';
 import 'facilities_screen.dart';
 import 'booking_records_screen.dart';
@@ -648,7 +649,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'Verified ${widget.account.category}',
+                          'Verified ${StudentCategory.labelFor(widget.account.category)}',
                           style: TextStyle(
                             fontWeight: FontWeight.bold,
                             color: primaryGreen,
@@ -657,7 +658,8 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                         const SizedBox(height: 2),
                         Text(
-                          widget.account.category == 'KRP Student'
+                          StudentCategory.parse(widget.account.category) ==
+                                  StudentCategory.krp
                               ? 'Subsidized collegian rates applied automatically.'
                               : 'General student rates applied.',
                           style: TextStyle(

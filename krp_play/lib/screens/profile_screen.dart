@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/booking.dart';
+import '../models/student_category.dart';
 import '../services/booking_service.dart';
 import '../widgets/booking_history.dart';
 
@@ -47,7 +48,7 @@ class _ProfileScreenState extends _ProfileSectionsState {
   @override
   bool get _isLoadingBookings => _loadingBookings;
   
-  String _category = 'KRP Student';
+  String _category = StudentCategory.notSetLabel;
   final _name = TextEditingController();
   final _contact = TextEditingController();
   final _matric = TextEditingController();
@@ -62,7 +63,8 @@ class _ProfileScreenState extends _ProfileSectionsState {
     _name.text = widget.fullName ?? 'Ng She Ling';
     _contact.text = widget.contact ?? '';
     _matric.text = widget.matric ?? '';
-    _category = widget.category ?? 'KRP Student';
+    // SCRUM-38: show the label for the stored value; never assume KRP.
+    _category = StudentCategory.labelFor(widget.category);
 
     _loadLiveBookings();
     _loadLiveReports();
