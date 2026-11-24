@@ -32,6 +32,12 @@ class BookingService {
 
   bool get usesRealPayment => paymentBackendUrl.isNotEmpty;
 
+  // Free ngrok shows a "you are about to visit" page to browsers instead of
+  // forwarding the request; this header skips it. Other servers ignore it.
+  static const Map<String, String> _tunnelHeaders = {
+    'ngrok-skip-browser-warning': 'true',
+  };
+
   createBillplzPayment(String bookingId) async {
     final session = _supabase.auth.currentSession;
     if (session == null) throw const PaymentException('Sign in to pay.');
@@ -45,6 +51,7 @@ class BookingService {
             headers: {
               'Content-Type': 'application/json',
               'Authorization': 'Bearer ${session.accessToken}',
+              ..._tunnelHeaders,
             },
             body: jsonEncode({'bookingId': bookingId}),
           )
@@ -79,7 +86,10 @@ class BookingService {
       response = await http
           .get(
             Uri.parse('$base/api/payment-status/$bookingId'),
-            headers: {'Authorization': 'Bearer ${session.accessToken}'},
+            headers: {
+              'Authorization': 'Bearer ${session.accessToken}',
+              ..._tunnelHeaders,
+            },
           )
           .timeout(const Duration(seconds: 30));
     } catch (_) {
