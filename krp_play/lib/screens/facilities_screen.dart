@@ -1009,7 +1009,7 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
           Column(
             children: [
               Text(
-                'RM${booking.totalPrice}',
+                'RM${(booking.totalPrice as num).toStringAsFixed(2)}',
                 style: const TextStyle(
                   color: Color(0xFF103B2B),
                   fontSize: 14,
@@ -1143,6 +1143,21 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
     if (_getCourtStatus(facilityName, timeSlots) != 'Available') {
       _showMessage(
         'That facility is no longer available for the selected time.',
+      );
+      return;
+    }
+
+    // The same session twice would double the total and be rejected at Pay
+    // (DUPLICATE_CART_SLOT), so stop it here with a clear message.
+    final overlapsCart = cartItems.any(
+      (item) =>
+          item.facilityName == facilityName &&
+          DateUtils.isSameDay(item.date, date) &&
+          List<String>.from(item.timeSlots as List).any(timeSlots.contains),
+    );
+    if (overlapsCart) {
+      _showMessage(
+        'This time is already in your order for $facilityName. Choose a different time.',
       );
       return;
     }
