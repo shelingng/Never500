@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/booking.dart';
+import '../models/booking_order.dart';
 
 class ReportPhotoUpload {
   final String name;
@@ -196,6 +197,29 @@ class BookingService {
         .eq('user_id', user.id)
         .order('created_at', ascending: false);
     return _unpackBookings(response);
+  }
+
+  /// SCRUM-48: the signed-in student's own orders, newest first, each with
+  /// all its sessions and payments. RLS also limits the rows to this user.
+  Future<List<BookingOrder>> getMyOrders() async {
+    final user = _supabase.auth.currentUser;
+    if (user == null) throw StateError('Sign in to see your bookings.');
+    final rows = await _supabase
+        .from('bookings')
+        .select(
+          'id, booking_reference, status, total_amount, payment_deadline, '
+          'created_at, is_demo, facility_name, booking_date, start_time, '
+          'booking_items(price, status, '
+          'time_slots(slot_date, start_time, end_time, facilities(name))), '
+          'payments(status, payment_method, payment_gateway, '
+          'transaction_reference, billplz_id, paid_at, amount)',
+        )
+        .eq('user_id', user.id)
+        .order('created_at', ascending: false);
+    return [
+      for (final row in rows as List)
+        BookingOrder.fromRow(Map<String, dynamic>.from(row as Map)),
+    ];
   }
 
   String _facilityMatchKey(String raw) {
