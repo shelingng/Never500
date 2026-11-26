@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'facilities_screen.dart';
+import '../models/booking.dart';
 import 'profile_screen.dart';
 
 class FacilityInfoScreen extends StatefulWidget {
@@ -39,6 +40,24 @@ class _FacilityInfoScreenState extends State<FacilityInfoScreen> {
   static const Color paleGreen = Color(0xFFEDF4EF);
   static const Color pageBackground = Color(0xFFF4F6F4);
   static const Color sidebarMuted = Color(0xFFA0B0A8);
+
+  List<Booking> _draftCart = [];
+  final Set<String> _restoredExpiredOrderIds = {};
+
+  void _saveDraftCart(List<Booking> items) {
+    // No rebuild is needed while the booking route is being disposed.
+    _draftCart = List<Booking>.of(items);
+  }
+
+  @override
+  void didUpdateWidget(covariant FacilityInfoScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.email != widget.email ||
+        oldWidget.category != widget.category) {
+      _draftCart = [];
+      _restoredExpiredOrderIds.clear();
+    }
+  }
 
   int _selectedTab = 0;
   int _currentCarouselIndex = 0;
@@ -437,6 +456,9 @@ class _FacilityInfoScreenState extends State<FacilityInfoScreen> {
                               category: widget.category,
                               email: widget.email,
                               studentName: widget.studentName,
+                              initialCart: _draftCart,
+                              onCartSaved: _saveDraftCart,
+                              restoredExpiredOrderIds: _restoredExpiredOrderIds,
                             ),
                           ),
                         ).then((_) => setState(() => _refreshKey++)); // 🌟 强制刷新
@@ -770,6 +792,9 @@ class _FacilityInfoScreenState extends State<FacilityInfoScreen> {
           category: widget.category,
           email: widget.email,
           studentName: widget.studentName,
+          initialCart: _draftCart,
+          onCartSaved: _saveDraftCart,
+          restoredExpiredOrderIds: _restoredExpiredOrderIds,
         ),
       ),
     );
