@@ -7,6 +7,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/booking.dart';
 import '../models/booking_order.dart';
+import '../models/checkout_recovery.dart';
 
 class ReportPhotoUpload {
   final String name;
@@ -112,6 +113,41 @@ class BookingService {
     return body;
   }
 
+  String? get checkoutUserId => _supabase.auth.currentUser?.id;
+
+  /// Always constrain recovery by the authenticated owner as well as RLS.
+  Future<CheckoutRecovery?> getCheckoutForRecovery({String? bookingId}) async {
+    final userId = checkoutUserId;
+    if (userId == null) return null;
+    var query = _supabase
+        .from('bookings')
+        .select(
+          '*, booking_items(price, status, '
+          'time_slots(slot_date, start_time, end_time, facilities(name))), '
+          'payments(status, payment_method, payment_gateway, '
+          'transaction_reference, billplz_id, paid_at, amount)',
+        )
+        .eq('user_id', userId)
+        .eq('is_demo', false);
+    if (bookingId != null) query = query.eq('id', bookingId);
+    final rows = await query
+        .order('created_at', ascending: false)
+        .order('id', ascending: false)
+        .limit(1);
+    if (checkoutUserId != userId) {
+      throw StateError('Account changed while loading checkout.');
+    }
+    if (rows.isEmpty) return null;
+    // Do not resurrect an older unpaid cart after a newer completed order.
+    final status = rows.first['status']?.toString().toLowerCase();
+    if (bookingId == null &&
+        status != 'pending_payment' &&
+        status != 'expired') {
+      return null;
+    }
+    return CheckoutRecovery.fromRow(Map<String, dynamic>.from(rows.first));
+  }
+
   getFacilities() async {
     final response = await _supabase
         .from('facilities')
@@ -130,10 +166,7 @@ class BookingService {
         '${hex.substring(12, 16)}-${hex.substring(16, 20)}-${hex.substring(20)}';
   }
 
-  reserveCart(
-    List<Booking> cart, {
-    required String requestId,
-  }) async {
+  reserveCart(List<Booking> cart, {required String requestId}) async {
     return _checkout(cart, requestId: requestId);
   }
 
@@ -141,8 +174,7 @@ class BookingService {
     List<Booking> cart, {
     required String requestId,
     required String method,
-  }) =>
-      _checkout(cart, requestId: requestId, demoMethod: method);
+  }) => _checkout(cart, requestId: requestId, demoMethod: method);
 
   _checkout(
     List<Booking> cart, {
@@ -157,9 +189,9 @@ class BookingService {
           (b) => {
             'facility_name': b.facilityName.toString(),
             'date': _date(b.date),
-            'start_times': List<String>.from(b.timeSlots as List)
-                .map(_databaseTime)
-                .toList(),
+            'start_times': List<String>.from(
+              b.timeSlots as List,
+            ).map(_databaseTime).toList(),
           },
         )
         .toList();
@@ -178,11 +210,7 @@ class BookingService {
     return Map<String, dynamic>.from(result as Map);
   }
 
-  confirmPayment(
-    String bookingId,
-    num amount,
-    String method,
-  ) async {
+  confirmPayment(String bookingId, num amount, String method) async {
     throw StateError(
       'Payment confirmation requires the verified server gateway.',
     );
@@ -193,7 +221,9 @@ class BookingService {
     if (user == null) return <Booking>[];
     final response = await _supabase
         .from('bookings')
-        .select('*, booking_items(price,status,time_slots(slot_date,start_time,facilities(name))), payments(status,paid_at,transaction_reference,billplz_id)')
+        .select(
+          '*, booking_items(price,status,time_slots(slot_date,start_time,facilities(name))), payments(status,paid_at,transaction_reference,billplz_id)',
+        )
         .eq('user_id', user.id)
         .order('created_at', ascending: false);
     return _unpackBookings(response);
@@ -309,10 +339,10 @@ class BookingService {
 
       final normalizedStatus =
           (stClean.contains('closed') || stClean.contains('maintenance'))
-              ? 'closed'
-              : (stClean == 'reserved' || stClean == 'pending_payment'
-                  ? 'reserved'
-                  : 'booked');
+          ? 'closed'
+          : (stClean == 'reserved' || stClean == 'pending_payment'
+                ? 'reserved'
+                : 'booked');
 
       if (idx == -1) {
         bookings.add(
@@ -381,8 +411,9 @@ class BookingService {
       '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
 
   static String _databaseTime(String value) {
-    final match = RegExp(r'^(\d{1,2}):(\d{2}) (AM|PM)$')
-        .firstMatch(value.trim());
+    final match = RegExp(
+      r'^(\d{1,2}):(\d{2}) (AM|PM)$',
+    ).firstMatch(value.trim());
     if (match == null) throw FormatException('Invalid start time', value);
     final hour = int.parse(match[1]!) % 12 + (match[3] == 'PM' ? 12 : 0);
     return '${hour.toString().padLeft(2, '0')}:${match[2]}:00';
@@ -495,17 +526,16 @@ class BookingService {
         status = 'expired';
       }
       final label = switch (status) {
-        'confirmed' => row['is_demo'] == true
-            ? 'Demo paid & confirmed'
-            : 'Paid & Confirmed',
+        'confirmed' =>
+          row['is_demo'] == true ? 'Demo paid & confirmed' : 'Paid & Confirmed',
         'pending_payment' => 'Reserved - awaiting payment',
         'expired' => 'Expired - unpaid',
         _ => status,
       };
       final paid = (row['payments'] as List? ?? [])
-      .cast<Map>()
-      .where((p) => p['status'] == 'paid')
-      .firstOrNull;
+          .cast<Map>()
+          .where((p) => p['status'] == 'paid')
+          .firstOrNull;
       final groups = <String, List>{};
       for (final raw in (row['booking_items'] as List? ?? [])) {
         final item = Map<String, dynamic>.from(raw as Map);

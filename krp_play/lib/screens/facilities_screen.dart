@@ -6,6 +6,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../models/booking.dart';
+import '../models/checkout_recovery.dart';
 import '../services/booking_service.dart';
 
 class FacilitiesScreen extends StatefulWidget {
@@ -42,6 +43,7 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
   void initState() {
     super.initState();
     _loadPrices();
+    if (_bookingService.usesRealPayment) _recoverCheckout();
     // The Billplz page opens in another tab. When the user comes back,
     // check the payment automatically instead of waiting for a button press.
     _lifecycleListener = AppLifecycleListener(onResume: _onAppResumed);
@@ -80,7 +82,7 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
   }
 
   void _onAppResumed() {
-    if (_paymentUrl != null && !reservationCreated) {
+    if (_pendingBookingId != null && !reservationCreated) {
       _checkPaymentStatus(quiet: true);
     }
   }
@@ -137,8 +139,11 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
   String? _checkoutRequestId;
   num? _reservedTotal;
   String? _pendingBookingId;
+  DateTime? _paymentDeadline;
   String? _paymentUrl;
   bool _checkingPayment = false;
+  bool _recoveringCheckout = false;
+  String? _recoveryError;
   bool _paidViaBillplz = false;
   String? _availabilityError;
   int _availabilityRequest = 0;
@@ -150,18 +155,40 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
   bool _isLoadingAvailability = false;
 
   static const List<String> malaysianBanks = [
-    'Maybank2u', 'CIMB Clicks', 'Public Bank', 'RHB Now', 'Hong Leong Bank',
-    'Bank Islam', 'AmBank', 'Bank Rakyat', 'Affin Bank', 'Alliance Bank',
-    'BSN', 'Bank Muamalat', 'Agrobank', 'OCBC Bank', 'UOB Malaysia',
+    'Maybank2u',
+    'CIMB Clicks',
+    'Public Bank',
+    'RHB Now',
+    'Hong Leong Bank',
+    'Bank Islam',
+    'AmBank',
+    'Bank Rakyat',
+    'Affin Bank',
+    'Alliance Bank',
+    'BSN',
+    'Bank Muamalat',
+    'Agrobank',
+    'OCBC Bank',
+    'UOB Malaysia',
   ];
 
   static const List<String> _weekdayStartTimes = [
-    '5:00 PM', '6:00 PM', '9:00 PM', '10:00 PM',
+    '5:00 PM',
+    '6:00 PM',
+    '9:00 PM',
+    '10:00 PM',
   ];
 
   static const List<String> _weekendStartTimes = [
-    '10:00 AM', '11:00 AM', '12:00 PM', '3:00 PM', '4:00 PM',
-    '5:00 PM', '6:00 PM', '9:00 PM', '10:00 PM',
+    '10:00 AM',
+    '11:00 AM',
+    '12:00 PM',
+    '3:00 PM',
+    '4:00 PM',
+    '5:00 PM',
+    '6:00 PM',
+    '9:00 PM',
+    '10:00 PM',
   ];
 
   List<String> get availableStartTimes {
@@ -172,8 +199,18 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
   }
 
   static const List<String> monthNames = [
-    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+    'Jan',
+    'Feb',
+    'Mar',
+    'Apr',
+    'May',
+    'Jun',
+    'Jul',
+    'Aug',
+    'Sep',
+    'Oct',
+    'Nov',
+    'Dec',
   ];
 
   String get formattedDate =>
@@ -326,7 +363,8 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
   }
 
   // SCRUM-38: a missing or unknown category is never given the KRP rate.
-  StudentCategory? get _studentCategory => StudentCategory.parse(widget.category);
+  StudentCategory? get _studentCategory =>
+      StudentCategory.parse(widget.category);
 
   num _priceFor(Map<String, dynamic> facility) {
     return facility[(_studentCategory ?? StudentCategory.nonKrp).priceColumn]
@@ -372,7 +410,9 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
           icon: const Icon(Icons.arrow_back_ios_new, size: 18),
           onPressed: () {
             if (_isReserving) return;
-            if (currentStep > 1 && !reservationCreated && _paymentUrl == null) {
+            if (currentStep > 1 &&
+                !reservationCreated &&
+                _pendingBookingId == null) {
               setState(() => currentStep -= 1);
             } else {
               Navigator.of(context).pop();
@@ -418,12 +458,42 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
   }
 
   Widget _buildCurrentStepCard() {
+    if (_recoveringCheckout) {
+      return const Padding(
+        padding: EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircularProgressIndicator(),
+            SizedBox(height: 16),
+            Text('Checking your unfinished checkout...'),
+          ],
+        ),
+      );
+    }
+    if (_recoveryError != null) {
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(_recoveryError!),
+          TextButton(
+            onPressed: _recoverCheckout,
+            child: const Text('Retry checkout recovery'),
+          ),
+        ],
+      );
+    }
     switch (currentStep) {
-      case 1: return _buildStep1ChooseSport();
-      case 2: return _buildStep2ChooseCourt();
-      case 3: return _buildStep3ReviewBooking();
-      case 4: return _buildStep4PaymentAndStatus();
-      default: return _buildStep1ChooseSport();
+      case 1:
+        return _buildStep1ChooseSport();
+      case 2:
+        return _buildStep2ChooseCourt();
+      case 3:
+        return _buildStep3ReviewBooking();
+      case 4:
+        return _buildStep4PaymentAndStatus();
+      default:
+        return _buildStep1ChooseSport();
     }
   }
 
@@ -559,11 +629,15 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
 
   IconData _sportIcon(String sport) {
     switch (sport) {
-      case 'Badminton': return Icons.sports_tennis;
+      case 'Badminton':
+        return Icons.sports_tennis;
       case 'Ping Pong':
-      case 'Snooker': return Icons.table_restaurant;
-      case 'Dart': return Icons.gps_fixed;
-      default: return Icons.sports;
+      case 'Snooker':
+        return Icons.table_restaurant;
+      case 'Dart':
+        return Icons.gps_fixed;
+      default:
+        return Icons.sports;
     }
   }
 
@@ -691,7 +765,9 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
                           statusColor = const Color(0xFF2E7D32);
                           surfaceTint = const Color(0xFFF3FAF5);
                           isSelectable = true;
-                        } else if (status == 'Booked' || status == 'Reserved' || status == 'In Cart') {
+                        } else if (status == 'Booked' ||
+                            status == 'Reserved' ||
+                            status == 'In Cart') {
                           statusColor = const Color(0xFFD32F2F);
                           surfaceTint = const Color(0xFFFDF2F2);
                         } else {
@@ -954,9 +1030,9 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
 
   Widget _buildCartItemCard(Booking booking) {
     final facilityName = booking.facilityName.toString();
-    final sport = facilityName.split(
-      RegExp(r'\s+(?:Court|Table|Board)\b', caseSensitive: false),
-    ).first;
+    final sport = facilityName
+        .split(RegExp(r'\s+(?:Court|Table|Board)\b', caseSensitive: false))
+        .first;
     final court = facilityName.startsWith('$sport ')
         ? facilityName.substring(sport.length + 1)
         : facilityName;
@@ -1255,7 +1331,7 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
                           ],
                         ),
                         Text(
-                          'RM${cartTotal.toStringAsFixed(2)}',
+                          'RM${(_reservedTotal ?? cartTotal).toStringAsFixed(2)}',
                           style: TextStyle(
                             fontSize: 24,
                             fontWeight: FontWeight.bold,
@@ -1275,11 +1351,16 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
                     const SizedBox(height: 20),
                     _buildPayNowButton(),
                   ] else ...[
-                    const Text('Prototype demo: Pay Now simulates payment. No money is charged.'),
+                    const Text(
+                      'Prototype demo: Pay Now simulates payment. No money is charged.',
+                    ),
                     const SizedBox(height: 12),
                     const Text(
                       'Select payment method',
-                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                     const SizedBox(height: 10),
                     _buildPaymentMethodOption(
@@ -1287,7 +1368,8 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
                       subtitle: 'All Malaysian banks',
                       icon: Icons.account_balance_outlined,
                       selected: selectedPaymentMethod == 'FPX',
-                      onTap: () => setState(() => selectedPaymentMethod = 'FPX'),
+                      onTap: () =>
+                          setState(() => selectedPaymentMethod = 'FPX'),
                       expandedContent: DropdownButtonFormField<String>(
                         key: ValueKey<String?>(selectedBank),
                         initialValue: selectedBank,
@@ -1305,7 +1387,8 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
                               ),
                             )
                             .toList(),
-                        onChanged: (bank) => setState(() => selectedBank = bank),
+                        onChanged: (bank) =>
+                            setState(() => selectedBank = bank),
                       ),
                     ),
                     const SizedBox(height: 10),
@@ -1325,7 +1408,10 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
                         ),
                         child: const Row(
                           children: [
-                            Icon(Icons.wallet_outlined, color: Color(0xFF315A3B)),
+                            Icon(
+                              Icons.wallet_outlined,
+                              color: Color(0xFF315A3B),
+                            ),
                             SizedBox(width: 10),
                             Expanded(
                               child: Text(
@@ -1444,11 +1530,20 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
             ? _reserveSelectedCart
             : null,
         child: Text(
-          _isReserving ? 'Processing...' : 'Pay Now',
+          _isReserving
+              ? 'Processing...'
+              : (_pendingBookingId == null ? 'Pay Now' : 'Resume payment'),
           style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
         ),
       ),
     );
+  }
+
+  String _deadlineLabel(DateTime deadline) {
+    final kl = deadline.toUtc().add(const Duration(hours: 8));
+    final hour = kl.hour % 12 == 0 ? 12 : kl.hour % 12;
+    final minute = kl.minute.toString().padLeft(2, '0');
+    return '${kl.day} ${monthNames[kl.month - 1]} ${kl.year}, $hour:$minute ${kl.hour < 12 ? 'AM' : 'PM'} (MYT)';
   }
 
   Widget _buildAwaitingPaymentPanel() {
@@ -1473,8 +1568,10 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
             style: const TextStyle(fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 4),
-          const Text(
-            'Pay on the Billplz page within 10 minutes, then come back here and check the status.',
+          Text(
+            _paymentDeadline == null
+                ? 'Complete payment before your reservation expires, then return here to check its status.'
+                : 'Original payment deadline: ${_deadlineLabel(_paymentDeadline!)}. Resuming does not extend your hold.',
           ),
           const SizedBox(height: 14),
           SizedBox(
@@ -1515,16 +1612,112 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
       webOnlyWindowName: '_blank',
     );
     if (!opened && mounted) {
-      _showMessage('Could not open the payment page. Allow pop-ups and try again.');
+      _showMessage(
+        'Could not open the payment page. Allow pop-ups and try again.',
+      );
     }
   }
 
-  // The hold is gone, so drop the old bill and send the user back to pick
-  // slots again. The cart is kept so they can pay with one more tap.
+  Future<void> _recoverCheckout() async {
+    if (_recoveringCheckout) return;
+    final owner = _bookingService.checkoutUserId;
+    setState(() {
+      _recoveringCheckout = true;
+      _recoveryError = null;
+    });
+    try {
+      final saved = await _bookingService.getCheckoutForRecovery();
+      if (!mounted || _bookingService.checkoutUserId != owner) return;
+      if (saved != null) {
+        if (saved.cart.isEmpty) {
+          throw StateError(
+            'This unfinished order has no recoverable sessions.',
+          );
+        }
+        _applyRecoveredCheckout(saved);
+        if (!saved.canResumeAt(DateTime.now())) {
+          await _resetExpiredPayment();
+          if (mounted)
+            _showMessage(
+              'Your previous hold expired. Your cart was restored. Review availability before paying again.',
+            );
+        } else {
+          _showMessage(
+            'Your unfinished order was restored. Resume payment to continue with the same booking.',
+          );
+        }
+      }
+    } catch (error) {
+      debugPrint('Checkout recovery failed: $error');
+      if (mounted) {
+        setState(
+          () => _recoveryError =
+              'Could not check your unfinished order. Retry before starting another checkout.',
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _recoveringCheckout = false);
+    }
+  }
+
+  void _applyRecoveredCheckout(CheckoutRecovery saved) {
+    setState(() {
+      cartItems
+        ..clear()
+        ..addAll(saved.cart);
+      _pendingBookingId = saved.order.id;
+      _paymentDeadline = saved.order.paymentDeadline;
+      _checkoutRequestId = saved.requestId;
+      _reservedTotal = saved.order.total;
+      generatedBookingRef = saved.order.reference;
+      selectedDate = saved.cart.first.date;
+      currentStep = 4;
+      _paymentUrl = null;
+    });
+  }
+
+  /// Re-check the owned order before reusing/creating its Billplz bill.
+  /// This path never calls reserveCart.
+  Future<void> _resumePendingCheckout() async {
+    final bookingId = _pendingBookingId;
+    if (bookingId == null) return;
+    final owner = _bookingService.checkoutUserId;
+    final saved = await _bookingService.getCheckoutForRecovery(
+      bookingId: bookingId,
+    );
+    if (!mounted || _bookingService.checkoutUserId != owner) return;
+    if (saved == null) {
+      throw const PaymentException(
+        'This order is no longer available. Check your booking history.',
+      );
+    }
+    if (saved.order.status.toLowerCase() == 'confirmed') {
+      setState(() {
+        _paidViaBillplz = true;
+        reservationCreated = true;
+        _paymentUrl = null;
+      });
+      return;
+    }
+    if (!saved.canResumeAt(DateTime.now())) {
+      await _resetExpiredPayment();
+      if (mounted)
+        _showMessage(
+          'This order can no longer be paid. Review your cart and booking history before checking out again.',
+        );
+      return;
+    }
+    final url = await _bookingService.createBillplzPayment(bookingId);
+    if (!mounted || _bookingService.checkoutUserId != owner) return;
+    setState(() => _paymentUrl = url);
+  }
+
+  // Drop the expired hold; keep the restored cart for a fresh availability check.
   Future<void> _resetExpiredPayment() async {
     setState(() {
       _paymentUrl = null;
       _pendingBookingId = null;
+      _paymentDeadline = null;
       _checkoutRequestId = null;
       _reservedTotal = null;
       currentStep = 2;
@@ -1546,8 +1739,7 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
       final deadline = DateTime.tryParse(
         result['paymentDeadline']?.toString() ?? '',
       );
-      final holdExpired =
-          deadline != null && !deadline.isAfter(DateTime.now());
+      final holdExpired = deadline != null && !deadline.isAfter(DateTime.now());
 
       if (status == 'confirmed') {
         setState(() {
@@ -1669,11 +1861,12 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
     try {
       for (final item in cartSnapshot) {
         final date = DateUtils.dateOnly(item.date);
-        final bookings = dates[date] ??=
-            await _bookingService.getBookingsForDate(date);
+        final bookings = dates[date] ??= await _bookingService
+            .getBookingsForDate(date);
         final requestedSlots = List<String>.from(item.timeSlots as List);
         final blocked = bookings.any((booking) {
-          if (!_sameFacility(booking.facilityName, item.facilityName)) return false;
+          if (!_sameFacility(booking.facilityName, item.facilityName))
+            return false;
           final occupiedSlots = List<String>.from(booking.timeSlots as List);
           return occupiedSlots.any(requestedSlots.contains);
         });
@@ -1697,22 +1890,26 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
     });
     await _fetchAvailability();
     if (!mounted) return;
-    final details = unavailable.map((item) {
-      final date = item.date;
-      final start = item.timeSlots.first.toString();
-      final end = _formatTime(
-        _minutesFor(start) + (item.timeSlots.length as int) * 60,
-      );
-      return '${item.facilityName} · ${date.day} ${monthNames[date.month - 1]} ${date.year} · $start–$end';
-    }).join('\n\n');
+    final details = unavailable
+        .map((item) {
+          final date = item.date;
+          final start = item.timeSlots.first.toString();
+          final end = _formatTime(
+            _minutesFor(start) + (item.timeSlots.length as int) * 60,
+          );
+          return '${item.facilityName} · ${date.day} ${monthNames[date.month - 1]} ${date.year} · $start–$end';
+        })
+        .join('\n\n');
     await showDialog<void>(
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: const Text('Selected slot is no longer available'),
         content: SingleChildScrollView(
-          child: Text(unavailable.isEmpty
-              ? 'A selected slot was booked or reserved before checkout. No payment was started. Please choose another slot.'
-              : '$details\n\nThese slots are booked, reserved or unavailable and have been removed from your cart. Other cart items are kept. No payment was started.'),
+          child: Text(
+            unavailable.isEmpty
+                ? 'A selected slot was booked or reserved before checkout. No payment was started. Please choose another slot.'
+                : '$details\n\nThese slots are booked, reserved or unavailable and have been removed from your cart. Other cart items are kept. No payment was started.',
+          ),
         ),
         actions: [
           TextButton(
@@ -1734,6 +1931,10 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
     setState(() => _isReserving = true);
     final key = _checkoutRequestId ??= BookingService.newCheckoutRequestId();
     try {
+      if (_bookingService.usesRealPayment && _pendingBookingId != null) {
+        await _resumePendingCheckout();
+        return;
+      }
       if (_bookingService.usesRealPayment) {
         final booking = await _bookingService.reserveCart(
           cartItems,
@@ -1742,6 +1943,9 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
         if (!mounted) return;
         setState(() {
           _pendingBookingId = booking['id'].toString();
+          _paymentDeadline = DateTime.tryParse(
+            booking['payment_deadline']?.toString() ?? '',
+          );
           generatedBookingRef = booking['reference'].toString();
           _reservedTotal = booking['total_amount'] as num;
         });
@@ -1762,7 +1966,9 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
       final response = await _bookingService.demoPayCart(
         cartItems,
         requestId: key,
-        method: selectedPaymentMethod == 'E-Wallet' ? 'touch_n_go_ewallet' : 'fpx',
+        method: selectedPaymentMethod == 'E-Wallet'
+            ? 'touch_n_go_ewallet'
+            : 'fpx',
       );
       if (!mounted) return;
       if (response['status'] != 'confirmed' || response['is_demo'] != true) {
@@ -2109,14 +2315,21 @@ class _SportChoiceIconPainter extends CustomPainter {
       canvas.translate(12, 11);
       canvas.rotate(0.6);
       canvas.drawOval(const Rect.fromLTWH(-7, -8, 14, 16), fill);
-      canvas.drawLine(const Offset(0, 7), const Offset(0, 16),
-          pen..strokeWidth = 4);
+      canvas.drawLine(
+        const Offset(0, 7),
+        const Offset(0, 16),
+        pen..strokeWidth = 4,
+      );
       canvas.restore();
       canvas.drawCircle(const Offset(23, 5), 3, pen..strokeWidth = 1.8);
     } else {
       for (final point in const [
-        Offset(11, 7), Offset(7, 14), Offset(15, 14),
-        Offset(3, 21), Offset(11, 21), Offset(19, 21),
+        Offset(11, 7),
+        Offset(7, 14),
+        Offset(15, 14),
+        Offset(3, 21),
+        Offset(11, 21),
+        Offset(19, 21),
       ]) {
         canvas.drawCircle(point, 3, fill);
       }
