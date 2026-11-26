@@ -8,11 +8,11 @@ import 'services/auth_service.dart';
 
 main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  
+
   // Replace with your actual Supabase URL and Anon Key
   await Supabase.initialize(
     url: 'https://ckhpsnuiypxetkmigqua.supabase.co',
-    anonKey: 'sb_publishable_jByO0pC0UVwMS5Jr1v5jhQ_VaCx8NV5'
+    anonKey: 'sb_publishable_jByO0pC0UVwMS5Jr1v5jhQ_VaCx8NV5',
   );
 
   runApp(const KrpPlayApp());
@@ -39,8 +39,24 @@ class KrpPlayApp extends StatelessWidget {
   }
 }
 
-class AuthWrapper extends StatelessWidget {
+class AuthWrapper extends StatefulWidget {
   const AuthWrapper({super.key});
+
+  @override
+  State<AuthWrapper> createState() => _AuthWrapperState();
+}
+
+class _AuthWrapperState extends State<AuthWrapper> {
+  String? _profileUserId;
+  Future<dynamic>? _profileFuture;
+
+  Future<dynamic> _profileFor(String userId) {
+    if (_profileUserId != userId || _profileFuture == null) {
+      _profileUserId = userId;
+      _profileFuture = AuthService().getCurrentProfile();
+    }
+    return _profileFuture!;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -49,7 +65,9 @@ class AuthWrapper extends StatelessWidget {
       stream: Supabase.instance.client.auth.onAuthStateChange,
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Scaffold(body: Center(child: CircularProgressIndicator()));
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
         }
 
         // Dynamically get the session to avoid copy-paste bracket issues
@@ -58,27 +76,39 @@ class AuthWrapper extends StatelessWidget {
 
         // If no session exists, show Login Screen
         if (session == null) {
+          _profileUserId = null;
+          _profileFuture = null;
           return const AuthScreen();
         }
 
         // If session exists, fetch profile to determine role
         return FutureBuilder(
-          future: AuthService().getCurrentProfile(),
+          future: _profileFor(session.user.id),
           builder: (context, profileSnapshot) {
             if (profileSnapshot.connectionState == ConnectionState.waiting) {
-              return const Scaffold(body: Center(child: CircularProgressIndicator()));
+              return const Scaffold(
+                body: Center(child: CircularProgressIndicator()),
+              );
             }
 
             dynamic profile = profileSnapshot.data;
             if (profileSnapshot.hasError) {
-              return Scaffold(body: Center(child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Text('We couldn’t load your profile. Please sign in again to retry.'),
-                  TextButton(onPressed: () => AuthService().signOut(),
-                    child: const Text('Sign out')),
-                ],
-              )));
+              return Scaffold(
+                body: Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Text(
+                        'We couldn’t load your profile. Please sign in again to retry.',
+                      ),
+                      TextButton(
+                        onPressed: () => AuthService().signOut(),
+                        child: const Text('Sign out'),
+                      ),
+                    ],
+                  ),
+                ),
+              );
             }
             if (profile == null) return const AuthScreen(completeProfile: true);
 
@@ -87,8 +117,11 @@ class AuthWrapper extends StatelessWidget {
               return AdminHomeScreen(onLogout: () => AuthService().signOut());
             } else {
               return FacilityInfoScreen(
+                key: ValueKey(session.user.id),
                 // SCRUM-38: pass the stored value (krp / non_krp), or '' if not set.
-                category: StudentCategory.parse(profile['student_category'])?.value ?? '',
+                category:
+                    StudentCategory.parse(profile['student_category'])?.value ??
+                    '',
                 email: profile['email'] ?? '',
                 studentName: profile['full_name'] ?? '',
                 contact: profile['phone_number'] ?? '',

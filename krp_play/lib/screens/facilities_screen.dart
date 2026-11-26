@@ -6,6 +6,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../models/booking.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../models/checkout_recovery.dart';
 import '../models/session_selection.dart';
 import '../services/booking_service.dart';
@@ -15,6 +16,9 @@ class FacilitiesScreen extends StatefulWidget {
   final String email;
   final String studentName;
   final BookingService? bookingService;
+  final List<Booking> initialCart;
+  final Set<String>? restoredExpiredOrderIds;
+  final ValueChanged<List<Booking>>? onCartSaved;
 
   const FacilitiesScreen({
     super.key,
@@ -22,6 +26,9 @@ class FacilitiesScreen extends StatefulWidget {
     required this.email,
     this.studentName = 'Yu Xiang',
     this.bookingService,
+    this.initialCart = const [],
+    this.restoredExpiredOrderIds,
+    this.onCartSaved,
   });
 
   @override
@@ -47,6 +54,7 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
   @override
   void initState() {
     super.initState();
+    cartItems.addAll(widget.initialCart);
     _loadPrices();
     _loadOperatingHours();
     if (_bookingService.usesRealPayment) _recoverCheckout();
@@ -103,6 +111,10 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
 
   @override
   void dispose() {
+    // Keep the receipt's local items, but never restore a completed order.
+    widget.onCartSaved?.call(
+      reservationCreated ? <Booking>[] : List<Booking>.of(cartItems),
+    );
     _lifecycleListener.dispose();
     _availabilityTimer?.cancel();
     if (_bookingsChannel != null) {
@@ -157,6 +169,9 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
   String? _paymentUrl;
   bool _checkingPayment = false;
   bool _recoveringCheckout = false;
+  String? _recoveredExpiredOrderId;
+  late final Set<String> _restoredExpiredOrderIds =
+      widget.restoredExpiredOrderIds ?? <String>{};
   String? _recoveryError;
   bool _paidViaBillplz = false;
   String? _availabilityError;
@@ -452,6 +467,10 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
                 _pendingBookingId == null) {
               setState(() => currentStep -= 1);
             } else {
+              // Save before Home becomes visible again.
+              widget.onCartSaved?.call(
+                reservationCreated ? <Booking>[] : List<Booking>.of(cartItems),
+              );
               Navigator.of(context).pop();
             }
           },
@@ -1325,7 +1344,29 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
     _showMessage('Added to your order.');
   }
 
-  void _removeCartItem(Booking booking) {
+  Future<void> _removeCartItem(Booking booking) async {
+    final expiredId = _recoveredExpiredOrderId;
+    final owner = _bookingService.checkoutUserId;
+
+    // Remember an explicit deletion, not merely opening the recovered order.
+    if (expiredId != null && owner != null) {
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        if (!mounted || _bookingService.checkoutUserId != owner) return;
+        final saved = await prefs.setBool(
+          'dismissed-expired-order:$owner:$expiredId',
+          true,
+        );
+        if (!saved) throw StateError('Could not save dismissal');
+      } catch (error) {
+        if (mounted) {
+          _showMessage('Could not save this removal. Please try again.');
+        }
+        return;
+      }
+    }
+
+    if (!mounted || _bookingService.checkoutUserId != owner) return;
     setState(() {
       _checkoutRequestId = null;
       cartItems.removeWhere((item) => item.id == booking.id);
@@ -1693,14 +1734,30 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
       final saved = await _bookingService.getCheckoutForRecovery();
       if (!mounted || _bookingService.checkoutUserId != owner) return;
       if (saved != null) {
+        final expired = !saved.canResumeAt(DateTime.now());
+        if (expired) {
+          final prefs = await SharedPreferences.getInstance();
+          if (!mounted || _bookingService.checkoutUserId != owner) return;
+          final key = 'dismissed-expired-order:$owner:${saved.order.id}';
+          if (prefs.getBool(key) == true) return;
+          _recoveredExpiredOrderId = saved.order.id;
+        }
+        // An expired order is a one-time recovery, not the current draft.
+        // Keep subsequent edits, including an intentionally empty cart.
+        if (expired && _restoredExpiredOrderIds.contains(saved.order.id)) {
+          return;
+        }
         if (saved.cart.isEmpty) {
           throw StateError(
             'This unfinished order has no recoverable sessions.',
           );
         }
         _applyRecoveredCheckout(saved);
-        if (!saved.canResumeAt(DateTime.now())) {
+        if (expired) {
           await _resetExpiredPayment();
+          if (mounted) {
+            _restoredExpiredOrderIds.add(saved.order.id);
+          }
           if (mounted)
             _showMessage(
               'Your previous hold expired. Your cart was restored. Review availability before paying again.',
