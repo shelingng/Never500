@@ -148,6 +148,16 @@ class BookingService {
     return CheckoutRecovery.fromRow(Map<String, dynamic>.from(rows.first));
   }
 
+  Future<List<Map<String, dynamic>>> getOperatingSchedules() async {
+    final rows = await _supabase
+        .from('operating_schedules')
+        .select('day_of_week, start_time, end_time, slot_minutes, is_active')
+        .eq('is_active', true)
+        .order('day_of_week')
+        .order('start_time');
+    return [for (final row in rows) Map<String, dynamic>.from(row)];
+  }
+
   getFacilities() async {
     final response = await _supabase
         .from('facilities')

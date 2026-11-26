@@ -15,6 +15,26 @@ class CheckoutFake extends BookingService {
   List<Booking> submitted = [];
 
   @override
+  Future<List<Map<String, dynamic>>> getOperatingSchedules() async => [
+    for (var day = 0; day < 7; day++)
+      for (final window in [
+        if (day == 0 || day == 6) ['10:00:00', '13:00:00'],
+        if (day == 0 || day == 6)
+          ['15:00:00', '19:00:00']
+        else
+          ['17:00:00', '19:00:00'],
+        ['21:00:00', '23:00:00'],
+      ])
+        {
+          'day_of_week': day,
+          'start_time': window[0],
+          'end_time': window[1],
+          'slot_minutes': 60,
+          'is_active': true,
+        },
+  ];
+
+  @override
   Future<List<Map<String, dynamic>>> getFacilities() async => [
     {'name': 'Badminton Court 1', 'krp_price': 6, 'non_krp_price': 8},
     {'name': 'Badminton Court 2', 'krp_price': 6, 'non_krp_price': 8},
@@ -55,7 +75,10 @@ class CheckoutFake extends BookingService {
         Future.value({
           'id': 'test-order',
           'reference': 'KRP-test',
-          'total_amount': 6,
+          'total_amount': cart.fold<num>(
+            0,
+            (sum, item) => sum + (item.totalPrice as num),
+          ),
           'status': 'confirmed',
           'is_demo': true,
           'payment_deadline': DateTime.now()
