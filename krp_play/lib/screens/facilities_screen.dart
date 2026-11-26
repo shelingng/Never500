@@ -7,6 +7,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../models/booking.dart';
 import '../models/checkout_recovery.dart';
+import '../models/session_selection.dart';
 import '../services/booking_service.dart';
 
 class FacilitiesScreen extends StatefulWidget {
@@ -37,12 +38,17 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
   List _facilities = [];
   bool _loadingPrices = true;
   bool _priceLoadFailed = false;
+  List<Map<String, dynamic>> _operatingHours = [];
+  bool _loadingHours = true;
+  bool _hoursLoadFailed = false;
+  int _hoursRequest = 0;
   late final AppLifecycleListener _lifecycleListener;
 
   @override
   void initState() {
     super.initState();
     _loadPrices();
+    _loadOperatingHours();
     if (_bookingService.usesRealPayment) _recoverCheckout();
     // The Billplz page opens in another tab. When the user comes back,
     // check the payment automatically instead of waiting for a button press.
@@ -67,6 +73,14 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
             if (mounted && currentStep == 2) {
               _fetchAvailability(showLoader: false);
             }
+          },
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'operating_schedules',
+          callback: (_) {
+            if (mounted) _loadOperatingHours();
           },
         )
         .subscribe();
@@ -172,30 +186,52 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
     'UOB Malaysia',
   ];
 
-  static const List<String> _weekdayStartTimes = [
-    '5:00 PM',
-    '6:00 PM',
-    '9:00 PM',
-    '10:00 PM',
-  ];
+  List<String> get availableStartTimes => SessionSelection.startsForDate(
+    _operatingHours,
+    selectedDate,
+  ).map(_formatTime).toList();
 
-  static const List<String> _weekendStartTimes = [
-    '10:00 AM',
-    '11:00 AM',
-    '12:00 PM',
-    '3:00 PM',
-    '4:00 PM',
-    '5:00 PM',
-    '6:00 PM',
-    '9:00 PM',
-    '10:00 PM',
-  ];
+  String? get _selectionRuleError {
+    if (_loadingHours) return 'Loading operating hours...';
+    if (_hoursLoadFailed)
+      return 'Operating hours could not be loaded. Please retry.';
+    return SessionSelection.error(
+      allowedStarts: SessionSelection.startsForDate(
+        _operatingHours,
+        selectedDate,
+      ),
+      start: _minutesFor(selectedStartTime),
+      hours: selectedDurationHours,
+    );
+  }
 
-  List<String> get availableStartTimes {
-    final isWeekend =
-        selectedDate.weekday == DateTime.saturday ||
-        selectedDate.weekday == DateTime.sunday;
-    return isWeekend ? _weekendStartTimes : _weekdayStartTimes;
+  Future<void> _loadOperatingHours() async {
+    final request = ++_hoursRequest;
+    if (!mounted) return;
+    setState(() {
+      _loadingHours = true;
+      _hoursLoadFailed = false;
+    });
+    try {
+      final rows = await _bookingService.getOperatingSchedules();
+      if (!mounted || request != _hoursRequest) return;
+      setState(() {
+        _operatingHours = rows;
+        _loadingHours = false;
+        final starts = availableStartTimes;
+        if (starts.isNotEmpty && !starts.contains(selectedStartTime)) {
+          selectedStartTime = starts.first;
+        }
+        _autoSelectFirstAvailableCourt();
+      });
+    } catch (error) {
+      debugPrint('Operating hours load failed: $error');
+      if (!mounted || request != _hoursRequest) return;
+      setState(() {
+        _loadingHours = false;
+        _hoursLoadFailed = true;
+      });
+    }
   }
 
   static const List<String> monthNames = [
@@ -260,6 +296,7 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
 
   String _getCourtStatus(String facilityName, List<String> requestedSlots) {
     if (_availabilityError != null) return 'Unavailable';
+    if (_selectionRuleError != null) return 'Outside hours';
     for (final booking in _dayBookings) {
       final stat = booking.status.trim().toLowerCase();
       if (_sameFacility(booking.facilityName, facilityName) &&
@@ -527,7 +564,15 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
                   style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
                 ),
                 const SizedBox(height: 24),
-                if (_loadingPrices) const LinearProgressIndicator(),
+                if (_loadingPrices || _loadingHours)
+                  const LinearProgressIndicator(),
+                if (_hoursLoadFailed)
+                  TextButton(
+                    onPressed: _loadOperatingHours,
+                    child: const Text(
+                      'Operating hours could not be loaded. Retry',
+                    ),
+                  ),
                 if (_priceLoadFailed)
                   TextButton(
                     onPressed: _loadPrices,
@@ -558,6 +603,8 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
       onTap:
           _loadingPrices ||
               _priceLoadFailed ||
+              _loadingHours ||
+              _hoursLoadFailed ||
               !_facilities.any(
                 (f) => f['name'].toString().startsWith('$sport '),
               )
@@ -727,6 +774,18 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
                 ),
                 const SizedBox(height: 20),
 
+                if (_selectionRuleError != null) ...[
+                  Text(
+                    _selectionRuleError!,
+                    style: const TextStyle(color: Color(0xFF946000)),
+                  ),
+                  if (_hoursLoadFailed)
+                    TextButton(
+                      onPressed: _loadOperatingHours,
+                      child: const Text('Retry operating hours'),
+                    ),
+                  const SizedBox(height: 12),
+                ],
                 if (_availabilityError != null)
                   TextButton.icon(
                     onPressed: _fetchAvailability,
@@ -1208,6 +1267,11 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
   }
 
   void _addSelectedToCart() {
+    final ruleError = _selectionRuleError;
+    if (ruleError != null) {
+      _showMessage(ruleError);
+      return;
+    }
     final date = DateTime(
       selectedDate.year,
       selectedDate.month,
@@ -2004,6 +2068,14 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
         _showMessage(
           'Prices have changed. Rebuild your cart with the updated prices before paying.',
         );
+      } else if (e.message.contains('OUTSIDE_OPERATING_HOURS') ||
+          e.message.contains('INVALID_SESSION') ||
+          e.message.contains('INVALID_DATE')) {
+        _checkoutRequestId = null;
+        await _loadOperatingHours();
+        if (!mounted) return;
+        setState(() => currentStep = 3);
+        _showMessage(SessionSelection.serverError(e.message));
       } else if (e.code == 'PGRST202') {
         _showMessage(
           'Checkout is not configured yet. The reviewed database script must be deployed first.',
@@ -2048,11 +2120,19 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
   }
 
   void _showDatePickerDialog() async {
+    final today = DateUtils.dateOnly(DateTime.now());
+    final lastDate = today.add(const Duration(days: 30));
+    final chosen = DateUtils.dateOnly(selectedDate);
+    final initial = chosen.isBefore(today)
+        ? today
+        : chosen.isAfter(lastDate)
+        ? lastDate
+        : chosen;
     final picked = await showDatePicker(
       context: context,
-      initialDate: selectedDate,
-      firstDate: DateTime.now(),
-      lastDate: DateTime.now().add(const Duration(days: 30)),
+      initialDate: initial,
+      firstDate: today,
+      lastDate: lastDate,
       builder: (context, child) => Theme(
         data: Theme.of(context).copyWith(
           colorScheme: ColorScheme.light(
@@ -2066,7 +2146,8 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
     if (picked != null && picked != selectedDate) {
       setState(() {
         selectedDate = picked;
-        if (!availableStartTimes.contains(selectedStartTime)) {
+        if (availableStartTimes.isNotEmpty &&
+            !availableStartTimes.contains(selectedStartTime)) {
           selectedStartTime = availableStartTimes.first;
         }
       });
@@ -2093,6 +2174,8 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
                 style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
               ),
               const SizedBox(height: 12),
+              if (availableStartTimes.isEmpty)
+                const Text('No bookable start times for this date.'),
               GridView.builder(
                 shrinkWrap: true,
                 physics: const NeverScrollableScrollPhysics(),
