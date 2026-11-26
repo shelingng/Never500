@@ -37,11 +37,18 @@ class CheckoutFake extends BookingService {
     submitted = List<Booking>.from(cart);
     if (error is PostgrestException) {
       final item = cart.first;
-      occupied.add(Booking(id: 'other-user-booking', userId: 'other-user',
-        facilityName: item.facilityName, date: item.date,
-        timeSlots: List<String>.from(item.timeSlots as List),
-        pricePerSession: item.pricePerSession, totalPrice: item.totalPrice,
-        status: 'confirmed'));
+      occupied.add(
+        Booking(
+          id: 'other-user-booking',
+          userId: 'other-user',
+          facilityName: item.facilityName,
+          date: item.date,
+          timeSlots: List<String>.from(item.timeSlots as List),
+          pricePerSession: item.pricePerSession,
+          totalPrice: item.totalPrice,
+          status: 'confirmed',
+        ),
+      );
     }
     if (error != null) throw error!;
     return pending?.future ??
@@ -65,7 +72,11 @@ Future<void> tapText(WidgetTester tester, String text) async {
   await tester.pumpAndSettle();
 }
 
-Future<void> openPayment(WidgetTester tester, CheckoutFake fake, {bool addDart = false}) async {
+Future<void> openPayment(
+  WidgetTester tester,
+  CheckoutFake fake, {
+  bool addDart = false,
+}) async {
   tester.view.physicalSize = const Size(1200, 1200);
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.resetPhysicalSize);
@@ -94,4 +105,18 @@ Future<void> openPayment(WidgetTester tester, CheckoutFake fake, {bool addDart =
     isEmpty,
     reason: 'Cart and method selection do not acquire a hold',
   );
+}
+
+void checkoutTestWidgets(String description, WidgetTesterCallback body) {
+  testWidgets(description, (tester) async {
+    try {
+      await body(tester);
+    } finally {
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 51));
+      await tester.pump(const Duration(seconds: 7));
+      await tester.pump();
+    }
+  });
 }

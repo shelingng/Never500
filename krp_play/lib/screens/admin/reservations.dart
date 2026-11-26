@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../models/student_category.dart';
+import '../../models/booking_order.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class AdminBookingsTab extends StatefulWidget {
@@ -136,110 +137,96 @@ class _AdminBookingsTabState extends State<AdminBookingsTab> {
       final response = await supabase
           .from('bookings')
           .select(
-            '*, profiles!booking_user_id_fkey(full_name, matric_number, phone_number, student_category)',
+            '*, profiles!booking_user_id_fkey(full_name, matric_number, phone_number, student_category), '
+            'booking_items(price, status, time_slots(slot_date, start_time, end_time, facilities(name))), '
+            'payments(status, payment_method, payment_gateway, transaction_reference, billplz_id, paid_at, amount)',
           )
           .order('created_at', ascending: false);
 
-      final mappedBookings = (response as List)
-          .map((r) => Map.from(r as Map))
+      final mapped = (response as List)
+          .map((r) => Map<String, dynamic>.from(r as Map))
           .where((b) => !_isAdminEmptyClosureRow(b))
           .map((b) {
-            final p = b['profiles'] is Map
-                ? Map.from(b['profiles'] as Map)
-                : {};
-
-            final rawPayload = b['checkout_payload'];
-            Map? firstCartItem;
-            if (rawPayload is List &&
-                rawPayload.isNotEmpty &&
-                rawPayload.first is Map) {
-              firstCartItem = Map.from(rawPayload.first as Map);
+            final order = BookingOrder.fromRow(b);
+            final profile = b['profiles'] is Map
+                ? b['profiles'] as Map
+                : const {};
+            final payments = b['payments'] as List? ?? const [];
+            final references = <String>{};
+            for (final payment in payments) {
+              for (final key in ['transaction_reference', 'billplz_id']) {
+                final value = payment[key]?.toString().trim() ?? '';
+                if (value.isNotEmpty) references.add(value);
+              }
             }
 
-            final facility = (b['facility_name'] ??
-                    firstCartItem?['facility_name'] ??
-                    '')
-                .toString()
-                .trim();
-            final date = (b['booking_date'] ??
-                    firstCartItem?['booking_date'] ??
-                    firstCartItem?['date'] ??
-                    '')
-                .toString()
-                .trim();
-            String time =
-                (b['start_time'] ?? firstCartItem?['start_time'] ?? '')
-                    .toString()
-                    .trim();
-            if (time.isEmpty &&
-                firstCartItem?['start_times'] is List &&
-                (firstCartItem!['start_times'] as List).isNotEmpty) {
-              time = (firstCartItem['start_times'] as List).join(', ');
-            }
+            final demo = order.isDemo || order.payments.any((p) => p.isDemo);
+            final paymentStatus = demo
+                ? 'Demo payment'
+                : order.payments.any((p) => p.isPaid)
+                ? 'Paid'
+                : order.payments.isEmpty
+                ? 'No payment record'
+                : order.payments.map((p) => p.status).toSet().join(', ');
 
-            final rawAmount = b['total_amount'] ?? b['amount'];
-            double amount = 0;
-            if (rawAmount is num) {
-              amount = rawAmount.toDouble();
-            } else if (rawAmount is String) {
-              amount = double.tryParse(rawAmount) ?? 0;
-            }
-
-            final rawStatus = (b['status'] ?? 'Pending').toString().trim();
-            final isClosedByAdmin =
-                rawStatus.toLowerCase().startsWith('closed');
-            final displayStatus = isClosedByAdmin
-                ? 'Closed by Admin (${rawStatus.replaceFirst(RegExp(r'^closed\s*\(?|\)?$', caseSensitive: false), '').trim()})'
-                : rawStatus;
-
-            final lowerStat = rawStatus.toLowerCase();
-            final paymentStatus = isClosedByAdmin
-                ? 'Refund Required'
-                : (lowerStat == 'paid' ||
-                        lowerStat == 'confirmed' ||
-                        lowerStat == 'booked')
-                    ? 'Paid'
-                    : (lowerStat == 'expired' || lowerStat == 'cancelled')
-                        ? 'Unpaid'
-                        : 'Pending';
-
-            final rawId = (b['id'] ?? '').toString();
-            final shortId = rawId.length > 6
-                ? rawId.substring(0, 6).toUpperCase()
-                : rawId;
+            final dates = order.sessions
+                .map((s) => _formatDateIso(s.date))
+                .toSet()
+                .toList();
+            final facilities = order.sessions
+                .map((s) => s.facilityName)
+                .toSet();
 
             return {
-              'id': rawId,
-              'ref': (b['booking_reference'] ?? '#KRP-$shortId').toString(),
-              'payId': 'PAY-$shortId',
-              'name': (firstCartItem?['student_name'] ??
-                      p['full_name'] ??
-                      'Walk-in / Unknown')
-                  .toString(),
-              'matric': (firstCartItem?['matric_number'] ??
-                      p['matric_number'] ??
-                      'N/A')
-                  .toString(),
-              'contact': (p['phone_number'] ?? 'Not provided').toString(),
+              'id': order.id,
+              'ref': order.reference,
+              'payId': references.isEmpty
+                  ? 'Not recorded'
+                  : references.join(', '),
+              'name':
+                  (b['customer_name'] ?? profile['full_name'] ?? 'Not provided')
+                      .toString(),
+              'matric':
+                  (b['matric_number'] ??
+                          profile['matric_number'] ??
+                          'Not provided')
+                      .toString(),
+              'contact':
+                  (b['customer_phone'] ??
+                          profile['phone_number'] ??
+                          'Not provided')
+                      .toString(),
               'category': _normalizeCategoryLabel(
-                firstCartItem?['student_category'] ?? p['student_category'],
+                b['student_category'] ?? profile['student_category'],
               ),
-              'facility': facility.isNotEmpty ? facility : 'Unknown Facility',
-              'date': date,
-              'time': time,
-              'price': 'RM ${amount.toStringAsFixed(2)}',
-              'status': displayStatus,
-              'normalizedStatus': _normalizeStatusFilterValue(rawStatus),
+              'facility': facilities.isEmpty
+                  ? 'Session details unavailable'
+                  : facilities.join(', '),
+              'date': dates.join(', '),
+              'dates': dates,
+              'time': order.sessions
+                  .map((s) => '${s.facilityName}: ${s.interval}')
+                  .join('\n'),
+              'price': formatRinggit(order.total),
+              'status': order.status,
+              'normalizedStatus': _normalizeStatusFilterValue(order.status),
               'paymentStatus': paymentStatus,
+              'order': order,
+              'paymentRows': payments,
             };
           })
           .toList();
 
-      if (mounted) setState(() => _bookings = mappedBookings);
-    } catch (e) {
+      if (mounted) setState(() => _bookings = mapped);
+    } catch (error) {
+      debugPrint('Admin reservations: $error');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error loading bookings: $e')),
+          const SnackBar(
+            content: Text(
+              'Could not load reservations. Please refresh to retry.',
+            ),
+          ),
         );
       }
     } finally {
@@ -249,23 +236,26 @@ class _AdminBookingsTabState extends State<AdminBookingsTab> {
 
   List get _filteredBookings {
     final query = _searchController.text.trim().toLowerCase();
-    final targetDateIso =
-        _selectedDate != null ? _formatDateIso(_selectedDate!) : null;
+    final targetDateIso = _selectedDate != null
+        ? _formatDateIso(_selectedDate!)
+        : null;
 
     return _bookings.where((booking) {
-      final matchesCategory = _selectedCategory == 'All Categories' ||
+      final matchesCategory =
+          _selectedCategory == 'All Categories' ||
           booking['category'] == _selectedCategory;
 
-      final matchesStatus = _selectedStatus == 'All Statuses' ||
+      final matchesStatus =
+          _selectedStatus == 'All Statuses' ||
           booking['normalizedStatus'] == _selectedStatus ||
           booking['status'].toString().toLowerCase() ==
               _selectedStatus.toLowerCase() ||
           (_selectedStatus == 'Closed by Admin' &&
               booking['status'].toString().startsWith('Closed by Admin'));
 
-      final bookingDateStr = (booking['date']?.toString() ?? '').trim();
       final matchesDate =
-          targetDateIso == null || bookingDateStr.startsWith(targetDateIso);
+          targetDateIso == null ||
+          (booking['dates'] as List).contains(targetDateIso);
 
       final searchableText = [
         booking['ref'],
@@ -355,6 +345,8 @@ class _AdminBookingsTabState extends State<AdminBookingsTab> {
   }
 
   void _showDetails(Map booking) {
+    final order = booking['order'] as BookingOrder;
+    final paymentRows = booking['paymentRows'] as List;
     showDialog<void>(
       context: context,
       builder: (dialogContext) => AlertDialog(
@@ -381,9 +373,21 @@ class _AdminBookingsTabState extends State<AdminBookingsTab> {
                   style: TextStyle(fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 8),
-                _detailRow('Facility', booking['facility'].toString()),
-                _detailRow('Date', booking['date'].toString()),
-                _detailRow('Time', booking['time'].toString()),
+                if (order.sessions.isEmpty)
+                  const Text('Session details unavailable for this record.'),
+                for (var i = 0; i < order.sessions.length; i++) ...[
+                  _detailRow(
+                    'Session ${i + 1}',
+                    order.sessions[i].facilityName,
+                  ),
+                  _detailRow('Date', formatKlDate(order.sessions[i].date)),
+                  _detailRow('Time', order.sessions[i].interval),
+                  _detailRow(
+                    'Session price',
+                    formatRinggit(order.sessions[i].price),
+                  ),
+                  const Divider(),
+                ],
                 _detailRow('Amount', booking['price'].toString()),
                 _detailRow('Booking status', booking['status'].toString()),
                 const Divider(height: 24),
@@ -392,8 +396,55 @@ class _AdminBookingsTabState extends State<AdminBookingsTab> {
                   style: TextStyle(fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 8),
-                _detailRow('Payment status', booking['paymentStatus'].toString()),
-                _detailRow('Payment reference', booking['payId'].toString()),
+                _detailRow(
+                  'Payment status',
+                  booking['paymentStatus'].toString(),
+                ),
+                if (paymentRows.isEmpty)
+                  const Text('No payment record is stored for this booking.'),
+                for (var i = 0; i < paymentRows.length; i++) ...[
+                  const Divider(),
+                  _detailRow(
+                    'Payment status',
+                    paymentRows[i]['status']?.toString() ?? 'Unknown',
+                  ),
+                  _detailRow(
+                    'Gateway',
+                    paymentRows[i]['payment_gateway']?.toString() ??
+                        'Not recorded',
+                  ),
+                  _detailRow(
+                    'Method',
+                    paymentRows[i]['payment_method']?.toString() ??
+                        'Not recorded',
+                  ),
+                  _detailRow(
+                    'Amount (RM)',
+                    paymentRows[i]['amount']?.toString() ?? 'Not recorded',
+                  ),
+                  _detailRow(
+                    'Transaction reference',
+                    paymentRows[i]['transaction_reference']?.toString() ??
+                        'Not recorded',
+                  ),
+                  _detailRow(
+                    'Billplz bill ID',
+                    paymentRows[i]['billplz_id']?.toString() ?? 'Not recorded',
+                  ),
+                  _detailRow(
+                    'Paid at',
+                    DateTime.tryParse(
+                              paymentRows[i]['paid_at']?.toString() ?? '',
+                            ) ==
+                            null
+                        ? 'Not recorded'
+                        : formatKlInstant(
+                            DateTime.parse(
+                              paymentRows[i]['paid_at'].toString(),
+                            ),
+                          ),
+                  ),
+                ],
               ],
             ),
           ),
@@ -417,8 +468,10 @@ class _AdminBookingsTabState extends State<AdminBookingsTab> {
         decoration: InputDecoration(
           labelText: 'Date',
           border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-          contentPadding:
-              const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 12,
+            vertical: 14,
+          ),
           suffixIcon: hasDate
               ? IconButton(
                   icon: const Icon(Icons.close, size: 18),
@@ -499,19 +552,20 @@ class _AdminBookingsTabState extends State<AdminBookingsTab> {
                     borderRadius: BorderRadius.circular(10),
                   ),
                 ),
-                items: [
-                  'All Categories',
-                  'KRP Student',
-                  'Non-KRP Student',
-                  'Public',
-                ]
-                    .map(
-                      (c) => DropdownMenuItem(
-                        value: c,
-                        child: Text(c, overflow: TextOverflow.ellipsis),
-                      ),
-                    )
-                    .toList(),
+                items:
+                    [
+                          'All Categories',
+                          'KRP Student',
+                          'Non-KRP Student',
+                          'Public',
+                        ]
+                        .map(
+                          (c) => DropdownMenuItem(
+                            value: c,
+                            child: Text(c, overflow: TextOverflow.ellipsis),
+                          ),
+                        )
+                        .toList(),
                 onChanged: (val) {
                   if (val != null) setState(() => _selectedCategory = val);
                 },
@@ -526,22 +580,23 @@ class _AdminBookingsTabState extends State<AdminBookingsTab> {
                     borderRadius: BorderRadius.circular(10),
                   ),
                 ),
-                items: [
-                  'All Statuses',
-                  'Pending Payment',
-                  'Confirmed',
-                  'Closed by Admin',
-                  'Cancelled',
-                  'Expired',
-                  'Refunded',
-                ]
-                    .map(
-                      (s) => DropdownMenuItem(
-                        value: s,
-                        child: Text(s, overflow: TextOverflow.ellipsis),
-                      ),
-                    )
-                    .toList(),
+                items:
+                    [
+                          'All Statuses',
+                          'Pending Payment',
+                          'Confirmed',
+                          'Closed by Admin',
+                          'Cancelled',
+                          'Expired',
+                          'Refunded',
+                        ]
+                        .map(
+                          (s) => DropdownMenuItem(
+                            value: s,
+                            child: Text(s, overflow: TextOverflow.ellipsis),
+                          ),
+                        )
+                        .toList(),
                 onChanged: (val) {
                   if (val != null) setState(() => _selectedStatus = val);
                 },
