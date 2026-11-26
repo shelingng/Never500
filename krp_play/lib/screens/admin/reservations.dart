@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
 import '../../models/student_category.dart';
 import '../../models/booking_order.dart';
+import '../../services/admin_reservations_source.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class AdminBookingsTab extends StatefulWidget {
-  const AdminBookingsTab({super.key});
+  final AdminReservationsSource? source;
+
+  const AdminBookingsTab({super.key, this.source});
 
   @override
   State<AdminBookingsTab> createState() => _AdminBookingsTabState();
@@ -12,12 +15,18 @@ class AdminBookingsTab extends StatefulWidget {
 
 class _AdminBookingsTabState extends State<AdminBookingsTab> {
   static const _green = Color(0xFF173F32);
-  final supabase = Supabase.instance.client;
+  late final AdminReservationsSource _source =
+      widget.source ?? SupabaseAdminReservationsSource();
 
   final _searchController = TextEditingController();
   String _selectedCategory = 'All Categories';
   String _selectedStatus = 'All Statuses';
   DateTime? _selectedDate;
+  String _selectedFacility = 'All Facilities';
+  String? _loadError;
+  int _loadVersion = 0;
+  int _pageIndex = 0;
+  static const _pageSize = 10;
 
   bool _isLoading = true;
   List _bookings = [];
@@ -28,23 +37,41 @@ class _AdminBookingsTabState extends State<AdminBookingsTab> {
   void initState() {
     super.initState();
     _fetchBookings();
-    _bookingsChannel = supabase
-        .channel('admin:bookings_tab')
-        .onPostgresChanges(
-          event: PostgresChangeEvent.all,
-          schema: 'public',
-          table: 'bookings',
-          callback: (_) {
-            if (mounted) _fetchBookings();
-          },
-        )
-        .subscribe();
+    if (widget.source == null) {
+      _bookingsChannel = Supabase.instance.client
+          .channel('admin:bookings_tab')
+          .onPostgresChanges(
+            event: PostgresChangeEvent.all,
+            schema: 'public',
+            table: 'bookings',
+            callback: (_) {
+              if (mounted) _fetchBookings();
+            },
+          )
+          .onPostgresChanges(
+            event: PostgresChangeEvent.all,
+            schema: 'public',
+            table: 'payments',
+            callback: (_) {
+              if (mounted) _fetchBookings();
+            },
+          )
+          .onPostgresChanges(
+            event: PostgresChangeEvent.all,
+            schema: 'public',
+            table: 'booking_items',
+            callback: (_) {
+              if (mounted) _fetchBookings();
+            },
+          )
+          .subscribe();
+    }
   }
 
   @override
   void dispose() {
     if (_bookingsChannel != null) {
-      supabase.removeChannel(_bookingsChannel!);
+      Supabase.instance.client.removeChannel(_bookingsChannel!);
     }
     _searchController.dispose();
     super.dispose();
@@ -113,7 +140,10 @@ class _AdminBookingsTabState extends State<AdminBookingsTab> {
     );
 
     if (picked != null) {
-      setState(() => _selectedDate = picked);
+      setState(() {
+        _selectedDate = picked;
+        _pageIndex = 0;
+      });
     }
   }
 
@@ -132,19 +162,17 @@ class _AdminBookingsTabState extends State<AdminBookingsTab> {
   }
 
   Future<void> _fetchBookings() async {
-    setState(() => _isLoading = true);
+    final version = ++_loadVersion;
+    setState(() {
+      _isLoading = true;
+      _loadError = null;
+    });
     try {
-      final response = await supabase
-          .from('bookings')
-          .select(
-            '*, profiles!booking_user_id_fkey(full_name, matric_number, phone_number, student_category), '
-            'booking_items(price, status, time_slots(slot_date, start_time, end_time, facilities(name))), '
-            'payments(status, payment_method, payment_gateway, transaction_reference, billplz_id, paid_at, amount)',
-          )
-          .order('created_at', ascending: false);
+      final response = await _source.loadAll();
+      if (!mounted || version != _loadVersion) return;
 
-      final mapped = (response as List)
-          .map((r) => Map<String, dynamic>.from(r as Map))
+      final mapped = response
+          .map((r) => Map<String, dynamic>.from(r))
           .where((b) => !_isAdminEmptyClosureRow(b))
           .map((b) {
             final order = BookingOrder.fromRow(b);
@@ -202,6 +230,7 @@ class _AdminBookingsTabState extends State<AdminBookingsTab> {
               'facility': facilities.isEmpty
                   ? 'Session details unavailable'
                   : facilities.join(', '),
+              'facilities': facilities.toList(),
               'date': dates.join(', '),
               'dates': dates,
               'time': order.sessions
@@ -217,21 +246,37 @@ class _AdminBookingsTabState extends State<AdminBookingsTab> {
           })
           .toList();
 
-      if (mounted) setState(() => _bookings = mapped);
+      if (mounted && version == _loadVersion) {
+        setState(() {
+          _bookings = mapped;
+          if (!_facilityOptions.contains(_selectedFacility)) {
+            _selectedFacility = 'All Facilities';
+          }
+        });
+      }
     } catch (error) {
       debugPrint('Admin reservations: $error');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Could not load reservations. Please refresh to retry.',
-            ),
-          ),
-        );
+      if (mounted && version == _loadVersion) {
+        setState(() {
+          _bookings = [];
+          _loadError = error is AdminAccessDenied
+              ? 'Administrator access is required to view reservations.'
+              : 'Could not load reservations. Please retry.';
+        });
       }
     } finally {
-      if (mounted) setState(() => _isLoading = false);
+      if (mounted && version == _loadVersion) {
+        setState(() => _isLoading = false);
+      }
     }
+  }
+
+  List<String> get _facilityOptions {
+    final names = <String>{
+      for (final booking in _bookings)
+        ...List<String>.from(booking['facilities'] as List),
+    }.toList()..sort();
+    return ['All Facilities', ...names];
   }
 
   List get _filteredBookings {
@@ -267,7 +312,11 @@ class _AdminBookingsTabState extends State<AdminBookingsTab> {
         booking['status'],
       ].join(' ').toLowerCase();
 
-      return matchesCategory &&
+      final matchesFacility =
+          _selectedFacility == 'All Facilities' ||
+          (booking['facilities'] as List).contains(_selectedFacility);
+      return matchesFacility &&
+          matchesCategory &&
           matchesStatus &&
           matchesDate &&
           searchableText.contains(query);
@@ -280,6 +329,8 @@ class _AdminBookingsTabState extends State<AdminBookingsTab> {
       _selectedCategory = 'All Categories';
       _selectedStatus = 'All Statuses';
       _selectedDate = null;
+      _selectedFacility = 'All Facilities';
+      _pageIndex = 0;
     });
   }
 
@@ -476,7 +527,10 @@ class _AdminBookingsTabState extends State<AdminBookingsTab> {
               ? IconButton(
                   icon: const Icon(Icons.close, size: 18),
                   tooltip: 'Clear date',
-                  onPressed: () => setState(() => _selectedDate = null),
+                  onPressed: () => setState(() {
+                    _selectedDate = null;
+                    _pageIndex = 0;
+                  }),
                 )
               : const Icon(Icons.calendar_today, size: 18),
         ),
@@ -495,6 +549,12 @@ class _AdminBookingsTabState extends State<AdminBookingsTab> {
   @override
   Widget build(BuildContext context) {
     final bookings = _filteredBookings;
+    final pages = (bookings.length / _pageSize).ceil();
+    final page = _pageIndex.clamp(0, pages > 0 ? pages - 1 : 0).toInt();
+    final visibleBookings = bookings
+        .skip(page * _pageSize)
+        .take(_pageSize)
+        .toList();
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(24),
@@ -504,28 +564,30 @@ class _AdminBookingsTabState extends State<AdminBookingsTab> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'ADMIN BOOKING RECORDS',
-                    style: TextStyle(
-                      color: _green,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 12,
-                      letterSpacing: 1.5,
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'ADMIN BOOKING RECORDS',
+                      style: TextStyle(
+                        color: _green,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 12,
+                        letterSpacing: 1.5,
+                      ),
                     ),
-                  ),
-                  SizedBox(height: 8),
-                  Text(
-                    'Reservations',
-                    style: TextStyle(
-                      fontSize: 28,
-                      fontWeight: FontWeight.w900,
-                      color: _green,
+                    SizedBox(height: 8),
+                    Text(
+                      'Reservations',
+                      style: TextStyle(
+                        fontSize: 28,
+                        fontWeight: FontWeight.w900,
+                        color: _green,
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
               IconButton(
                 icon: const Icon(Icons.refresh, color: _green),
@@ -540,11 +602,40 @@ class _AdminBookingsTabState extends State<AdminBookingsTab> {
             style: TextStyle(color: Colors.grey, fontSize: 14),
           ),
           const SizedBox(height: 24),
+          DropdownButtonFormField<String>(
+            key: ValueKey('facility-$_selectedFacility'),
+            initialValue: _selectedFacility,
+            isExpanded: true,
+            decoration: InputDecoration(
+              labelText: 'Facility',
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
+            items: _facilityOptions
+                .map(
+                  (name) => DropdownMenuItem(
+                    value: name,
+                    child: Text(name, overflow: TextOverflow.ellipsis),
+                  ),
+                )
+                .toList(),
+            onChanged: (value) {
+              if (value != null) {
+                setState(() {
+                  _selectedFacility = value;
+                  _pageIndex = 0;
+                });
+              }
+            },
+          ),
+          const SizedBox(height: 12),
           LayoutBuilder(
             builder: (context, constraints) {
               final isMobile = constraints.maxWidth < 900;
               final categoryDropdown = DropdownButtonFormField<String>(
-                value: _selectedCategory,
+                key: ValueKey('category-$_selectedCategory'),
+                initialValue: _selectedCategory,
                 isExpanded: true,
                 decoration: InputDecoration(
                   labelText: 'Category',
@@ -567,12 +658,17 @@ class _AdminBookingsTabState extends State<AdminBookingsTab> {
                         )
                         .toList(),
                 onChanged: (val) {
-                  if (val != null) setState(() => _selectedCategory = val);
+                  if (val != null)
+                    setState(() {
+                      _selectedCategory = val;
+                      _pageIndex = 0;
+                    });
                 },
               );
 
               final statusDropdown = DropdownButtonFormField<String>(
-                value: _selectedStatus,
+                key: ValueKey('status-$_selectedStatus'),
+                initialValue: _selectedStatus,
                 isExpanded: true,
                 decoration: InputDecoration(
                   labelText: 'Status',
@@ -598,7 +694,11 @@ class _AdminBookingsTabState extends State<AdminBookingsTab> {
                         )
                         .toList(),
                 onChanged: (val) {
-                  if (val != null) setState(() => _selectedStatus = val);
+                  if (val != null)
+                    setState(() {
+                      _selectedStatus = val;
+                      _pageIndex = 0;
+                    });
                 },
               );
 
@@ -614,7 +714,7 @@ class _AdminBookingsTabState extends State<AdminBookingsTab> {
                           borderRadius: BorderRadius.circular(10),
                         ),
                       ),
-                      onChanged: (_) => setState(() {}),
+                      onChanged: (_) => setState(() => _pageIndex = 0),
                     ),
                     const SizedBox(height: 12),
                     Row(
@@ -653,7 +753,7 @@ class _AdminBookingsTabState extends State<AdminBookingsTab> {
                             borderRadius: BorderRadius.circular(10),
                           ),
                         ),
-                        onChanged: (_) => setState(() {}),
+                        onChanged: (_) => setState(() => _pageIndex = 0),
                       ),
                     ),
                     const SizedBox(width: 12),
@@ -692,6 +792,16 @@ class _AdminBookingsTabState extends State<AdminBookingsTab> {
                 child: CircularProgressIndicator(color: _green),
               ),
             )
+          else if (_loadError != null)
+            Column(
+              children: [
+                Text(_loadError!, textAlign: TextAlign.center),
+                TextButton(
+                  onPressed: _fetchBookings,
+                  child: const Text('Retry reservations'),
+                ),
+              ],
+            )
           else if (bookings.isEmpty)
             Container(
               width: double.infinity,
@@ -717,9 +827,34 @@ class _AdminBookingsTabState extends State<AdminBookingsTab> {
             LayoutBuilder(
               builder: (context, constraints) {
                 return constraints.maxWidth < 800
-                    ? _buildMobileCardList(bookings)
-                    : _buildDesktopTable(bookings);
+                    ? _buildMobileCardList(visibleBookings)
+                    : _buildDesktopTable(visibleBookings);
               },
+            ),
+          if (!_isLoading && _loadError == null && bookings.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 16),
+              child: Wrap(
+                spacing: 16,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  Text(
+                    'Page ${page + 1} of $pages · ${bookings.length} reservation(s)',
+                  ),
+                  TextButton(
+                    onPressed: page > 0
+                        ? () => setState(() => _pageIndex = page - 1)
+                        : null,
+                    child: const Text('Previous page'),
+                  ),
+                  TextButton(
+                    onPressed: page + 1 < pages
+                        ? () => setState(() => _pageIndex = page + 1)
+                        : null,
+                    child: const Text('Next page'),
+                  ),
+                ],
+              ),
             ),
         ],
       ),

@@ -1,6 +1,10 @@
 name: Flutter checks
 
 on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -50,3 +54,4 @@ jobs:
           path: krp_play/ci-results/
           if-no-files-found: warn
           retention-days: 30
+
