@@ -60,7 +60,6 @@ abstract class _ProfileSectionsState extends State<ProfileScreen> {
   ];
 
   List<Booking> get _bookings;
-  bool get _isLoadingBookings;
 
   @override
   void initState() {
@@ -87,12 +86,15 @@ abstract class _ProfileSectionsState extends State<ProfileScreen> {
             }
 
             String uiCategory = 'Other';
-            if (row['category'] == 'booking_issue') uiCategory = 'Booking Issue';
-            if (row['category'] == 'payment_issue') uiCategory = 'Payment Issue';
+            if (row['category'] == 'booking_issue')
+              uiCategory = 'Booking Issue';
+            if (row['category'] == 'payment_issue')
+              uiCategory = 'Payment Issue';
             if (row['category'] == 'facility_problem') {
               uiCategory = 'Facility Problem';
             }
-            if (row['category'] == 'account_issue') uiCategory = 'Account Issue';
+            if (row['category'] == 'account_issue')
+              uiCategory = 'Account Issue';
 
             final createdAt = row['created_at'] != null
                 ? DateTime.parse(row['created_at'].toString()).toLocal()
@@ -101,23 +103,26 @@ abstract class _ProfileSectionsState extends State<ProfileScreen> {
             final desc = (row['description'] ?? '').toString();
             final subj = (row['subject'] ?? '').toString().trim();
 
-            _reports.add(_LocalReport(
-              id: row['report_reference'] ??
-                  row['id'].toString().substring(0, 8),
-              category: uiCategory,
-              title: subj.isNotEmpty ? subj : 'Facility report',
-              facility: facilityName,
-              dateTime: '${_shortDate(createdAt)} · ${_clockTime(createdAt)}',
-              description: desc,
-              photos: prototypePhotoCache[desc] ?? const [],
-              status: row['status'] == 'submitted'
-                  ? 'Submitted'
-                  : row['status'] == 'under_review'
-                      ? 'Under Review'
-                      : row['status'] == 'resolved'
-                          ? 'Resolved'
-                          : 'Rejected',
-            ));
+            _reports.add(
+              _LocalReport(
+                id:
+                    row['report_reference'] ??
+                    row['id'].toString().substring(0, 8),
+                category: uiCategory,
+                title: subj.isNotEmpty ? subj : 'Facility report',
+                facility: facilityName,
+                dateTime: '${_shortDate(createdAt)} · ${_clockTime(createdAt)}',
+                description: desc,
+                photos: prototypePhotoCache[desc] ?? const [],
+                status: row['status'] == 'submitted'
+                    ? 'Submitted'
+                    : row['status'] == 'under_review'
+                    ? 'Under Review'
+                    : row['status'] == 'resolved'
+                    ? 'Resolved'
+                    : 'Rejected',
+              ),
+            );
           }
           _isLoadingReports = false;
         });
@@ -136,17 +141,23 @@ abstract class _ProfileSectionsState extends State<ProfileScreen> {
 
   Widget _refundRequests() {
     final supabase = Supabase.instance.client;
-    final bookingIds = _bookings
-        .map((b) => b.id.toString().trim())
-        .where((id) => id.isNotEmpty)
-        .toList();
-    final bookingsById = {
-      for (final b in _bookings) b.id.toString().trim(): b,
-    };
+    final owner = supabase.auth.currentUser?.id;
+    if (owner == null) {
+      return const Text('Sign in to view your refunds.');
+    }
+    final bookingsById = {for (final b in _bookings) b.id.toString().trim(): b};
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        Align(
+          alignment: Alignment.centerRight,
+          child: IconButton(
+            tooltip: 'Refresh refund status',
+            icon: const Icon(Icons.refresh),
+            onPressed: () => setState(() {}),
+          ),
+        ),
         _card(
           color: const Color(0xFFEFF4EF),
           child: const Text(
@@ -155,84 +166,96 @@ abstract class _ProfileSectionsState extends State<ProfileScreen> {
           ),
         ),
         const SizedBox(height: 12),
-        if (_isLoadingBookings)
-          const Padding(
-            padding: EdgeInsets.all(32),
-            child: Center(child: CircularProgressIndicator(color: _green)),
-          )
-        else if (bookingIds.isEmpty)
-          _empty(
-            Icons.receipt_long_outlined,
-            'No refund records',
-            'Refunds for affected bookings will appear here.',
-          )
-        else
-          FutureBuilder<List<dynamic>>(
-            future: supabase
-                .from('refunds')
-                .select()
-                .inFilter('booking_id', bookingIds)
-                .order('created_at', ascending: false),
-            builder: (context, snapshot) {
-              if (snapshot.connectionState == ConnectionState.waiting) {
-                return const Padding(
-                  padding: EdgeInsets.all(32),
-                  child: Center(child: CircularProgressIndicator(color: _green)),
-                );
-              }
-              if (snapshot.hasError) {
-                return _empty(
-                  Icons.error_outline,
-                  'Could not load refunds',
-                  snapshot.error.toString(),
-                );
-              }
-              final rows = snapshot.data ?? const [];
-              if (rows.isEmpty) {
-                return _empty(
-                  Icons.receipt_long_outlined,
-                  'No refund records',
-                  'Refunds for affected bookings will appear here.',
-                );
-              }
-
-              return Column(
-                children: rows.map((raw) {
-                  final r = Map<String, dynamic>.from(raw as Map);
-                  final bid = (r['booking_id'] ?? '').toString().trim();
-                  final linkedBooking = bookingsById[bid];
-                  final refCode = (r['refund_reference'] ?? '').toString().trim();
-                  final displayId = refCode.isNotEmpty
-                      ? refCode
-                      : (linkedBooking?.reference ?? (bid.isNotEmpty ? bid : 'Refund'));
-                  final facility = linkedBooking?.facilityName ?? 'Sports Facility';
-                  final reason = (r['reason'] ?? 'Facility closure or disruption').toString();
-                  final method = (r['refund_method'] ?? 'Bank Transfer').toString();
-                  final channel = (r['refund_channel'] ?? '').toString().trim();
-                  final displayMethod = channel.isNotEmpty ? '$method · $channel' : method;
-                  final rawStatus = (r['status'] ?? 'awaiting_action').toString().trim().toLowerCase();
-                  final badgeLabel = switch (rawStatus) {
-                    'refunded' => 'REFUNDED',
-                    'failed' => 'FAILED',
-                    'processing' => 'PROCESSING',
-                    _ => 'AWAITING ACTION',
-                  };
-                  final amountVal = r['amount'] is num
-                      ? (r['amount'] as num).toDouble()
-                      : (double.tryParse(r['amount']?.toString() ?? '') ?? 0);
-
-                  return _refundCard(
-                    displayId,
-                    facility,
-                    reason,
-                    displayMethod,
-                    'RM ${amountVal.toStringAsFixed(2)}',
-                    badgeLabel,
-                  );
-                }).toList(),
+        FutureBuilder<List<dynamic>>(
+          future: supabase
+              .from('refunds')
+              .select(
+                '*, bookings!inner(user_id, booking_reference, facility_name), '
+                'booking_items(time_slots(slot_date,start_time,end_time,facilities(name)))',
+              )
+              .eq('bookings.user_id', owner)
+              .order('created_at', ascending: false),
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting &&
+                !snapshot.hasData) {
+              return const Padding(
+                padding: EdgeInsets.all(32),
+                child: Center(child: CircularProgressIndicator(color: _green)),
               );
-            },
-          ),
+            }
+            if (snapshot.hasError) {
+              return _empty(
+                Icons.error_outline,
+                'Could not load refunds',
+                snapshot.error.toString(),
+              );
+            }
+            final rows = snapshot.data ?? const [];
+            if (rows.isEmpty) {
+              return _empty(
+                Icons.receipt_long_outlined,
+                'No refund records',
+                'Refunds for affected bookings will appear here.',
+              );
+            }
+
+            return Column(
+              children: rows.map((raw) {
+                final r = Map<String, dynamic>.from(raw as Map);
+                final bid = (r['booking_id'] ?? '').toString().trim();
+                final linkedBooking = bookingsById[bid];
+                final refCode = (r['refund_reference'] ?? '').toString().trim();
+                final displayId = refCode.isNotEmpty
+                    ? refCode
+                    : (linkedBooking?.reference ??
+                          (bid.isNotEmpty ? bid : 'Refund'));
+                final item = r['booking_items'] as Map?;
+                final slot = item?['time_slots'] as Map?;
+                final order = r['bookings'] as Map?;
+                final facilityName =
+                    (slot?['facilities'] as Map?)?['name']?.toString() ??
+                    order?['facility_name']?.toString() ??
+                    linkedBooking?.facilityName ??
+                    'Sports Facility';
+                final facility = [
+                  facilityName,
+                  if (slot != null)
+                    '${slot['slot_date']} · ${slot['start_time']} - ${slot['end_time']}',
+                ].join('\n');
+                final reason = (r['reason'] ?? 'Facility closure or disruption')
+                    .toString();
+                final method = (r['refund_method'] ?? 'Bank Transfer')
+                    .toString();
+                final channel = (r['refund_channel'] ?? '').toString().trim();
+                final displayMethod = channel.isNotEmpty
+                    ? '$method · $channel'
+                    : method;
+                final rawStatus = (r['status'] ?? 'awaiting_action')
+                    .toString()
+                    .trim()
+                    .toLowerCase();
+                final badgeLabel = switch (rawStatus) {
+                  'refunded' => 'REFUNDED',
+                  'failed' => 'FAILED',
+                  'processing' => 'PROCESSING',
+                  _ => 'AWAITING ACTION',
+                };
+                final amountVal = r['amount'] is num
+                    ? (r['amount'] as num).toDouble()
+                    : (double.tryParse(r['amount']?.toString() ?? '') ?? 0);
+
+                return _refundCard(
+                  displayId,
+                  facility,
+                  reason,
+                  displayMethod,
+                  'RM ${amountVal.toStringAsFixed(2)}',
+                  badgeLabel,
+                );
+              }).toList(),
+            );
+          },
+        ),
       ],
     );
   }
@@ -248,13 +271,13 @@ abstract class _ProfileSectionsState extends State<ProfileScreen> {
     final color = status == 'REFUNDED'
         ? _green
         : status == 'FAILED'
-            ? const Color(0xFFB3261E)
-            : const Color(0xFFB36B00);
+        ? const Color(0xFFB3261E)
+        : const Color(0xFFB36B00);
     final background = status == 'REFUNDED'
         ? _pale
         : status == 'FAILED'
-            ? const Color(0xFFFCE8E6)
-            : const Color(0xFFFFF0D8);
+        ? const Color(0xFFFCE8E6)
+        : const Color(0xFFFFF0D8);
     return _card(
       margin: const EdgeInsets.only(bottom: 12),
       child: Column(
@@ -289,84 +312,85 @@ abstract class _ProfileSectionsState extends State<ProfileScreen> {
   }
 
   Widget _myReports() => Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          _card(
-            color: const Color(0xFFEFF4EF),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      _card(
+        color: const Color(0xFFEFF4EF),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'How can we help?',
+              style: TextStyle(fontSize: 19, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 12),
+            Row(
               children: [
-                const Text(
-                  'How can we help?',
-                  style: TextStyle(fontSize: 19, fontWeight: FontWeight.bold),
+                Expanded(
+                  child: _contactBox(
+                    Icons.support_agent,
+                    'Admin contact',
+                    'krp@university.edu',
+                  ),
                 ),
-                const SizedBox(height: 12),
-                Row(
-                  children: [
-                    Expanded(
-                      child: _contactBox(
-                        Icons.support_agent,
-                        'Admin contact',
-                        'krp@university.edu',
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: _contactBox(
-                        Icons.location_on_outlined,
-                        'Visit us',
-                        'KRP Sports Centre',
-                      ),
-                    ),
-                  ],
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _contactBox(
+                    Icons.location_on_outlined,
+                    'Visit us',
+                    'KRP Sports Centre',
+                  ),
                 ),
               ],
             ),
+          ],
+        ),
+      ),
+      const SizedBox(height: 12),
+      const Text(
+        'Reports and photo attachments sync to the live database so admins can review details and photos.',
+        style: TextStyle(fontSize: 12, color: Colors.black54),
+      ),
+      const SizedBox(height: 12),
+      if (!_showReport)
+        FilledButton.icon(
+          onPressed: () => setState(() => _showReport = true),
+          icon: const Icon(Icons.add),
+          label: const Text('Create Report'),
+          style: FilledButton.styleFrom(
+            backgroundColor: _green,
+            minimumSize: const Size.fromHeight(48),
           ),
-          const SizedBox(height: 12),
-          const Text(
-            'Reports and photo attachments sync to the live database so admins can review details and photos.',
-            style: TextStyle(fontSize: 12, color: Colors.black54),
-          ),
-          const SizedBox(height: 12),
-          if (!_showReport)
-            FilledButton.icon(
-              onPressed: () => setState(() => _showReport = true),
-              icon: const Icon(Icons.add),
-              label: const Text('Create Report'),
-              style: FilledButton.styleFrom(
-                backgroundColor: _green,
-                minimumSize: const Size.fromHeight(48),
-              ),
-            )
-          else
-            _reportForm(),
-          const SizedBox(height: 18),
-          const Text(
-            'Submitted reports',
-            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
-          ),
-          const SizedBox(height: 10),
-          if (_isLoadingReports)
-            const Padding(
-              padding: EdgeInsets.all(40),
-              child: Center(child: CircularProgressIndicator(color: _green)),
-            )
-          else if (_reports.isEmpty)
-            _empty(
-              Icons.description_outlined,
-              'No reports submitted',
-              'Reports you submit will be listed here.',
-            )
-          else
-            ..._reports.map(_reportCard),
-        ],
-      );
+        )
+      else
+        _reportForm(),
+      const SizedBox(height: 18),
+      const Text(
+        'Submitted reports',
+        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+      ),
+      const SizedBox(height: 10),
+      if (_isLoadingReports)
+        const Padding(
+          padding: EdgeInsets.all(40),
+          child: Center(child: CircularProgressIndicator(color: _green)),
+        )
+      else if (_reports.isEmpty)
+        _empty(
+          Icons.description_outlined,
+          'No reports submitted',
+          'Reports you submit will be listed here.',
+        )
+      else
+        ..._reports.map(_reportCard),
+    ],
+  );
 
   Widget _reportForm() {
     final bookings = _bookings;
-    final bookingValue =
-        bookings.any((item) => item.id == _bookingId) ? _bookingId : null;
+    final bookingValue = bookings.any((item) => item.id == _bookingId)
+        ? _bookingId
+        : null;
     return _card(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -475,7 +499,9 @@ abstract class _ProfileSectionsState extends State<ProfileScreen> {
           ),
           const SizedBox(height: 16),
           FilledButton(
-            onPressed: _pickingPhoto || _isSubmittingReport ? null : _submitReport,
+            onPressed: _pickingPhoto || _isSubmittingReport
+                ? null
+                : _submitReport,
             style: FilledButton.styleFrom(
               backgroundColor: _green,
               minimumSize: const Size.fromHeight(48),
@@ -527,11 +553,13 @@ abstract class _ProfileSectionsState extends State<ProfileScreen> {
         return;
       }
 
-      final jpeg = bytes.length >= 3 &&
+      final jpeg =
+          bytes.length >= 3 &&
           bytes[0] == 0xFF &&
           bytes[1] == 0xD8 &&
           bytes[2] == 0xFF;
-      final png = bytes.length >= 8 &&
+      final png =
+          bytes.length >= 8 &&
           listEquals(bytes.sublist(0, 8), [
             0x89,
             0x50,
@@ -715,7 +743,8 @@ abstract class _ProfileSectionsState extends State<ProfileScreen> {
   }
 
   Widget _reportCard(_LocalReport report) {
-    final cachedPhotos = prototypePhotoCache[report.description] ?? report.photos;
+    final cachedPhotos =
+        prototypePhotoCache[report.description] ?? report.photos;
     final hasPhoto = cachedPhotos.isNotEmpty || report.samplePhotoAsset != null;
 
     return Card(
@@ -791,17 +820,19 @@ abstract class _ProfileSectionsState extends State<ProfileScreen> {
             ),
             if (hasPhoto) ...[
               const SizedBox(height: 12),
-              _reportThumbnails(_LocalReport(
-                id: report.id,
-                category: report.category,
-                title: report.title,
-                facility: report.facility,
-                dateTime: report.dateTime,
-                description: report.description,
-                photos: cachedPhotos,
-                samplePhotoAsset: report.samplePhotoAsset,
-                status: report.status,
-              )),
+              _reportThumbnails(
+                _LocalReport(
+                  id: report.id,
+                  category: report.category,
+                  title: report.title,
+                  facility: report.facility,
+                  dateTime: report.dateTime,
+                  description: report.description,
+                  photos: cachedPhotos,
+                  samplePhotoAsset: report.samplePhotoAsset,
+                  status: report.status,
+                ),
+              ),
             ],
             const SizedBox(height: 12),
             Text(
@@ -884,134 +915,129 @@ abstract class _ProfileSectionsState extends State<ProfileScreen> {
       );
 
   Widget _contactBox(IconData icon, String title, String value) => Container(
-        padding: const EdgeInsets.all(10),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(10),
+    padding: const EdgeInsets.all(10),
+    decoration: BoxDecoration(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(10),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(icon, size: 20, color: _green),
+        const SizedBox(height: 5),
+        Text(
+          title,
+          style: const TextStyle(fontSize: 11, color: Colors.black54),
         ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Icon(icon, size: 20, color: _green),
-            const SizedBox(height: 5),
-            Text(
-              title,
-              style: const TextStyle(fontSize: 11, color: Colors.black54),
-            ),
-            Text(
-              value,
-              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
-              overflow: TextOverflow.ellipsis,
-            ),
-          ],
+        Text(
+          value,
+          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+          overflow: TextOverflow.ellipsis,
         ),
-      );
+      ],
+    ),
+  );
 
   Widget _info(IconData icon, String title, String value) => Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 14),
-            child: Row(
-              children: [
-                Icon(icon, color: const Color(0xFFC5F84B)),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        title,
-                        style: const TextStyle(
-                          color: Colors.white70,
-                          fontSize: 12,
-                        ),
-                      ),
-                      const SizedBox(height: 3),
-                      Text(
-                        value,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
+    children: [
+      Padding(
+        padding: const EdgeInsets.symmetric(vertical: 14),
+        child: Row(
+          children: [
+            Icon(icon, color: const Color(0xFFC5F84B)),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: const TextStyle(color: Colors.white70, fontSize: 12),
                   ),
-                ),
-              ],
+                  const SizedBox(height: 3),
+                  Text(
+                    value,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
-          const Divider(height: 1, color: Color(0xFF45635A)),
-        ],
-      );
+          ],
+        ),
+      ),
+      const Divider(height: 1, color: Color(0xFF45635A)),
+    ],
+  );
 
   Widget _labelValue(String label, String value) => Padding(
-        padding: const EdgeInsets.only(bottom: 6),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            SizedBox(
-              width: 112,
-              child: Text(
-                label,
-                style: const TextStyle(color: Colors.black54, fontSize: 12),
-              ),
-            ),
-            Expanded(
-              child: Text(
-                value,
-                style:
-                    const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
-              ),
-            ),
-          ],
-        ),
-      );
-
-  Widget _badge(String text, Color background, Color foreground) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
-        decoration: BoxDecoration(
-          color: background,
-          borderRadius: BorderRadius.circular(20),
-        ),
-        child: Text(
-          text,
-          style: TextStyle(
-            color: foreground,
-            fontSize: 10,
-            fontWeight: FontWeight.bold,
+    padding: const EdgeInsets.only(bottom: 6),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: 112,
+          child: Text(
+            label,
+            style: const TextStyle(color: Colors.black54, fontSize: 12),
           ),
         ),
-      );
+        Expanded(
+          child: Text(
+            value,
+            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+          ),
+        ),
+      ],
+    ),
+  );
+
+  Widget _badge(String text, Color background, Color foreground) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+    decoration: BoxDecoration(
+      color: background,
+      borderRadius: BorderRadius.circular(20),
+    ),
+    child: Text(
+      text,
+      style: TextStyle(
+        color: foreground,
+        fontSize: 10,
+        fontWeight: FontWeight.bold,
+      ),
+    ),
+  );
 
   Widget _empty(IconData icon, String title, String subtitle) => _card(
-        child: Column(
-          children: [
-            Icon(icon, color: _green, size: 30),
-            const SizedBox(height: 8),
-            Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
-            const SizedBox(height: 4),
-            Text(
-              subtitle,
-              style: const TextStyle(color: Colors.black54),
-              textAlign: TextAlign.center,
-            ),
-          ],
+    child: Column(
+      children: [
+        Icon(icon, color: _green, size: 30),
+        const SizedBox(height: 8),
+        Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
+        const SizedBox(height: 4),
+        Text(
+          subtitle,
+          style: const TextStyle(color: Colors.black54),
+          textAlign: TextAlign.center,
         ),
-      );
+      ],
+    ),
+  );
 
   Widget _card({
     required Widget child,
     Color color = Colors.white,
     EdgeInsets margin = EdgeInsets.zero,
-  }) =>
-      Card(
-        color: color,
-        margin: margin,
-        elevation: 2,
-        shadowColor: const Color(0x221A332C),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-        child: Padding(padding: const EdgeInsets.all(16), child: child),
-      );
+  }) => Card(
+    color: color,
+    margin: margin,
+    elevation: 2,
+    shadowColor: const Color(0x221A332C),
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+    child: Padding(padding: const EdgeInsets.all(16), child: child),
+  );
 
   void _message(String text) =>
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
@@ -1046,19 +1072,19 @@ abstract class _ProfileSectionsState extends State<ProfileScreen> {
   }
 
   String _month(int month) => const [
-        'JAN',
-        'FEB',
-        'MAR',
-        'APR',
-        'MAY',
-        'JUN',
-        'JUL',
-        'AUG',
-        'SEP',
-        'OCT',
-        'NOV',
-        'DEC',
-      ][month - 1];
+    'JAN',
+    'FEB',
+    'MAR',
+    'APR',
+    'MAY',
+    'JUN',
+    'JUL',
+    'AUG',
+    'SEP',
+    'OCT',
+    'NOV',
+    'DEC',
+  ][month - 1];
 
   String _shortDate(DateTime date) =>
       '${date.day} ${_month(date.month)} ${date.year}';

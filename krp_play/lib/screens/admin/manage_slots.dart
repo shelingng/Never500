@@ -3,15 +3,23 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'reservations.dart';
+
 enum _SlotStatus { open, reserved, closed }
 
 class _DemoBooking {
+  final String bookingId;
   final String id;
   final int amount;
   final bool paid;
   bool cancelled = false;
 
-  _DemoBooking({required this.id, required this.amount, required this.paid});
+  _DemoBooking({
+    required this.id,
+    required this.amount,
+    required this.paid,
+    this.bookingId = '',
+  });
 }
 
 class _Slot {
@@ -255,7 +263,9 @@ class _AdminSlotsTabState extends State<AdminSlotsTab> {
     }
 
     final rawPayload = b['checkout_payload'];
-    if (rawPayload is List) {
+    if (rawPayload is List && rawPayload.isNotEmpty) {
+      // Payload sessions replace legacy top-level booking fields.
+      found.clear();
       for (final item in rawPayload) {
         if (item is Map) {
           final f = (item['facility_name'] ?? topFacility).toString().trim();
@@ -291,7 +301,9 @@ class _AdminSlotsTabState extends State<AdminSlotsTab> {
     }
 
     final bookingItems = b['booking_items'];
-    if (bookingItems is List) {
+    if (bookingItems is List && bookingItems.isNotEmpty) {
+      // Linked items are authoritative for multi-session orders.
+      found.clear();
       for (final rawItem in bookingItems) {
         if (rawItem is Map) {
           final itemStatus = (rawItem['status'] ?? status).toString();
@@ -322,7 +334,7 @@ class _AdminSlotsTabState extends State<AdminSlotsTab> {
                     ? (isClosed ? status : itemStatus)
                     : itemStatus,
                 'amount': itemCents,
-                'paid': true,
+                'paid': isPaid,
               });
             }
           }
@@ -330,83 +342,25 @@ class _AdminSlotsTabState extends State<AdminSlotsTab> {
       }
     }
 
-    return found;
+    // Do not repeat the same booking within this facility/date/hour.
+    final unique = <String, Map>{};
+    for (final raw in found) {
+      final row = Map.from(raw as Map);
+      final time = (row['time'] ?? '').toString();
+      final hour = _parseHour(time);
+      final key = '${row['id']}|${hour ?? time}';
+      unique[key] = row;
+    }
+    return unique.values.toList();
   }
 
-  Future<void> _syncTimeSlotsAvailability(
-    String dateStr,
-    int hour, {
-    required bool available,
-  }) async {
-    final rows = await supabase
-        .from('time_slots')
-        .select('id, start_time, facilities(name)')
-        .eq('slot_date', dateStr);
-
-    var updatedCount = 0;
-    for (final r in (rows as List)) {
-      final row = r as Map;
-      final facName = ((row['facilities'] as Map?)?['name'] ?? '')
-          .toString()
-          .trim();
-      final startTime = (row['start_time'] ?? '').toString().trim();
-      if (_sameFacility(facName, _facility) && _matchesHour(startTime, hour)) {
-        await supabase
-            .from('time_slots')
-            .update({'is_available': available})
-            .eq('id', row['id']);
-        updatedCount++;
-      }
-    }
-
-    if (updatedCount == 0) {
-      final facilitiesRows = await supabase.from('facilities').select('id, name');
-      String? facilityId;
-      for (final f in (facilitiesRows as List)) {
-        final fMap = f as Map;
-        if (_sameFacility((fMap['name'] ?? '').toString(), _facility)) {
-          facilityId = fMap['id']?.toString();
-          break;
-        }
-      }
-      if (facilityId != null) {
-        final startStr = '${hour.toString().padLeft(2, '0')}:00:00';
-        final endHour = (hour + 1) % 24;
-        final endStr = '${endHour.toString().padLeft(2, '0')}:00:00';
-        await supabase.from('time_slots').insert({
-          'facility_id': facilityId,
-          'slot_date': dateStr,
-          'start_time': startStr,
-          'end_time': endStr,
-          'is_available': available,
-        });
-      }
-    }
-  }
-
-  Future<String?> _resolvePaymentId(Map bookingRecord, String bookingId) async {
-    final directId = bookingRecord['payment_id']?.toString().trim();
-    if (directId != null && directId.isNotEmpty) {
-      return directId;
-    }
-
-    try {
-      final paymentRow = await supabase
-          .from('payments')
-          .select('id')
-          .eq('booking_id', bookingId)
-          .limit(1)
-          .maybeSingle();
-      final fetchedId = paymentRow?['id']?.toString().trim();
-      if (fetchedId != null && fetchedId.isNotEmpty) {
-        return fetchedId;
-      }
-    } catch (_) {}
-
-    return null;
-  }
+  int _slotLoadVersion = 0;
+  bool _slotFetchInFlight = false;
 
   Future<void> _fetchLiveSlots({bool showLoader = true}) async {
+    if (!showLoader && _slotFetchInFlight) return;
+    _slotFetchInFlight = true;
+    final loadVersion = ++_slotLoadVersion;
     if (showLoader && mounted) {
       setState(() {
         _isLoading = true;
@@ -426,23 +380,36 @@ class _AdminSlotsTabState extends State<AdminSlotsTab> {
             .select(
               '*, booking_items(price, status, time_slots(slot_date, start_time, facilities(name)))',
             );
+        if (!mounted || loadVersion != _slotLoadVersion) return;
         for (final r in (joinedRows as List)) {
           occupiedRecords.addAll(
             _extractItemsFromBookingMap(Map.from(r as Map), dateStr),
           );
         }
       } catch (e) {
-        errMsg = e.toString();
-        try {
-          final plainRows = await supabase.from('bookings').select();
-          for (final r in (plainRows as List)) {
-            occupiedRecords.addAll(
-              _extractItemsFromBookingMap(Map.from(r as Map), dateStr),
-            );
-          }
-          errMsg = null;
-        } catch (e2) {
-          errMsg = e2.toString();
+        rethrow;
+      }
+
+      final lockedRows = await supabase
+          .from('time_slots')
+          .select('start_time, locked_reason, facilities(name)')
+          .eq('slot_date', dateStr)
+          .eq('is_available', false);
+      if (!mounted || loadVersion != _slotLoadVersion) return;
+      for (final raw in lockedRows) {
+        final row = Map<String, dynamic>.from(raw);
+        if (_sameFacility(
+          (row['facilities'] as Map?)?['name']?.toString() ?? '',
+          _facility,
+        )) {
+          occupiedRecords.add({
+            'id': 'closure',
+            'time': row['start_time'],
+            'status':
+                'Closed (${row['locked_reason'] ?? 'Management closure'})',
+            'amount': 0,
+            'paid': false,
+          });
         }
       }
 
@@ -505,7 +472,9 @@ class _AdminSlotsTabState extends State<AdminSlotsTab> {
             );
           } else {
             final activeOnly = hourMatches
-                .where((m) => !_isInactiveStatus((m['status'] ?? '').toString()))
+                .where(
+                  (m) => !_isInactiveStatus((m['status'] ?? '').toString()),
+                )
                 .toList();
 
             if (activeOnly.isEmpty) {
@@ -529,6 +498,7 @@ class _AdminSlotsTabState extends State<AdminSlotsTab> {
                     : rawId.toUpperCase();
                 return _DemoBooking(
                   id: safeId,
+                  bookingId: rawId,
                   amount: (m['amount'] as int?) ?? 0,
                   paid: (m['paid'] as bool?) ?? true,
                 );
@@ -552,20 +522,32 @@ class _AdminSlotsTabState extends State<AdminSlotsTab> {
         }
       }
 
-      if (mounted) {
+      if (mounted && loadVersion == _slotLoadVersion) {
         setState(() {
           _lastQueryError = errMsg;
+          final selectedStarts = _selected.map((slot) => slot.start).toSet();
           _liveSlots = fetchedSlots;
-          _selected.clear();
+          _selected
+            ..clear()
+            ..addAll(
+              fetchedSlots.where(
+                (slot) =>
+                    selectedStarts.contains(slot.start) &&
+                    !slot.hasEnded &&
+                    slot.status != _SlotStatus.closed,
+              ),
+            );
         });
       }
     } catch (e) {
       debugPrint('Error fetching slots: $e');
-      if (mounted) {
+      if (mounted && loadVersion == _slotLoadVersion) {
         setState(() => _lastQueryError = e.toString());
       }
     } finally {
-      if (showLoader && mounted) setState(() => _isLoading = false);
+      if (loadVersion == _slotLoadVersion) _slotFetchInFlight = false;
+      if (mounted && loadVersion == _slotLoadVersion)
+        setState(() => _isLoading = false);
     }
   }
 
@@ -626,7 +608,7 @@ class _AdminSlotsTabState extends State<AdminSlotsTab> {
               ),
               const SizedBox(height: 16),
               const Text(
-                'Booked sessions closed by management will stay in Reservations history and create a refund record in Refund Management.',
+                'Only the selected sessions are cancelled. Refund requests use each affected session price; other sessions remain booked.',
                 style: TextStyle(color: Colors.red, fontSize: 12),
               ),
             ],
@@ -648,142 +630,45 @@ class _AdminSlotsTabState extends State<AdminSlotsTab> {
     if (!mounted || confirmed != true) return;
     setState(() => _isLoading = true);
 
-    int createdRefundCount = 0;
-
     try {
-      final dateStr =
-          '${_selectedDate.year}-${_selectedDate.month.toString().padLeft(2, '0')}-${_selectedDate.day.toString().padLeft(2, '0')}';
-
-      final allRows = await supabase.from('bookings').select();
-      final records = (allRows as List)
-          .map((r) => Map.from(r as Map))
-          .where((b) => _extractItemsFromBookingMap(b, dateStr).isNotEmpty)
-          .toList();
-
-      for (final slot in targets) {
-        final hour12 = slot.start.hour > 12
-            ? slot.start.hour - 12
-            : (slot.start.hour == 0 ? 12 : slot.start.hour);
-        final ampm = slot.start.hour >= 12 ? 'PM' : 'AM';
-        final slotTime = '$hour12:00 $ampm';
-
-        final matchingRecords = records.where((record) {
-          final stat = (record['status']?.toString() ?? '').toLowerCase();
-          final items = _extractItemsFromBookingMap(record, dateStr);
-          return items.any(
-                (it) =>
-                    _matchesHour((it['time'] ?? '').toString(), slot.start.hour),
-              ) &&
-              !_isClosedStatus(stat) &&
-              !_isInactiveStatus(stat);
-        }).toList();
-
-        if (slot.status == _SlotStatus.reserved || matchingRecords.isNotEmpty) {
-          for (var record in matchingRecords) {
-            final bookingId = record['id']?.toString().trim();
-            if (bookingId == null || bookingId.isEmpty) continue;
-
-            double refundAmount = 0;
-            final rawAmt = record['total_amount'] ?? record['amount'];
-            if (rawAmt is num) refundAmount = rawAmt.toDouble();
-            if (rawAmt is String) refundAmount = double.tryParse(rawAmt) ?? 0;
-
-            await supabase
-                .from('bookings')
-                .update({'status': 'Closed ($reason)'})
-                .eq('id', bookingId);
-
-            try {
-              await supabase
-                  .from('booking_items')
-                  .update({'status': 'Closed ($reason)'})
-                  .eq('booking_id', bookingId);
-            } catch (_) {}
-
-            final existingRefund = await supabase
-                .from('refunds')
-                .select('id')
-                .eq('booking_id', bookingId)
-                .maybeSingle();
-
-            if (existingRefund == null) {
-              final paymentId = await _resolvePaymentId(record, bookingId);
-              final nowIso = DateTime.now().toIso8601String();
-              final adminId = supabase.auth.currentUser?.id;
-              final refCode =
-                  'RF-${DateTime.now().millisecondsSinceEpoch.toString().substring(5)}';
-
-              final insertMap = <String, dynamic>{
-                'refund_reference': refCode,
-                'booking_id': bookingId,
-                'amount': refundAmount,
-                'reason': 'Facility closed by KRP Management: $reason',
-                'refund_method': 'manual',
-                'refund_channel': 'bank_transfer',
-                'status': 'awaiting_action',
-                if (paymentId != null) 'payment_id': paymentId,
-                if (adminId != null) 'processed_by': adminId,
-                'created_at': nowIso,
-                'updated_at': nowIso,
-              };
-
-              final insertedRefund = await supabase
-                  .from('refunds')
-                  .insert(insertMap)
-                  .select('id')
-                  .single();
-
-              final refundId = insertedRefund['id']?.toString();
-              if (refundId != null) {
-                try {
-                  await supabase.from('refund_events').insert({
-                    'refund_id': refundId,
-                    'event_type': 'created_from_closure',
-                    'previous_status': null,
-                    'new_status': 'awaiting_action',
-                    'note': 'Closed $_facility ($dateStr $slotTime) — $reason',
-                    if (adminId != null) 'performed_by': adminId,
-                  });
-                } catch (_) {}
-              }
-              createdRefundCount++;
-            } else {
-              createdRefundCount++;
-            }
-          }
-        }
-
-        final uniqueRef =
-            'ADMIN-${slot.start.hour}-${DateTime.now().millisecondsSinceEpoch}';
-        await supabase.from('bookings').insert({
-          'user_id': supabase.auth.currentUser?.id,
-          'facility_name': _facility,
-          'booking_date': dateStr,
-          'start_time': slotTime,
-          'status': 'Closed ($reason)',
-          'total_amount': 0,
-          'booking_reference': uniqueRef,
-        });
-
-        await _syncTimeSlotsAvailability(dateStr, slot.start.hour, available: false);
-      }
-
-      if (createdRefundCount > 0) {
-        _message(
-          'Booked slot closed ($createdRefundCount refund record(s)) — opening Refund Management.',
-        );
-      } else {
-        _message('Sessions successfully closed in live database.');
-      }
+      final result = await _setSessionClosure(targets, true, reason);
+      final count = (result['refunds_created'] as num?)?.toInt() ?? 0;
+      _message(
+        'Closed ${targets.length} selected session(s). $count refund request(s) created. Other sessions are kept.',
+      );
+      if (mounted && count > 0) widget.onNavigateToRefunds?.call();
     } catch (e) {
-      await _showErrorDialog('Refund / Closure Error', e);
+      await _showErrorDialog('Session closure failed', e);
     }
-
     await _fetchLiveSlots();
+  }
 
-    if (mounted && createdRefundCount > 0) {
-      widget.onNavigateToRefunds?.call();
-    }
+  Future<Map<String, dynamic>> _setSessionClosure(
+    List<_Slot> slots,
+    bool closed,
+    String reason,
+  ) async {
+    final rows = await supabase.from('facilities').select('id,name');
+    final matches = rows
+        .where((r) => _sameFacility(r['name'].toString(), _facility))
+        .toList();
+    if (matches.length != 1)
+      throw StateError('Facility could not be uniquely identified.');
+    final date = slots.first.start;
+    final result = await supabase.rpc(
+      'admin_set_session_closure',
+      params: {
+        'p_facility_id': matches.single['id'],
+        'p_date':
+            '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}',
+        'p_start_times': slots
+            .map((s) => '${s.start.hour.toString().padLeft(2, '0')}:00:00')
+            .toList(),
+        'p_closed': closed,
+        'p_reason': reason,
+      },
+    );
+    return Map<String, dynamic>.from(result as Map);
   }
 
   Future<void> _reopen(_Slot slot) async {
@@ -811,42 +696,12 @@ class _AdminSlotsTabState extends State<AdminSlotsTab> {
     setState(() => _isLoading = true);
 
     try {
-      final dateStr =
-          '${_selectedDate.year}-${_selectedDate.month.toString().padLeft(2, '0')}-${_selectedDate.day.toString().padLeft(2, '0')}';
-
-      final allRows = await supabase.from('bookings').select();
-      for (final r in (allRows as List)) {
-        final record = Map.from(r as Map);
-        final stat = (record['status']?.toString() ?? '').toLowerCase();
-        if (!_isClosedStatus(stat)) continue;
-        final items = _extractItemsFromBookingMap(record, dateStr);
-        final matchesHour = items.any(
-          (it) => _matchesHour((it['time'] ?? '').toString(), slot.start.hour),
-        );
-        if (matchesHour) {
-          final refCode = (record['booking_reference'] ?? '').toString();
-          if (refCode.startsWith('ADMIN-')) {
-            await supabase.from('bookings').delete().eq('id', record['id']);
-          } else {
-            await supabase
-                .from('bookings')
-                .update({'status': 'Refunded'})
-                .eq('id', record['id']);
-            try {
-              await supabase
-                  .from('booking_items')
-                  .update({'status': 'Refunded'})
-                  .eq('booking_id', record['id']);
-            } catch (_) {}
-          }
-        }
-      }
-
-      await _syncTimeSlotsAvailability(dateStr, slot.start.hour, available: true);
-
-      _message('Session reopened in live database.');
+      await _setSessionClosure([slot], false, '');
+      _message(
+        'Session reopened. Cancelled bookings and refund requests are kept.',
+      );
     } catch (e) {
-      await _showErrorDialog('Reopen Error', e);
+      await _showErrorDialog('Reopen failed', e);
     }
 
     await _fetchLiveSlots();
@@ -883,43 +738,175 @@ class _AdminSlotsTabState extends State<AdminSlotsTab> {
   void _message(String text) =>
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
 
-  void _viewDetails(_Slot slot) {
-    showDialog<void>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Session details'),
-        content: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(_facility),
-            Text(_dateLabel(slot.start)),
-            Text(_timeRange(slot)),
-            const SizedBox(height: 12),
-            Text('Status: ${_statusLabel(slot)}'),
-            if (slot.closureReason != null)
-              Text('Closure reason: ${slot.closureReason}'),
-            const Divider(height: 24),
-            if (slot.bookings.isEmpty)
-              const Text('No bookings for this session.'),
-            ...slot.bookings.map(
-              (booking) => Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: Text(
-                  '${booking.id}\n${booking.cancelled ? 'Cancelled by management' : 'Active reservation'}\n${booking.paid ? 'Paid' : 'Unpaid'} · ${_money(booking.amount)}',
-                ),
-              ),
+  bool _loadingSessionDetails = false;
+
+  Future<void> _viewDetails(_Slot slot) async {
+    if (_loadingSessionDetails) return;
+    _loadingSessionDetails = true;
+    final owner = supabase.auth.currentUser?.id;
+    final facility = _facility;
+    final date = _dateLabel(slot.start);
+    final time = _timeRange(slot);
+    final slotStatus = _statusLabel(slot);
+    final reason = slot.closureReason;
+    final ids = slot.bookings
+        .map((booking) => booking.bookingId)
+        .where((id) => id.isNotEmpty)
+        .toSet()
+        .toList();
+
+    try {
+      if (owner == null || await supabase.rpc('is_admin') != true) {
+        throw StateError('Admin access required');
+      }
+      final List<Map<String, dynamic>> rows = [];
+      if (ids.isNotEmpty) {
+        final response = await supabase
+            .from('bookings')
+            .select(
+              'id, booking_reference, status, total_amount, is_demo, '
+              'customer_name, customer_matric_number, '
+              'profiles!booking_user_id_fkey(full_name, matric_number), '
+              'payments(status, created_at)',
+            )
+            .inFilter('id', ids);
+        rows.addAll(response.map((row) => Map<String, dynamic>.from(row)));
+      }
+      if (!mounted || supabase.auth.currentUser?.id != owner) return;
+      final byId = {for (final row in rows) row['id'].toString(): row};
+
+      String value(dynamic raw) {
+        final text = raw?.toString().trim() ?? '';
+        return text.isEmpty ? 'Not recorded' : text;
+      }
+
+      Widget line(String label, dynamic raw) => Padding(
+        padding: const EdgeInsets.only(bottom: 6),
+        child: SelectableText('$label: ${value(raw)}'),
+      );
+
+      await showDialog<void>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Session details'),
+          scrollable: true,
+          content: SizedBox(
+            width: 520,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                line('Facility', facility),
+                line('Date', date),
+                line('Time', time),
+                line('Slot status', slotStatus),
+                if (reason != null) line('Closure reason', reason),
+                if (slot.bookings.isEmpty)
+                  const Text('No bookings for this session.'),
+                for (final booking in slot.bookings)
+                  Builder(
+                    builder: (_) {
+                      final row = byId[booking.bookingId];
+                      if (row == null) {
+                        return const Padding(
+                          padding: EdgeInsets.only(top: 12),
+                          child: Text(
+                            'Booking details unavailable. Close and retry.',
+                          ),
+                        );
+                      }
+                      final profile = row['profiles'] as Map?;
+                      final payments =
+                          [
+                            for (final payment
+                                in (row['payments'] as List? ?? []))
+                              Map<String, dynamic>.from(payment as Map),
+                          ]..sort(
+                            (a, b) => (b['created_at'] ?? '')
+                                .toString()
+                                .compareTo((a['created_at'] ?? '').toString()),
+                          );
+                      final paid = payments.any(
+                        (payment) =>
+                            payment['status']?.toString().toLowerCase() ==
+                            'paid',
+                      );
+                      final paymentStatus = row['is_demo'] == true
+                          ? 'Demo payment'
+                          : paid
+                          ? 'Paid'
+                          : payments.isEmpty
+                          ? 'No payment record'
+                          : value(payments.first['status']);
+                      final reference = value(row['booking_reference']);
+
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Divider(height: 24),
+                          line('Booking reference', reference),
+                          line(
+                            'Student name',
+                            profile?['full_name'] ?? row['customer_name'],
+                          ),
+                          line(
+                            'Matric number',
+                            profile?['matric_number'] ??
+                                row['customer_matric_number'],
+                          ),
+                          line('Booking status', row['status']),
+                          line('Payment status', paymentStatus),
+                          line('This session price', _money(booking.amount)),
+                          line(
+                            'Whole order total',
+                            row['total_amount'] == null
+                                ? null
+                                : 'RM${num.parse(row['total_amount'].toString()).toStringAsFixed(2)}',
+                          ),
+                          TextButton.icon(
+                            icon: const Icon(Icons.receipt_long_outlined),
+                            label: const Text('View full booking'),
+                            onPressed: () {
+                              Navigator.pop(dialogContext);
+                              Navigator.of(context).push(
+                                MaterialPageRoute<void>(
+                                  builder: (_) => Scaffold(
+                                    appBar: AppBar(
+                                      title: const Text('Booking history'),
+                                    ),
+                                    body: AdminBookingsTab(
+                                      initialSearch:
+                                          row['booking_reference']
+                                              ?.toString() ??
+                                          booking.bookingId,
+                                    ),
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                        ],
+                      );
+                    },
+                  ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Close'),
             ),
           ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Close'),
-          ),
-        ],
-      ),
-    );
+      );
+    } catch (error) {
+      if (mounted && supabase.auth.currentUser?.id == owner) {
+        _message('Could not load booking details. Please try again.');
+      }
+    } finally {
+      _loadingSessionDetails = false;
+    }
   }
 
   Future<void> _selectDate(BuildContext context) async {
@@ -954,7 +941,10 @@ class _AdminSlotsTabState extends State<AdminSlotsTab> {
       ),
     );
     if (picked != null && picked != _selectedDate) {
-      setState(() => _selectedDate = picked);
+      setState(() {
+        _selected.clear();
+        _selectedDate = picked;
+      });
       _fetchLiveSlots();
     }
   }
@@ -1014,10 +1004,10 @@ class _AdminSlotsTabState extends State<AdminSlotsTab> {
                 past
                     ? 'Session ended'
                     : closed
-                        ? 'Reason: ${slot.closureReason}'
-                        : reserved
-                            ? 'Booked · ${slot.activeBookings.first.paid ? 'Paid' : 'Unpaid'}'
-                            : 'Available for booking',
+                    ? 'Reason: ${slot.closureReason}'
+                    : reserved
+                    ? 'Booked · ${slot.activeBookings.first.paid ? 'Paid' : 'Unpaid'}'
+                    : 'Available for booking',
                 style: const TextStyle(color: Colors.grey, fontSize: 12),
               ),
               const SizedBox(height: 12),
@@ -1034,8 +1024,8 @@ class _AdminSlotsTabState extends State<AdminSlotsTab> {
                         closed
                             ? 'Reopen'
                             : reserved
-                                ? 'Review closure'
-                                : 'Close session',
+                            ? 'Review closure'
+                            : 'Close session',
                       ),
                     ),
                   TextButton(
@@ -1141,7 +1131,10 @@ class _AdminSlotsTabState extends State<AdminSlotsTab> {
                           .toList(),
                       onChanged: (value) {
                         if (value != null) {
-                          setState(() => _facility = value);
+                          setState(() {
+                            _selected.clear();
+                            _facility = value;
+                          });
                           _fetchLiveSlots();
                         }
                       },
@@ -1160,7 +1153,7 @@ class _AdminSlotsTabState extends State<AdminSlotsTab> {
           ],
           const SizedBox(height: 16),
           const Text(
-            'Reserved sessions closed by management automatically create a refund record and navigate to Refund Management.',
+            'Closing a reserved session creates a refund request for that session only. No money is transferred automatically.',
             style: TextStyle(color: _green),
           ),
           const SizedBox(height: 16),
@@ -1209,8 +1202,8 @@ class _AdminSlotsTabState extends State<AdminSlotsTab> {
                     final columns = constraints.maxWidth >= 1000
                         ? 3
                         : constraints.maxWidth >= 650
-                            ? 2
-                            : 1;
+                        ? 2
+                        : 1;
                     final width =
                         (constraints.maxWidth - (columns - 1) * 12) / columns;
                     return Wrap(

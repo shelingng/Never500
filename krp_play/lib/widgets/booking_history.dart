@@ -61,8 +61,7 @@ class _BookingHistoryViewState extends State<BookingHistoryView> {
       if (!mounted) return;
       setState(() {
         _loading = false;
-        _error =
-            'Your bookings could not be loaded. Check your connection and try again.';
+        _error = 'Your bookings could not be loaded. Check your connection and try again.';
       });
     }
   }
@@ -274,7 +273,7 @@ class _BookingHistoryViewState extends State<BookingHistoryView> {
                   const SizedBox(width: 6),
                   Expanded(
                     child: Text(
-                      '${session.facilityName} · ${formatKlDate(session.date)} · ${session.interval}',
+                      '${session.facilityName} · ${formatKlDate(session.date)} · ${session.interval} · ${session.sessionStatusLabel}',
                       style: const TextStyle(
                         color: _green,
                         fontSize: 13,

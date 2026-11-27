@@ -1,11 +1,22 @@
+import 'admin_metric_card.dart';
+import 'refunds.dart';
+import 'user_reports.dart';
+import 'reservations.dart';
 import 'package:flutter/material.dart';
 import '../../models/student_category.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class AdminOverviewTab extends StatefulWidget {
   final VoidCallback? onViewAllBookings;
+  final VoidCallback? onViewReports;
+  final ValueChanged<String>? onViewRefunds;
 
-  const AdminOverviewTab({super.key, this.onViewAllBookings});
+  const AdminOverviewTab({
+    super.key,
+    this.onViewAllBookings,
+    this.onViewReports,
+    this.onViewRefunds,
+  });
 
   @override
   State<AdminOverviewTab> createState() => _AdminOverviewTabState();
@@ -19,6 +30,7 @@ class _AdminOverviewTabState extends State<AdminOverviewTab> {
   RealtimeChannel? _bookingSubscription;
 
   List<dynamic> _recentReservations = [];
+  List<dynamic> _dashboardBookingRows = [];
 
   Map<String, Map<String, String>> _dashboardStats = {
     'Daily': {
@@ -119,12 +131,13 @@ class _AdminOverviewTabState extends State<AdminOverviewTab> {
           firstCartItem = Map<String, dynamic>.from(rawPayload.first as Map);
         }
 
-        final String dateString = (b['booking_date'] ??
-                firstCartItem?['booking_date'] ??
-                firstCartItem?['date'] ??
-                b['created_at'] ??
-                now)
-            .toString();
+        final String dateString =
+            (b['booking_date'] ??
+                    firstCartItem?['booking_date'] ??
+                    firstCartItem?['date'] ??
+                    b['created_at'] ??
+                    now)
+                .toString();
 
         final bDateRaw = DateTime.tryParse(dateString) ?? now;
         final bDate = DateTime(bDateRaw.year, bDateRaw.month, bDateRaw.day);
@@ -160,18 +173,15 @@ class _AdminOverviewTabState extends State<AdminOverviewTab> {
 
       int dailyRep = 0, weeklyRep = 0, monthlyRep = 0;
       try {
-        final allReports =
-            await supabase.from('reports').select('status, created_at');
+        final allReports = await supabase
+            .from('reports')
+            .select('status, created_at');
         for (var r in allReports) {
           final rStatus = (r['status']?.toString() ?? '').toLowerCase();
           if (rStatus == 'submitted' || rStatus == 'under review') {
             final rDateRaw =
                 DateTime.tryParse(r['created_at']?.toString() ?? '') ?? now;
-            final rDate = DateTime(
-              rDateRaw.year,
-              rDateRaw.month,
-              rDateRaw.day,
-            );
+            final rDate = DateTime(rDateRaw.year, rDateRaw.month, rDateRaw.day);
             final diffDays = rDate.difference(today).inDays.abs();
 
             if (diffDays == 0) dailyRep++;
@@ -192,6 +202,7 @@ class _AdminOverviewTabState extends State<AdminOverviewTab> {
 
       setState(() {
         _recentReservations = recentData;
+        _dashboardBookingRows = bookingRows;
         _dashboardStats = {
           'Daily': {
             'bookings': '$dailyB',
@@ -283,7 +294,7 @@ class _AdminOverviewTabState extends State<AdminOverviewTab> {
           ),
           const SizedBox(height: 8),
           const Text(
-            'Live database overview from Supabase.',
+            'Bookings, payments and requests at a glance.',
             style: TextStyle(color: Colors.grey, fontSize: 14),
           ),
           const SizedBox(height: 32),
@@ -311,7 +322,8 @@ class _AdminOverviewTabState extends State<AdminOverviewTab> {
                               (e) => DropdownMenuItem(value: e, child: Text(e)),
                             )
                             .toList(),
-                        onChanged: (val) => setState(() => _selectedView = val!),
+                        onChanged: (val) =>
+                            setState(() => _selectedView = val!),
                       ),
                     ),
                   ),
@@ -437,7 +449,11 @@ class _AdminOverviewTabState extends State<AdminOverviewTab> {
                         fontWeight: FontWeight.bold,
                       ),
                     ),
-                    Icon(Icons.arrow_forward, color: Color(0xFF173F32), size: 16),
+                    Icon(
+                      Icons.arrow_forward,
+                      color: Color(0xFF173F32),
+                      size: 16,
+                    ),
                   ],
                 ),
               ),
@@ -454,7 +470,9 @@ class _AdminOverviewTabState extends State<AdminOverviewTab> {
             child: _recentReservations.isEmpty
                 ? const Padding(
                     padding: EdgeInsets.all(24),
-                    child: Center(child: Text('No bookings found in database.')),
+                    child: Center(
+                      child: Text('No bookings found in database.'),
+                    ),
                   )
                 : Column(
                     children: _recentReservations.asMap().entries.map((entry) {
@@ -473,8 +491,9 @@ class _AdminOverviewTabState extends State<AdminOverviewTab> {
                       if (rawPayload is List &&
                           rawPayload.isNotEmpty &&
                           rawPayload.first is Map) {
-                        firstCartItem =
-                            Map<String, dynamic>.from(rawPayload.first as Map);
+                        firstCartItem = Map<String, dynamic>.from(
+                          rawPayload.first as Map,
+                        );
                       }
 
                       final String facility =
@@ -508,7 +527,8 @@ class _AdminOverviewTabState extends State<AdminOverviewTab> {
                       return Column(
                         children: [
                           _buildReservationRow(
-                            (b['booking_reference'] ?? '#KRP-$shortId').toString(),
+                            (b['booking_reference'] ?? '#KRP-$shortId')
+                                .toString(),
                             displayName,
                             displayMatric,
                             facility,
@@ -533,57 +553,308 @@ class _AdminOverviewTabState extends State<AdminOverviewTab> {
     String title,
     String value,
     String subtitle,
-  ) {
-    return Container(
-      width: width,
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey.shade200),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: iconBgColor,
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Icon(icon, color: Colors.black54),
+  ) => AdminMetricCard(
+    width: width,
+    icon: icon,
+    iconBackground: iconBgColor,
+    title: title,
+    value: value,
+    subtitle: subtitle,
+    onTap: () => _openStat(title),
+  );
+
+  void _openStat(String title) {
+    if (title.contains('REPORT')) {
+      final action = widget.onViewReports;
+      if (action != null) {
+        action();
+        return;
+      }
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => const Scaffold(
+            appBar: null,
+            body: SafeArea(child: AdminReportsTab()),
           ),
-          const SizedBox(width: 16),
-          Expanded(
+        ),
+      );
+      return;
+    }
+    if (title.contains('REFUND')) {
+      _showFailedRefunds();
+      return;
+    }
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final limit = _selectedView == 'Daily'
+        ? 0
+        : _selectedView == 'Weekly'
+        ? 7
+        : 30;
+    final rows = _dashboardBookingRows.where((raw) {
+      final b = raw as Map;
+      final payload = b['checkout_payload'];
+      final first =
+          payload is List && payload.isNotEmpty && payload.first is Map
+          ? payload.first as Map
+          : <dynamic, dynamic>{};
+      final parsed =
+          DateTime.tryParse(
+            (b['booking_date'] ??
+                    first['booking_date'] ??
+                    first['date'] ??
+                    b['created_at'] ??
+                    now)
+                .toString(),
+          ) ??
+          now;
+      final delta = DateTime(
+        parsed.year,
+        parsed.month,
+        parsed.day,
+      ).difference(today).inDays.abs();
+      final status = (b['status'] ?? '').toString().trim().toLowerCase();
+      return delta <= limit &&
+          (!title.contains('ACTIVE') ||
+              ['confirmed', 'paid', 'booked'].contains(status));
+    }).toList();
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      backgroundColor: const Color(0xFFF7F9F7),
+      builder: (ctx) => SafeArea(
+        child: SizedBox(
+          height: MediaQuery.sizeOf(ctx).height * .72,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  title,
-                  style: const TextStyle(
-                    fontSize: 10,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.grey,
-                    letterSpacing: 1,
-                  ),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        title,
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w800,
+                          color: Color(0xFF173F32),
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'Close details',
+                      onPressed: () => Navigator.pop(ctx),
+                      icon: const Icon(Icons.close),
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 4),
                 Text(
-                  value,
-                  style: const TextStyle(
-                    fontSize: 28,
-                    fontWeight: FontWeight.bold,
-                  ),
+                  '${rows.length} reservation${rows.length == 1 ? '' : 's'} · $_selectedView view',
+                  style: const TextStyle(color: Color(0xFF65756C)),
                 ),
-                const SizedBox(height: 4),
-                Text(
-                  subtitle,
-                  style: const TextStyle(fontSize: 12, color: Colors.green),
+                const SizedBox(height: 14),
+                Expanded(
+                  child: rows.isEmpty
+                      ? const Center(child: Text('No matching reservations.'))
+                      : ListView.separated(
+                          itemCount: rows.length,
+                          separatorBuilder: (_, __) =>
+                              const SizedBox(height: 8),
+                          itemBuilder: (_, index) {
+                            final b = rows[index] as Map;
+                            final profile = b['profiles'] is Map
+                                ? b['profiles'] as Map
+                                : <dynamic, dynamic>{};
+                            return Container(
+                              padding: const EdgeInsets.all(14),
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                  color: const Color(0xFFE2E8E4),
+                                ),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    (b['booking_reference'] ?? b['id'])
+                                        .toString(),
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w700,
+                                      color: Color(0xFF173F32),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 5),
+                                  Text(
+                                    (profile['full_name'] ?? 'Student')
+                                        .toString(),
+                                  ),
+                                  Text(
+                                    '${b['facility_name'] ?? 'See booking details'} · ${b['booking_date'] ?? ''}',
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      color: Color(0xFF65756C),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Wrap(
+                                    spacing: 12,
+                                    runSpacing: 4,
+                                    children: [
+                                      Text(
+                                        'RM${(num.tryParse((b['total_amount'] ?? b['amount'] ?? 0).toString()) ?? 0).toStringAsFixed(2)}',
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                      Text(
+                                        (b['status'] ?? '').toString(),
+                                        style: const TextStyle(
+                                          color: Color(0xFF65756C),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                            );
+                          },
+                        ),
+                ),
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton(
+                    onPressed: () {
+                      Navigator.pop(ctx);
+                      if (widget.onViewAllBookings != null) {
+                        widget.onViewAllBookings!();
+                      } else {
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => const Scaffold(
+                              body: SafeArea(child: AdminBookingsTab()),
+                            ),
+                          ),
+                        );
+                      }
+                    },
+                    style: FilledButton.styleFrom(
+                      backgroundColor: const Color(0xFF173F32),
+                    ),
+                    child: const Text('Open bookings'),
+                  ),
                 ),
               ],
             ),
           ),
-        ],
+        ),
+      ),
+    );
+  }
+
+  void _showFailedRefunds() {
+    final future = supabase
+        .from('refunds')
+        .select('refund_reference,amount,status,reason')
+        .eq('status', 'failed');
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (ctx) => SafeArea(
+        child: SizedBox(
+          height: MediaQuery.sizeOf(ctx).height * .65,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Expanded(
+                      child: Text(
+                        'Failed refunds',
+                        style: TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'Close details',
+                      onPressed: () => Navigator.pop(ctx),
+                      icon: const Icon(Icons.close),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Expanded(
+                  child: FutureBuilder(
+                    future: future,
+                    builder: (context, snapshot) {
+                      if (snapshot.connectionState == ConnectionState.waiting)
+                        return const Center(child: CircularProgressIndicator());
+                      if (snapshot.hasError)
+                        return const Center(
+                          child: Text(
+                            'Could not load failed refunds. Close and try again.',
+                          ),
+                        );
+                      final rows = snapshot.data as List? ?? [];
+                      if (rows.isEmpty)
+                        return const Center(child: Text('No failed refunds.'));
+                      return ListView.separated(
+                        itemCount: rows.length,
+                        separatorBuilder: (_, __) => const Divider(),
+                        itemBuilder: (_, index) {
+                          final r = rows[index] as Map;
+                          return ListTile(
+                            contentPadding: EdgeInsets.zero,
+                            title: Text(
+                              (r['refund_reference'] ?? 'Refund').toString(),
+                            ),
+                            subtitle: Text((r['reason'] ?? '').toString()),
+                            trailing: Text(
+                              'RM${(num.tryParse(r['amount'].toString()) ?? 0).toStringAsFixed(2)}',
+                            ),
+                          );
+                        },
+                      );
+                    },
+                  ),
+                ),
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton(
+                    onPressed: () {
+                      Navigator.pop(ctx);
+                      if (widget.onViewRefunds != null) {
+                        widget.onViewRefunds!('Failed');
+                      } else {
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => const Scaffold(
+                              body: SafeArea(child: AdminRefundsTab()),
+                            ),
+                          ),
+                        );
+                      }
+                    },
+                    style: FilledButton.styleFrom(
+                      backgroundColor: const Color(0xFF173F32),
+                    ),
+                    child: const Text('Open refund management'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -605,12 +876,18 @@ class _AdminOverviewTabState extends State<AdminOverviewTab> {
             children: [
               Text(
                 bookingId,
-                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 14,
+                ),
               ),
               const SizedBox(height: 4),
               Text(
                 name,
-                style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+                style: const TextStyle(
+                  fontWeight: FontWeight.w600,
+                  fontSize: 14,
+                ),
               ),
               Text(
                 matric,
@@ -673,12 +950,7 @@ class _ManualBookingSheetState extends State<_ManualBookingSheet> {
     'Gym',
   ];
 
-  static const _weekdaySlots = [
-    '5:00 PM',
-    '6:00 PM',
-    '9:00 PM',
-    '10:00 PM',
-  ];
+  static const _weekdaySlots = ['5:00 PM', '6:00 PM', '9:00 PM', '10:00 PM'];
 
   static const _weekendSlots = [
     '10:00 AM',
@@ -696,7 +968,8 @@ class _ManualBookingSheetState extends State<_ManualBookingSheet> {
     final parsed =
         DateTime.tryParse(_dateController.text.trim()) ?? DateTime.now();
     final isWeekend =
-        parsed.weekday == DateTime.saturday || parsed.weekday == DateTime.sunday;
+        parsed.weekday == DateTime.saturday ||
+        parsed.weekday == DateTime.sunday;
     return isWeekend ? _weekendSlots : _weekdaySlots;
   }
 
@@ -717,10 +990,10 @@ class _ManualBookingSheetState extends State<_ManualBookingSheet> {
   }
 
   String _normalizeFacilityName(String raw) {
-    return raw
-        .trim()
-        .toLowerCase()
-        .replaceFirstMapped(RegExp(r' 0+(\d+)$'), (m) => ' ${m[1]}');
+    return raw.trim().toLowerCase().replaceFirstMapped(
+      RegExp(r' 0+(\d+)$'),
+      (m) => ' ${m[1]}',
+    );
   }
 
   bool _sameFacility(String a, String b) {
@@ -784,8 +1057,9 @@ class _ManualBookingSheetState extends State<_ManualBookingSheet> {
       for (final item in rawPayload) {
         if (item is Map) {
           final itemFac = (item['facility_name'] ?? '').toString().trim();
-          final itemDate =
-              (item['booking_date'] ?? item['date'] ?? '').toString().trim();
+          final itemDate = (item['booking_date'] ?? item['date'] ?? '')
+              .toString()
+              .trim();
           if (_sameFacility(itemFac, _selectedFacility)) facilityOk = true;
           if (itemDate.startsWith(dateStr)) dateOk = true;
         }
@@ -825,9 +1099,11 @@ class _ManualBookingSheetState extends State<_ManualBookingSheet> {
       final rows = await supabase.from('bookings').select();
       final activeBookings = (rows as List)
           .map((r) => Map.from(r as Map))
-          .where((b) =>
-              _bookingMatchesFacilityAndDate(b, dateStr) &&
-              !_isInactiveStatus((b['status'] ?? '').toString()))
+          .where(
+            (b) =>
+                _bookingMatchesFacilityAndDate(b, dateStr) &&
+                !_isInactiveStatus((b['status'] ?? '').toString()),
+          )
           .toList();
 
       List availabilityRows = [];
@@ -846,8 +1122,9 @@ class _ManualBookingSheetState extends State<_ManualBookingSheet> {
         final hour = _parseHourFromSlotLabel(slotLabel);
         if (hour == null) continue;
 
-        final bookedInTable =
-            activeBookings.any((b) => _bookingMatchesHour(b, hour));
+        final bookedInTable = activeBookings.any(
+          (b) => _bookingMatchesHour(b, hour),
+        );
         final bookedInRpc = availabilityRows.any((r) {
           final row = r as Map;
           final status = (row['status'] ?? '').toString().toLowerCase();
@@ -964,7 +1241,9 @@ class _ManualBookingSheetState extends State<_ManualBookingSheet> {
     final dateStr = _dateController.text.trim();
     if (DateTime.tryParse(dateStr) == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter a valid date (YYYY-MM-DD).')),
+        const SnackBar(
+          content: Text('Please enter a valid date (YYYY-MM-DD).'),
+        ),
       );
       return;
     }
@@ -990,11 +1269,13 @@ class _ManualBookingSheetState extends State<_ManualBookingSheet> {
       // SCRUM-38: a registered student is charged by the category stored in
       // their profile, not by the dropdown, so the KRP discount cannot be
       // given to a non-KRP student by mistake.
-      final profileCategory =
-          StudentCategory.parse(matchedProfile?['student_category']);
+      final profileCategory = StudentCategory.parse(
+        matchedProfile?['student_category'],
+      );
       final categoryLabel = profileCategory?.label ?? _selectedCategory;
       final price = _priceForCategory(categoryLabel);
-      final storedCategory = profileCategory?.value ??
+      final storedCategory =
+          profileCategory?.value ??
           StudentCategory.parse(categoryLabel)?.value ??
           'public';
 
@@ -1025,7 +1306,7 @@ class _ManualBookingSheetState extends State<_ManualBookingSheet> {
             'matric_number': resolvedMatric,
             'amount': price,
             'is_manual_walkin': true,
-          }
+          },
         ],
       };
 
@@ -1050,7 +1331,7 @@ class _ManualBookingSheetState extends State<_ManualBookingSheet> {
             content: Text(
               matchedProfile != null
                   ? 'Manual booking ($refCode) linked to ${matchedProfile['full_name']}, '
-                      'charged RM$price as $categoryLabel.'
+                        'charged RM$price as $categoryLabel.'
                   : 'Manual booking ($refCode) added, charged RM$price as $categoryLabel.',
             ),
           ),
@@ -1059,9 +1340,9 @@ class _ManualBookingSheetState extends State<_ManualBookingSheet> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error adding booking: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error adding booking: $e')));
       }
     } finally {
       if (mounted) setState(() => _isSubmitting = false);
@@ -1121,14 +1402,16 @@ class _ManualBookingSheetState extends State<_ManualBookingSheet> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   _buildLabel('Student category'),
-                  _buildDropdown(
-                    _selectedCategory,
-                    ['KRP Student', 'Non-KRP Student', 'Public'],
-                    (val) => setState(() => _selectedCategory = val!),
-                  ),
+                  _buildDropdown(_selectedCategory, [
+                    'KRP Student',
+                    'Non-KRP Student',
+                    'Public',
+                  ], (val) => setState(() => _selectedCategory = val!)),
                   const SizedBox(height: 16),
 
-                  _buildLabel('Student Matric No. or Email (links to student app)'),
+                  _buildLabel(
+                    'Student Matric No. or Email (links to student app)',
+                  ),
                   TextField(
                     controller: _matricOrEmailController,
                     onChanged: (val) async {
@@ -1140,8 +1423,8 @@ class _ManualBookingSheetState extends State<_ManualBookingSheet> {
                               'Matched: ${profile['full_name']} (${profile['matric_number'] ?? ''})';
                           if (_studentNameController.text.trim().isEmpty &&
                               profile['full_name'] != null) {
-                            _studentNameController.text =
-                                profile['full_name'].toString();
+                            _studentNameController.text = profile['full_name']
+                                .toString();
                           }
                         } else {
                           _matchedStudentLabel = null;
@@ -1189,16 +1472,12 @@ class _ManualBookingSheetState extends State<_ManualBookingSheet> {
                   const SizedBox(height: 16),
 
                   _buildLabel('Facility'),
-                  _buildDropdown(
-                    _selectedFacility,
-                    _facilities,
-                    (val) async {
-                      if (val != null) {
-                        setState(() => _selectedFacility = val);
-                        await _fetchAvailableSlots();
-                      }
-                    },
-                  ),
+                  _buildDropdown(_selectedFacility, _facilities, (val) async {
+                    if (val != null) {
+                      setState(() => _selectedFacility = val);
+                      await _fetchAvailableSlots();
+                    }
+                  }),
                   const SizedBox(height: 16),
 
                   _buildLabel('Date (YYYY-MM-DD)'),
@@ -1321,7 +1600,8 @@ class _ManualBookingSheetState extends State<_ManualBookingSheet> {
                         borderRadius: BorderRadius.circular(8),
                       ),
                     ),
-                    onPressed: (_isSubmitting ||
+                    onPressed:
+                        (_isSubmitting ||
                             _isCheckingSlots ||
                             _openSlots.isEmpty)
                         ? null
@@ -1354,16 +1634,16 @@ class _ManualBookingSheetState extends State<_ManualBookingSheet> {
   }
 
   Widget _buildLabel(String text) => Padding(
-        padding: const EdgeInsets.only(bottom: 8.0),
-        child: Text(
-          text,
-          style: const TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.bold,
-            color: Colors.black87,
-          ),
-        ),
-      );
+    padding: const EdgeInsets.only(bottom: 8.0),
+    child: Text(
+      text,
+      style: const TextStyle(
+        fontSize: 12,
+        fontWeight: FontWeight.bold,
+        color: Colors.black87,
+      ),
+    ),
+  );
 
   Widget _buildDropdown(
     String value,

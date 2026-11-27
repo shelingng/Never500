@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -17,6 +19,8 @@ class _AdminRefundsTabState extends State<AdminRefundsTab> {
   final supabase = Supabase.instance.client;
 
   bool _isLoading = true;
+  bool _refundFetchInFlight = false;
+  Timer? _refundRefreshTimer;
   String _selectedFilter = 'All';
   List<JsonMap> _refunds = [];
 
@@ -24,6 +28,17 @@ class _AdminRefundsTabState extends State<AdminRefundsTab> {
   void initState() {
     super.initState();
     _fetchRefunds();
+    _refundRefreshTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+      if (mounted && !_refundFetchInFlight) {
+        _fetchRefunds(showLoader: false);
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _refundRefreshTimer?.cancel();
+    super.dispose();
   }
 
   double _parseAmount(dynamic raw) {
@@ -249,8 +264,10 @@ class _AdminRefundsTabState extends State<AdminRefundsTab> {
     };
   }
 
-  Future<void> _fetchRefunds() async {
-    setState(() => _isLoading = true);
+  Future<void> _fetchRefunds({bool showLoader = true}) async {
+    if (_refundFetchInFlight) return;
+    _refundFetchInFlight = true;
+    if (showLoader && mounted) setState(() => _isLoading = true);
     try {
       final bookingsRows = await _loadBookingsWithSlots();
 
@@ -312,7 +329,9 @@ class _AdminRefundsTabState extends State<AdminRefundsTab> {
                 '')
             .toString()
             .trim();
-        final profile = uid.isNotEmpty ? (profileById[uid] ?? <String, dynamic>{}) : <String, dynamic>{};
+        final profile = uid.isNotEmpty
+            ? (profileById[uid] ?? <String, dynamic>{})
+            : <String, dynamic>{};
         final details = _extractBookingDetails(b, profile, r);
 
         return <String, dynamic>{
@@ -321,16 +340,34 @@ class _AdminRefundsTabState extends State<AdminRefundsTab> {
         };
       }).toList();
 
+      const priority = {
+        'awaiting_action': 0,
+        'processing': 1,
+        'failed': 2,
+        'refunded': 3,
+      };
+      enriched.sort((a, b) {
+        final aStatus = a['status']?.toString().toLowerCase();
+        final bStatus = b['status']?.toString().toLowerCase();
+        final byStatus = (priority[aStatus] ?? 4).compareTo(
+          priority[bStatus] ?? 4,
+        );
+        if (byStatus != 0) return byStatus;
+        return (b['created_at'] ?? '').toString().compareTo(
+          (a['created_at'] ?? '').toString(),
+        );
+      });
       if (mounted) {
         setState(() => _refunds = enriched);
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error loading refunds: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error loading refunds: $e')));
       }
     } finally {
+      _refundFetchInFlight = false;
       if (mounted) setState(() => _isLoading = false);
     }
   }
@@ -392,8 +429,8 @@ class _AdminRefundsTabState extends State<AdminRefundsTab> {
     final id = refund['id'];
     if (id == null) return;
 
-    final refCode =
-        (refund['refund_reference'] ?? refund['id'] ?? 'REF').toString();
+    final refCode = (refund['refund_reference'] ?? refund['id'] ?? 'REF')
+        .toString();
 
     String? manualRemark;
     String? failureReason;
@@ -495,9 +532,9 @@ class _AdminRefundsTabState extends State<AdminRefundsTab> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to update refund: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed to update refund: $e')));
         setState(() => _isLoading = false);
       }
     }
@@ -696,7 +733,11 @@ class _AdminRefundsTabState extends State<AdminRefundsTab> {
               ),
               child: const Column(
                 children: [
-                  Icon(Icons.receipt_long_outlined, size: 36, color: Colors.grey),
+                  Icon(
+                    Icons.receipt_long_outlined,
+                    size: 36,
+                    color: Colors.grey,
+                  ),
                   SizedBox(height: 10),
                   Text(
                     'No refund records found.',
@@ -711,8 +752,9 @@ class _AdminRefundsTabState extends State<AdminRefundsTab> {
                   (refund['refund_reference'] ?? refund['id'] ?? 'REF')
                       .toString();
               final amountNum = _parseAmount(refund['amount']);
-              final status =
-                  (refund['status'] ?? 'awaiting_action').toString().trim();
+              final status = (refund['status'] ?? 'awaiting_action')
+                  .toString()
+                  .trim();
               final statusLower = status.toLowerCase();
               final reason = (refund['reason'] ?? '').toString();
               final manualRemark = (refund['manual_remark'] ?? '').toString();
@@ -721,13 +763,14 @@ class _AdminRefundsTabState extends State<AdminRefundsTab> {
                   ? JsonMap.from(refund['_details'] as Map)
                   : <String, dynamic>{};
 
-              final studentName =
-                  (details['studentName'] ?? 'Unknown Student').toString();
+              final studentName = (details['studentName'] ?? 'Unknown Student')
+                  .toString();
               final matric = (details['matric'] ?? '').toString();
-              final studentDisplay =
-                  matric.isNotEmpty ? '$studentName · $matric' : studentName;
-              final facility =
-                  (details['facility'] ?? 'Unknown Facility').toString();
+              final studentDisplay = matric.isNotEmpty
+                  ? '$studentName · $matric'
+                  : studentName;
+              final facility = (details['facility'] ?? 'Unknown Facility')
+                  .toString();
               final dateBooked = (details['date'] ?? '-').toString();
               final timeBooked = (details['time'] ?? '-').toString();
 
@@ -919,7 +962,10 @@ class _AdminRefundsTabState extends State<AdminRefundsTab> {
                               borderRadius: BorderRadius.circular(10),
                             ),
                           ),
-                          icon: const Icon(Icons.check_circle_outline, size: 18),
+                          icon: const Icon(
+                            Icons.check_circle_outline,
+                            size: 18,
+                          ),
                           label: Text(
                             isRefunded ? 'Refunded' : 'Mark Refunded',
                           ),

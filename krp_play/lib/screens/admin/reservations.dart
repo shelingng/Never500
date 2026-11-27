@@ -6,8 +6,9 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 class AdminBookingsTab extends StatefulWidget {
   final AdminReservationsSource? source;
+  final String initialSearch;
 
-  const AdminBookingsTab({super.key, this.source});
+  const AdminBookingsTab({super.key, this.source, this.initialSearch = ''});
 
   @override
   State<AdminBookingsTab> createState() => _AdminBookingsTabState();
@@ -36,6 +37,7 @@ class _AdminBookingsTabState extends State<AdminBookingsTab> {
   @override
   void initState() {
     super.initState();
+    _searchController.text = widget.initialSearch;
     _fetchBookings();
     if (widget.source == null) {
       _bookingsChannel = Supabase.instance.client
