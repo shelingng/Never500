@@ -11,6 +11,9 @@ import '../models/checkout_recovery.dart';
 import '../models/session_selection.dart';
 import '../services/booking_service.dart';
 
+typedef JsonMap = Map<String, dynamic>;
+typedef BookingList = List<Booking>;
+
 class FacilitiesScreen extends StatefulWidget {
   final String category;
   final String email;
@@ -18,7 +21,7 @@ class FacilitiesScreen extends StatefulWidget {
   final BookingService? bookingService;
   final List<Booking> initialCart;
   final Set<String>? restoredExpiredOrderIds;
-  final ValueChanged<List<Booking>>? onCartSaved;
+  final ValueChanged<BookingList>? onCartSaved;
 
   const FacilitiesScreen({
     super.key,
@@ -42,10 +45,10 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
   RealtimeChannel? _bookingsChannel;
   Timer? _availabilityTimer;
 
-  List _facilities = [];
+  List<JsonMap> _facilities = [];
   bool _loadingPrices = true;
   bool _priceLoadFailed = false;
-  List<Map<String, dynamic>> _operatingHours = [];
+  List<JsonMap> _operatingHours = [];
   bool _loadingHours = true;
   bool _hoursLoadFailed = false;
   int _hoursRequest = 0;
@@ -132,9 +135,7 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
       final rows = await _bookingService.getFacilities();
       if (!mounted) return;
       setState(() {
-        _facilities = (rows as List)
-            .map((r) => Map<String, dynamic>.from(r as Map))
-            .toList();
+        _facilities = rows.map((r) => JsonMap.from(r as Map)).toList();
         _loadingPrices = false;
       });
     } catch (_) {
@@ -162,6 +163,7 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
 
   bool reservationCreated = false;
   bool _isReserving = false;
+  bool _cancellingPayment = false;
   String? _checkoutRequestId;
   num? _reservedTotal;
   String? _pendingBookingId;
@@ -208,8 +210,9 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
 
   String? get _selectionRuleError {
     if (_loadingHours) return 'Loading operating hours...';
-    if (_hoursLoadFailed)
+    if (_hoursLoadFailed) {
       return 'Operating hours could not be loaded. Please retry.';
+    }
     return SessionSelection.error(
       allowedStarts: SessionSelection.startsForDate(
         _operatingHours,
@@ -418,7 +421,7 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
   StudentCategory? get _studentCategory =>
       StudentCategory.parse(widget.category);
 
-  num _priceFor(Map<String, dynamic> facility) {
+  num _priceFor(JsonMap facility) {
     return facility[(_studentCategory ?? StudentCategory.nonKrp).priceColumn]
         as num;
   }
@@ -461,7 +464,7 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_ios_new, size: 18),
           onPressed: () {
-            if (_isReserving) return;
+            if (_isReserving || _cancellingPayment) return;
             if (currentStep > 1 &&
                 !reservationCreated &&
                 _pendingBookingId == null) {
@@ -1379,6 +1382,92 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
       ..showSnackBar(SnackBar(content: Text(message)));
   }
 
+  Widget _buildCancelPendingButton() {
+    if (_pendingBookingId == null || reservationCreated) {
+      return const SizedBox.shrink();
+    }
+    return Padding(
+      padding: const EdgeInsets.only(top: 10),
+      child: SizedBox(
+        width: double.infinity,
+        height: 46,
+        child: OutlinedButton(
+          onPressed: (_isReserving || _cancellingPayment || _checkingPayment)
+              ? null
+              : _cancelPendingCheckout,
+          style: OutlinedButton.styleFrom(
+            foregroundColor: const Color(0xFFB13D35),
+            side: const BorderSide(color: Color(0xFFB13D35)),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
+          ),
+          child: Text(
+            _cancellingPayment ? 'Cancelling...' : 'Cancel payment',
+            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _cancelPendingCheckout() async {
+    final bookingId = _pendingBookingId;
+    if (bookingId == null || _cancellingPayment) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Cancel pending payment?'),
+        content: const Text(
+          'This will cancel your pending booking and release your held time slot immediately.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Keep hold'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            style: TextButton.styleFrom(
+              foregroundColor: const Color(0xFFB13D35),
+            ),
+            child: const Text('Cancel payment'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    setState(() => _cancellingPayment = true);
+    try {
+      await _bookingService.cancelPendingBooking(bookingId);
+      if (!mounted) return;
+      setState(() {
+        _paymentUrl = null;
+        _pendingBookingId = null;
+        _paymentDeadline = null;
+        _checkoutRequestId = null;
+        _reservedTotal = null;
+        currentStep = 3;
+      });
+      _showMessage(
+        'Pending payment cancelled. Your slot hold has been released.',
+      );
+    } on PaymentException catch (e) {
+      if (!mounted) return;
+      _showMessage(e.message);
+      await _checkPaymentStatus(quiet: true);
+    } catch (_) {
+      if (mounted) {
+        _showMessage('Could not cancel payment. Please try again.');
+      }
+    } finally {
+      if (mounted) setState(() => _cancellingPayment = false);
+    }
+  }
+
   Widget _buildStep4PaymentAndStatus() {
     return Container(
       decoration: BoxDecoration(
@@ -1455,6 +1544,7 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
                     ),
                     const SizedBox(height: 20),
                     _buildPayNowButton(),
+                    _buildCancelPendingButton(),
                   ] else ...[
                     const Text(
                       'Prototype demo: Pay Now simulates payment. No money is charged.',
@@ -1531,6 +1621,7 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
                     ),
                     const SizedBox(height: 20),
                     _buildPayNowButton(),
+                    _buildCancelPendingButton(),
                   ],
                 ],
                 if (reservationCreated) ...[
@@ -1631,7 +1722,7 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
             borderRadius: BorderRadius.circular(10),
           ),
         ),
-        onPressed: _canSubmitPayment && !_isReserving
+        onPressed: _canSubmitPayment && !_isReserving && !_cancellingPayment
             ? _reserveSelectedCart
             : null,
         child: Text(
@@ -1697,12 +1788,15 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
             width: double.infinity,
             height: 46,
             child: OutlinedButton(
-              onPressed: _checkingPayment ? null : _checkPaymentStatus,
+              onPressed: _checkingPayment || _cancellingPayment
+                  ? null
+                  : _checkPaymentStatus,
               child: Text(
                 _checkingPayment ? 'Checking...' : "I've paid - check status",
               ),
             ),
           ),
+          _buildCancelPendingButton(),
         ],
       ),
     );
@@ -1758,10 +1852,11 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
           if (mounted) {
             _restoredExpiredOrderIds.add(saved.order.id);
           }
-          if (mounted)
+          if (mounted) {
             _showMessage(
               'Your previous hold expired. Your cart was restored. Review availability before paying again.',
             );
+          }
         } else {
           _showMessage(
             'Your unfinished order was restored. Resume payment to continue with the same booking.',
@@ -1822,10 +1917,11 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
     }
     if (!saved.canResumeAt(DateTime.now())) {
       await _resetExpiredPayment();
-      if (mounted)
+      if (mounted) {
         _showMessage(
           'This order can no longer be paid. Review your cart and booking history before checking out again.',
         );
+      }
       return;
     }
     final url = await _bookingService.createBillplzPayment(bookingId);
@@ -1978,7 +2074,7 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
   Future<void> _removeConflictingCartItems() async {
     final cartSnapshot = List<Booking>.from(cartItems);
     final unavailable = <Booking>[];
-    final dates = <DateTime, List<Booking>>{};
+    final dates = <DateTime, BookingList>{};
     try {
       for (final item in cartSnapshot) {
         final date = DateUtils.dateOnly(item.date);
@@ -1986,8 +2082,9 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
             .getBookingsForDate(date);
         final requestedSlots = List<String>.from(item.timeSlots as List);
         final blocked = bookings.any((booking) {
-          if (!_sameFacility(booking.facilityName, item.facilityName))
+          if (!_sameFacility(booking.facilityName, item.facilityName)) {
             return false;
+          }
           final occupiedSlots = List<String>.from(booking.timeSlots as List);
           return occupiedSlots.any(requestedSlots.contains);
         });

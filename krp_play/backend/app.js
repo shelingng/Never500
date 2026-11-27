@@ -253,6 +253,116 @@ app.post('/api/create-payment', async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
+// Cancel a pending payment and release the held slots immediately
+// ---------------------------------------------------------------------------
+app.post('/api/cancel-payment/:bookingId', async (req, res) => {
+    try {
+        const user = await getUserFromRequest(req);
+        if (!user) return res.status(401).json({ error: 'Not signed in' });
+
+        const { bookingId } = req.params;
+        if (!bookingId) return res.status(400).json({ error: 'Missing bookingId' });
+
+        const { data: booking, error: bookingError } = await supabase
+            .from('bookings')
+            .select('id, user_id, booking_reference, status')
+            .eq('id', bookingId)
+            .eq('user_id', user.id)
+            .maybeSingle();
+
+        if (bookingError) {
+            console.error('❌ [SUPABASE ERROR]:', bookingError.message);
+            return res.status(500).json({ error: 'Could not load booking' });
+        }
+        if (!booking) return res.status(404).json({ error: 'Booking not found' });
+
+        if (booking.status === 'confirmed') {
+            return res.status(409).json({ error: 'This booking is already paid and confirmed.' });
+        }
+        if (booking.status !== 'pending_payment') {
+            return res.status(200).json({ cancelled: true, status: booking.status });
+        }
+
+        // Check any pending Billplz bill first so we never cancel a bill
+        // that the student already paid in another tab.
+        const { data: pendingPayments } = await supabase
+            .from('payments')
+            .select('id, billplz_id, status')
+            .eq('booking_id', booking.id)
+            .eq('status', 'pending');
+
+        for (const p of pendingPayments || []) {
+            if (!p.billplz_id) continue;
+            try {
+                const { data: bill } = await axios.get(
+                    `${BILLPLZ_API_BASE_URL}/bills/${p.billplz_id}`,
+                    billplzAuth,
+                );
+                if (bill.paid) {
+                    const { data: tx } = await axios.get(
+                        `${BILLPLZ_API_BASE_URL}/bills/${bill.id}/transactions`,
+                        billplzAuth,
+                    );
+                    const done = (tx.transactions || []).find((t) => t.status === 'completed');
+                    const { data: result, error: rpcError } = await supabase.rpc('confirm_billplz_payment', {
+                        p_billplz_id: bill.id,
+                        p_paid_cents: Number(bill.paid_amount),
+                        p_paid_at: done?.completed_at ? new Date(done.completed_at).toISOString() : new Date().toISOString(),
+                        p_transaction_ref: done?.id || bill.id,
+                    });
+                    if (rpcError) throw rpcError;
+                    logPaymentResult(bill.id, result, bill.paid_amount);
+                    if (result === 'confirmed' || result === 'confirmed_late') {
+                        sendConfirmationEmailForBill(bill.id);
+                    }
+                    return res.status(409).json({
+                        error: 'Payment was already completed on Billplz. Your booking is confirmed!',
+                        bookingStatus: 'confirmed',
+                    });
+                }
+                if (bill.state === 'due') {
+                    await axios.delete(`${BILLPLZ_API_BASE_URL}/bills/${bill.id}`, billplzAuth);
+                    console.log(`🗑️ Closed Billplz bill ${bill.id} after user cancelled booking ${booking.id}.`);
+                }
+            } catch (billErr) {
+                console.warn(`⚠️ Could not close Billplz bill ${p.billplz_id}:`, billErr.response?.data || billErr.message);
+            }
+        }
+
+        const nowIso = new Date().toISOString();
+
+        const { error: updateBookingError } = await supabase
+            .from('bookings')
+            .update({ status: 'cancelled', updated_at: nowIso })
+            .eq('id', booking.id)
+            .eq('user_id', user.id)
+            .eq('status', 'pending_payment');
+
+        if (updateBookingError) {
+            console.error('❌ [CANCEL BOOKING ERROR]:', updateBookingError.message);
+            return res.status(500).json({ error: 'Could not cancel booking' });
+        }
+
+        await supabase
+            .from('booking_items')
+            .update({ status: 'cancelled' })
+            .eq('booking_id', booking.id);
+
+        await supabase
+            .from('payments')
+            .update({ status: 'cancelled' })
+            .eq('booking_id', booking.id)
+            .eq('status', 'pending');
+
+        console.log(`🚫 Student ${user.id} cancelled pending booking ${booking.booking_reference} (${booking.id}).`);
+        return res.status(200).json({ cancelled: true, status: 'cancelled' });
+    } catch (error) {
+        console.error('❌ [CANCEL PAYMENT ERROR]:', error.message);
+        return res.status(500).json({ error: 'Could not cancel payment' });
+    }
+});
+
+// ---------------------------------------------------------------------------
 // SCRUM-18: Billplz callback (server-to-server)
 // ---------------------------------------------------------------------------
 app.post('/api/webhook', async (req, res) => {

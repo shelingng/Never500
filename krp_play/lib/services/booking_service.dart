@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 import 'dart:typed_data';
@@ -8,6 +9,8 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/booking.dart';
 import '../models/booking_order.dart';
 import '../models/checkout_recovery.dart';
+
+typedef JsonMap = Map<String, dynamic>;
 
 class ReportPhotoUpload {
   final String name;
@@ -40,7 +43,7 @@ class BookingService {
     'ngrok-skip-browser-warning': 'true',
   };
 
-  createBillplzPayment(String bookingId) async {
+  Future<String> createBillplzPayment(String bookingId) async {
     final session = _supabase.auth.currentSession;
     if (session == null) throw const PaymentException('Sign in to pay.');
 
@@ -64,9 +67,9 @@ class BookingService {
       );
     }
 
-    Map<String, dynamic> body = {};
+    JsonMap body = {};
     try {
-      body = Map<String, dynamic>.from(jsonDecode(response.body) as Map);
+      body = JsonMap.from(jsonDecode(response.body) as Map);
     } catch (_) {}
 
     if (response.statusCode != 200 || body['paymentUrl'] == null) {
@@ -78,7 +81,7 @@ class BookingService {
     return body['paymentUrl'].toString();
   }
 
-  getPaymentStatus(String bookingId) async {
+  Future<JsonMap> getPaymentStatus(String bookingId) async {
     final session = _supabase.auth.currentSession;
     if (session == null) throw const PaymentException('Sign in to pay.');
 
@@ -100,9 +103,9 @@ class BookingService {
       );
     }
 
-    Map<String, dynamic> body = {};
+    JsonMap body = {};
     try {
-      body = Map<String, dynamic>.from(jsonDecode(response.body) as Map);
+      body = JsonMap.from(jsonDecode(response.body) as Map);
     } catch (_) {}
     if (response.statusCode != 200) {
       throw PaymentException(
@@ -111,6 +114,67 @@ class BookingService {
       );
     }
     return body;
+  }
+
+  Future<bool> cancelPendingBooking(String bookingId) async {
+    final session = _supabase.auth.currentSession;
+    final userId = checkoutUserId;
+    if (session == null || userId == null) {
+      throw const PaymentException('Sign in to cancel a booking.');
+    }
+
+    if (usesRealPayment) {
+      final base = paymentBackendUrl.replaceFirst(RegExp(r'/+$'), '');
+      final http.Response response;
+      try {
+        response = await http
+            .post(
+              Uri.parse('$base/api/cancel-payment/$bookingId'),
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer ${session.accessToken}',
+                ..._tunnelHeaders,
+              },
+            )
+            .timeout(const Duration(seconds: 30));
+      } catch (_) {
+        throw const PaymentException(
+          'Could not reach the payment server. Check that the backend and tunnel are running.',
+        );
+      }
+
+      JsonMap body = {};
+      try {
+        body = JsonMap.from(jsonDecode(response.body) as Map);
+      } catch (_) {}
+
+      if (response.statusCode != 200) {
+        throw PaymentException(
+          body['error']?.toString() ??
+              'Could not cancel payment (${response.statusCode}).',
+        );
+      }
+      return true;
+    }
+
+    final updatedRows = await _supabase
+        .from('bookings')
+        .update({'status': 'cancelled'})
+        .eq('id', bookingId)
+        .eq('user_id', userId)
+        .eq('status', 'pending_payment')
+        .select('id');
+
+    if ((updatedRows as List).isEmpty) return false;
+
+    try {
+      await _supabase
+          .from('booking_items')
+          .update({'status': 'cancelled'})
+          .eq('booking_id', bookingId);
+    } catch (_) {}
+
+    return true;
   }
 
   String? get checkoutUserId => _supabase.auth.currentUser?.id;
@@ -145,25 +209,25 @@ class BookingService {
         status != 'expired') {
       return null;
     }
-    return CheckoutRecovery.fromRow(Map<String, dynamic>.from(rows.first));
+    return CheckoutRecovery.fromRow(JsonMap.from(rows.first));
   }
 
-  Future<List<Map<String, dynamic>>> getOperatingSchedules() async {
+  Future<List<JsonMap>> getOperatingSchedules() async {
     final rows = await _supabase
         .from('operating_schedules')
         .select('day_of_week, start_time, end_time, slot_minutes, is_active')
         .eq('is_active', true)
         .order('day_of_week')
         .order('start_time');
-    return [for (final row in rows) Map<String, dynamic>.from(row)];
+    return [for (final row in rows) JsonMap.from(row)];
   }
 
-  getFacilities() async {
+  Future<List<dynamic>> getFacilities() async {
     final response = await _supabase
         .from('facilities')
         .select()
         .eq('is_active', true);
-    return response;
+    return response as List<dynamic>;
   }
 
   static String newCheckoutRequestId() {
@@ -176,17 +240,20 @@ class BookingService {
         '${hex.substring(12, 16)}-${hex.substring(16, 20)}-${hex.substring(20)}';
   }
 
-  reserveCart(List<Booking> cart, {required String requestId}) async {
+  Future<JsonMap> reserveCart(
+    List<Booking> cart, {
+    required String requestId,
+  }) async {
     return _checkout(cart, requestId: requestId);
   }
 
-  demoPayCart(
+  Future<JsonMap> demoPayCart(
     List<Booking> cart, {
     required String requestId,
     required String method,
   }) => _checkout(cart, requestId: requestId, demoMethod: method);
 
-  _checkout(
+  Future<JsonMap> _checkout(
     List<Booking> cart, {
     required String requestId,
     String? demoMethod,
@@ -217,16 +284,16 @@ class BookingService {
         ),
       },
     );
-    return Map<String, dynamic>.from(result as Map);
+    return JsonMap.from(result as Map);
   }
 
-  confirmPayment(String bookingId, num amount, String method) async {
+  Future<void> confirmPayment(String bookingId, num amount, String method) async {
     throw StateError(
       'Payment confirmation requires the verified server gateway.',
     );
   }
 
-  getUserBookings() async {
+  Future<List<Booking>> getUserBookings() async {
     final user = _supabase.auth.currentUser;
     if (user == null) return <Booking>[];
     final response = await _supabase
@@ -236,7 +303,7 @@ class BookingService {
         )
         .eq('user_id', user.id)
         .order('created_at', ascending: false);
-    return _unpackBookings(response);
+    return _unpackBookings(response as List<dynamic>);
   }
 
   /// SCRUM-48: the signed-in student's own orders, newest first, each with
@@ -258,7 +325,7 @@ class BookingService {
         .order('created_at', ascending: false);
     return [
       for (final row in rows as List)
-        BookingOrder.fromRow(Map<String, dynamic>.from(row as Map)),
+        BookingOrder.fromRow(JsonMap.from(row as Map)),
     ];
   }
 
@@ -389,7 +456,7 @@ class BookingService {
         params: {'p_date': dateStr},
       );
       for (final r in (response as List)) {
-        final map = Map<String, dynamic>.from(r as Map);
+        final map = JsonMap.from(r as Map);
         addOrUpgrade(
           (map['facility_name'] ?? '').toString(),
           (map['start_time'] ?? '').toString(),
@@ -404,7 +471,7 @@ class BookingService {
           .select('id, facility_name, booking_date, start_time, status')
           .eq('booking_date', dateStr);
       for (final r in (bookingRows as List)) {
-        final row = Map<String, dynamic>.from(r as Map);
+        final row = JsonMap.from(r as Map);
         addOrUpgrade(
           (row['facility_name'] ?? '').toString(),
           (row['start_time'] ?? '').toString(),
@@ -440,7 +507,7 @@ class BookingService {
     (m) => ' ${m[1]!.padLeft(2, '0')}',
   );
 
-  createReport({
+  Future<JsonMap> createReport({
     required String category,
     String? bookingId,
     String? subject,
@@ -507,10 +574,10 @@ class BookingService {
       }
     }
 
-    return inserted;
+    return JsonMap.from(inserted);
   }
 
-  getUserReports() async {
+  Future<List<dynamic>> getUserReports() async {
     final user = _supabase.auth.currentUser;
     if (user == null) return [];
 
@@ -520,7 +587,7 @@ class BookingService {
         .eq('user_id', user.id)
         .order('created_at', ascending: false);
 
-    return response;
+    return response as List<dynamic>;
   }
 
   List<Booking> _unpackBookings(List<dynamic> response) {
@@ -543,12 +610,12 @@ class BookingService {
         _ => status,
       };
       final paid = (row['payments'] as List? ?? [])
-          .cast<Map>()
+          .cast()
           .where((p) => p['status'] == 'paid')
           .firstOrNull;
       final groups = <String, List>{};
       for (final raw in (row['booking_items'] as List? ?? [])) {
-        final item = Map<String, dynamic>.from(raw as Map);
+        final item = JsonMap.from(raw as Map);
         final slot = item['time_slots'] as Map?;
         if (slot == null) continue;
         final facility =

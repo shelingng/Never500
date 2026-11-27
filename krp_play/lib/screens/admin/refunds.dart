@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+typedef JsonMap = Map<String, dynamic>;
+
 class AdminRefundsTab extends StatefulWidget {
   const AdminRefundsTab({super.key});
 
@@ -16,7 +18,7 @@ class _AdminRefundsTabState extends State<AdminRefundsTab> {
 
   bool _isLoading = true;
   String _selectedFilter = 'All';
-  List _refunds = [];
+  List<JsonMap> _refunds = [];
 
   @override
   void initState() {
@@ -30,7 +32,22 @@ class _AdminRefundsTabState extends State<AdminRefundsTab> {
     return double.tryParse(raw.toString()) ?? 0;
   }
 
-  Future<void> _insertRefundSafely(Map basePayload) async {
+  Future<List<JsonMap>> _loadBookingsWithSlots() async {
+    try {
+      final rows = await supabase
+          .from('bookings')
+          .select(
+            '*, booking_items(id, price, status, '
+            'time_slots(id, status, slot_date, start_time, end_time, facilities(name)))',
+          );
+      return [for (final r in (rows as List)) JsonMap.from(r as Map)];
+    } catch (_) {
+      final rows = await supabase.from('bookings').select();
+      return [for (final r in (rows as List)) JsonMap.from(r as Map)];
+    }
+  }
+
+  Future<void> _insertRefundSafely(JsonMap basePayload) async {
     const candidateMethods = [
       'bank_transfer',
       'fpx',
@@ -45,7 +62,7 @@ class _AdminRefundsTabState extends State<AdminRefundsTab> {
     Object? lastError;
     for (final method in candidateMethods) {
       try {
-        final attempt = Map.from(basePayload);
+        final attempt = JsonMap.from(basePayload);
         attempt['refund_method'] = method;
         await supabase.from('refunds').insert(attempt);
         return;
@@ -59,8 +76,27 @@ class _AdminRefundsTabState extends State<AdminRefundsTab> {
     if (lastError != null) throw lastError;
   }
 
-  Future<void> _syncClosedBookingsToRefunds() async {
-    final allBookings = await supabase.from('bookings').select();
+  bool _hasClosedSlot(JsonMap booking) {
+    final items = booking['booking_items'];
+    if (items is! List) return false;
+    for (final rawItem in items) {
+      if (rawItem is! Map) continue;
+      final itemStatus = (rawItem['status'] ?? '').toString().trim().toLowerCase();
+      if (itemStatus.startsWith('closed') || itemStatus.contains('maintenance')) {
+        return true;
+      }
+      final slot = rawItem['time_slots'];
+      if (slot is Map) {
+        final slotStatus = (slot['status'] ?? '').toString().trim().toLowerCase();
+        if (slotStatus.startsWith('closed') || slotStatus.contains('maintenance')) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  Future<void> _syncClosedBookingsToRefunds(List<JsonMap> allBookings) async {
     final existingRefunds = await supabase.from('refunds').select('booking_id');
 
     final refundedBookingIds = <String>{};
@@ -71,16 +107,18 @@ class _AdminRefundsTabState extends State<AdminRefundsTab> {
       }
     }
 
-    for (final rawRow in (allBookings as List)) {
-      final b = Map.from(rawRow as Map);
+    for (final b in allBookings) {
       final status = (b['status'] ?? '').toString().trim().toLowerCase();
       final refCodeBooking =
           (b['booking_reference'] ?? '').toString().trim().toUpperCase();
       final bookingId = b['id']?.toString().trim() ?? '';
       if (bookingId.isEmpty) continue;
 
-      final isClosedBooking = status.startsWith('closed');
       final isEmptyAdminBlock = refCodeBooking.startsWith('ADMIN-');
+      final isPaidOrConfirmed =
+          status == 'confirmed' || status == 'paid' || status.startsWith('closed');
+      final isClosedBooking =
+          status.startsWith('closed') || (isPaidOrConfirmed && _hasClosedSlot(b));
 
       if (isClosedBooking &&
           !isEmptyAdminBlock &&
@@ -105,12 +143,11 @@ class _AdminRefundsTabState extends State<AdminRefundsTab> {
           } catch (_) {}
         }
 
-        final payload = {
+        final payload = <String, dynamic>{
           'refund_reference': 'RF-$shortSuffix',
           'booking_id': bookingId,
           'amount': amount,
-          'reason':
-              'Facility closed by KRP Management (${b['status'] ?? 'Closed'})',
+          'reason': 'Facility closed by KRP Management: Maintenance',
           'refund_channel': 'bank_transfer',
           'status': 'awaiting_action',
           if (paymentId != null && paymentId.isNotEmpty)
@@ -126,38 +163,61 @@ class _AdminRefundsTabState extends State<AdminRefundsTab> {
     }
   }
 
-  Map _extractBookingDetails(Map? b, Map profile) {
-    if (b == null) {
-      return {
-        'studentName':
-            (profile['full_name'] ?? 'Unknown Student').toString().trim(),
-        'matric': (profile['matric_number'] ?? '').toString().trim(),
-        'facility': 'Unknown Facility',
-        'date': '-',
-        'time': '-',
-      };
-    }
-
-    Map? firstCartItem;
-    final rawPayload = b['checkout_payload'];
+  JsonMap _extractBookingDetails(JsonMap? b, JsonMap profile, JsonMap refund) {
+    JsonMap? firstCartItem;
+    final rawPayload = b?['checkout_payload'];
     if (rawPayload is List &&
         rawPayload.isNotEmpty &&
         rawPayload.first is Map) {
-      firstCartItem = Map.from(rawPayload.first as Map);
+      firstCartItem = JsonMap.from(rawPayload.first as Map);
     }
 
-    final facility = (b['facility_name'] ??
+    String slotFacility = '';
+    String slotDate = '';
+    final slotTimes = <String>[];
+
+    final rawItems = b?['booking_items'];
+    if (rawItems is List) {
+      for (final rawItem in rawItems) {
+        if (rawItem is! Map) continue;
+        final slot = rawItem['time_slots'];
+        if (slot is! Map) continue;
+        final fac = slot['facilities'];
+        if (slotFacility.isEmpty && fac is Map && fac['name'] != null) {
+          slotFacility = fac['name'].toString().trim();
+        }
+        if (slotDate.isEmpty && slot['slot_date'] != null) {
+          slotDate = slot['slot_date'].toString().trim();
+        }
+        if (slot['start_time'] != null) {
+          slotTimes.add(slot['start_time'].toString().trim());
+        }
+      }
+    }
+    slotTimes.sort();
+
+    final facility = (b?['facility_name'] ??
             firstCartItem?['facility_name'] ??
+            (slotFacility.isNotEmpty ? slotFacility : null) ??
+            refund['facility_name'] ??
             '')
         .toString()
         .trim();
-    final date = (b['booking_date'] ??
+
+    final date = (b?['booking_date'] ??
             firstCartItem?['booking_date'] ??
             firstCartItem?['date'] ??
+            (slotDate.isNotEmpty ? slotDate : null) ??
+            refund['booking_date'] ??
             '')
         .toString()
         .trim();
-    String time = (b['start_time'] ?? firstCartItem?['start_time'] ?? '')
+
+    String time = (b?['start_time'] ??
+            firstCartItem?['start_time'] ??
+            (slotTimes.isNotEmpty ? slotTimes.join(', ') : null) ??
+            refund['start_time'] ??
+            '')
         .toString()
         .trim();
     if (time.isEmpty &&
@@ -167,12 +227,16 @@ class _AdminRefundsTabState extends State<AdminRefundsTab> {
     }
 
     final studentName = (profile['full_name'] ??
-            b['student_name'] ??
-            b['full_name'] ??
+            b?['student_name'] ??
+            b?['full_name'] ??
+            refund['student_name'] ??
             'Unknown Student')
         .toString()
         .trim();
-    final matric = (profile['matric_number'] ?? b['matric_number'] ?? '')
+    final matric = (profile['matric_number'] ??
+            b?['matric_number'] ??
+            refund['matric_number'] ??
+            '')
         .toString()
         .trim();
 
@@ -188,8 +252,10 @@ class _AdminRefundsTabState extends State<AdminRefundsTab> {
   Future<void> _fetchRefunds() async {
     setState(() => _isLoading = true);
     try {
+      final bookingsRows = await _loadBookingsWithSlots();
+
       try {
-        await _syncClosedBookingsToRefunds();
+        await _syncClosedBookingsToRefunds(bookingsRows);
       } catch (syncError) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -203,12 +269,10 @@ class _AdminRefundsTabState extends State<AdminRefundsTab> {
           .select()
           .order('created_at', ascending: false);
 
-      final bookingsRows = await supabase.from('bookings').select();
-      final bookingById = <String, Map>{};
+      final bookingById = <String, JsonMap>{};
       final userIds = <String>{};
 
-      for (final rawB in (bookingsRows as List)) {
-        final b = Map.from(rawB as Map);
+      for (final b in bookingsRows) {
         final id = b['id']?.toString().trim() ?? '';
         if (id.isNotEmpty) bookingById[id] = b;
 
@@ -216,7 +280,13 @@ class _AdminRefundsTabState extends State<AdminRefundsTab> {
         if (uid.isNotEmpty) userIds.add(uid);
       }
 
-      final profileById = <String, Map>{};
+      for (final rawR in (rows as List)) {
+        final r = rawR as Map;
+        final uid = (r['user_id'] ?? r['student_id'] ?? '').toString().trim();
+        if (uid.isNotEmpty) userIds.add(uid);
+      }
+
+      final profileById = <String, JsonMap>{};
       if (userIds.isNotEmpty) {
         try {
           final profRows = await supabase
@@ -224,7 +294,7 @@ class _AdminRefundsTabState extends State<AdminRefundsTab> {
               .select('id, full_name, matric_number')
               .inFilter('id', userIds.toList());
           for (final rawP in (profRows as List)) {
-            final p = Map.from(rawP as Map);
+            final p = JsonMap.from(rawP as Map);
             final pid = p['id']?.toString().trim() ?? '';
             if (pid.isNotEmpty) profileById[pid] = p;
           }
@@ -232,16 +302,20 @@ class _AdminRefundsTabState extends State<AdminRefundsTab> {
       }
 
       final enriched = (rows as List).map((rawR) {
-        final r = Map.from(rawR as Map);
+        final r = JsonMap.from(rawR as Map);
         final bid = r['booking_id']?.toString().trim() ?? '';
         final b = bookingById[bid];
-        final uid = b != null
-            ? (b['user_id'] ?? b['student_id'] ?? '').toString().trim()
-            : '';
-        final profile = uid.isNotEmpty ? (profileById[uid] ?? {}) : {};
-        final details = _extractBookingDetails(b, profile);
+        final uid = (b?['user_id'] ??
+                b?['student_id'] ??
+                r['user_id'] ??
+                r['student_id'] ??
+                '')
+            .toString()
+            .trim();
+        final profile = uid.isNotEmpty ? (profileById[uid] ?? <String, dynamic>{}) : <String, dynamic>{};
+        final details = _extractBookingDetails(b, profile, r);
 
-        return {
+        return <String, dynamic>{
           ...r,
           '_details': details,
         };
@@ -314,7 +388,7 @@ class _AdminRefundsTabState extends State<AdminRefundsTab> {
     return result;
   }
 
-  Future<void> _updateStatus(Map refund, String newStatus) async {
+  Future<void> _updateStatus(JsonMap refund, String newStatus) async {
     final id = refund['id'];
     if (id == null) return;
 
@@ -330,7 +404,8 @@ class _AdminRefundsTabState extends State<AdminRefundsTab> {
         prompt: 'Enter manual_remark before marking $refCode as Refunded:',
         label: 'Manual Remark',
         initialValue:
-            (refund['manual_remark'] ?? 'Refunded manually via bank transfer').toString(),
+            (refund['manual_remark'] ?? 'Refunded manually via bank transfer')
+                .toString(),
         confirmLabel: 'Confirm Refunded',
       );
       if (manualRemark == null || manualRemark.isEmpty) return;
@@ -340,7 +415,8 @@ class _AdminRefundsTabState extends State<AdminRefundsTab> {
         prompt: 'Enter failure_reason for marking $refCode as Failed:',
         label: 'Failure Reason',
         initialValue:
-            (refund['failure_reason'] ?? 'Transfer failed during processing').toString(),
+            (refund['failure_reason'] ?? 'Transfer failed during processing')
+                .toString(),
         confirmLabel: 'Confirm Failed',
       );
       if (failureReason == null || failureReason.isEmpty) return;
@@ -376,8 +452,10 @@ class _AdminRefundsTabState extends State<AdminRefundsTab> {
               .select('status')
               .eq('id', bookingId)
               .maybeSingle();
-          final currentBookingStatus =
-              (existingBooking?['status'] ?? '').toString().trim().toLowerCase();
+          final currentBookingStatus = (existingBooking?['status'] ?? '')
+              .toString()
+              .trim()
+              .toLowerCase();
           final isAlreadyClosed =
               currentBookingStatus.contains('closed') ||
               currentBookingStatus.contains('maintenance');
@@ -397,7 +475,8 @@ class _AdminRefundsTabState extends State<AdminRefundsTab> {
           'event_type': 'status_updated',
           'previous_status': previousStatus,
           'new_status': newStatus,
-          'note': manualRemark ??
+          'note':
+              manualRemark ??
               failureReason ??
               'Refund status changed to $newStatus by admin',
           if (adminId != null) 'performed_by': adminId,
@@ -439,11 +518,11 @@ class _AdminRefundsTabState extends State<AdminRefundsTab> {
     }
   }
 
-  List _getFilteredRefunds() {
+  List<JsonMap> _getFilteredRefunds() {
     if (_selectedFilter == 'All') return _refunds;
     final target = _selectedFilter.toLowerCase().replaceAll(' ', '_');
-    return _refunds.where((raw) {
-      final st = ((raw as Map)['status'] ?? '').toString().trim().toLowerCase();
+    return _refunds.where((r) {
+      final st = (r['status'] ?? '').toString().trim().toLowerCase();
       return st == target;
     }).toList();
   }
@@ -627,8 +706,7 @@ class _AdminRefundsTabState extends State<AdminRefundsTab> {
               ),
             )
           else
-            ...visibleList.map((rawRefund) {
-              final refund = rawRefund as Map;
+            ...visibleList.map((refund) {
               final refCode =
                   (refund['refund_reference'] ?? refund['id'] ?? 'REF')
                       .toString();
@@ -640,8 +718,8 @@ class _AdminRefundsTabState extends State<AdminRefundsTab> {
               final manualRemark = (refund['manual_remark'] ?? '').toString();
               final failureReason = (refund['failure_reason'] ?? '').toString();
               final details = refund['_details'] is Map
-                  ? Map.from(refund['_details'] as Map)
-                  : {};
+                  ? JsonMap.from(refund['_details'] as Map)
+                  : <String, dynamic>{};
 
               final studentName =
                   (details['studentName'] ?? 'Unknown Student').toString();
