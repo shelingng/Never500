@@ -1,3 +1,4 @@
+const { acquireBillClaim, finishBillClaim, markBillUncertain } = require('./payment_bill_guard');
 require('dotenv').config();
 const crypto = require('crypto');
 const express = require('express');
@@ -152,6 +153,7 @@ function isValidBillplzSignature(params) {
 // The amount is read from the booking created by reserve_cart
 // (database/atomic_checkout.sql); the client only sends which booking to pay.
 app.post('/api/create-payment', async (req, res) => {
+    let claimedBookingId;
     try {
         const user = await getUserFromRequest(req);
         if (!user) return res.status(401).json({ error: 'Not signed in' });
@@ -183,8 +185,17 @@ app.post('/api/create-payment', async (req, res) => {
             return res.status(409).json({ error: 'Booking has no payable amount' });
         }
 
+        const claim = await acquireBillClaim(supabase, booking.id);
+        if (!claim.acquired) {
+            if (claim.state === 'ready' && claim.payment_url && claim.billplz_id) {
+                return res.status(200).json({ paymentUrl: claim.payment_url, billId: claim.billplz_id });
+            }
+            return res.status(409).json({ error: 'Payment creation is pending verification. Check payment status before retrying.' });
+        }
+        claimedBookingId = booking.id;
+
         // Reuse an unpaid bill for this booking instead of creating duplicates.
-        const { data: existing } = await supabase
+        const { data: existing, error: existingError } = await supabase
             .from('payments')
             .select('billplz_id')
             .eq('booking_id', booking.id)
@@ -193,18 +204,23 @@ app.post('/api/create-payment', async (req, res) => {
             .order('created_at', { ascending: false })
             .limit(1)
             .maybeSingle();
+        if (existingError) throw existingError;
         if (existing?.billplz_id) {
             try {
                 const { data: bill } = await axios.get(`${BILLPLZ_API_BASE_URL}/bills/${existing.billplz_id}`, {
                     auth: { username: process.env.BILLPLZ_SECRET_KEY, password: '' },
+                    timeout: 15000,
                 });
                 if (bill.state === 'due' && Number(bill.amount) === amountCents) {
+                    await finishBillClaim(supabase, booking.id, bill);
                     return res.status(200).json({ paymentUrl: bill.url, billId: bill.id });
                 }
             } catch (lookupError) {
-                console.warn(`⚠️ Could not reuse bill ${existing.billplz_id}:`, lookupError.response?.data || lookupError.message);
+                throw lookupError;
             }
         }
+
+        if (existing?.billplz_id) throw new Error('Existing bill needs payment status verification');
 
         const { data: profile } = await supabase
             .from('profiles')
@@ -225,6 +241,7 @@ app.post('/api/create-payment', async (req, res) => {
 
         const response = await axios.post(`${BILLPLZ_API_BASE_URL}/bills`, params, {
             auth: { username: process.env.BILLPLZ_SECRET_KEY, password: '' },
+                    timeout: 15000,
         });
 
         const { id: billplzId, url: paymentUrl } = response.data;
@@ -241,12 +258,14 @@ app.post('/api/create-payment', async (req, res) => {
 
         if (insertError) {
             console.error('❌ [SUPABASE ERROR]:', insertError.message);
-            return res.status(500).json({ error: 'Could not record payment' });
+            throw new Error('Could not record payment; needs reconciliation');
         }
 
+        await finishBillClaim(supabase, booking.id, { id: billplzId, url: paymentUrl });
         console.log(`✅ Bill ${billplzId} created for booking ${booking.id}`);
         res.status(200).json({ paymentUrl, billId: billplzId });
     } catch (error) {
+        if (claimedBookingId) await markBillUncertain(supabase, claimedBookingId);
         console.error('❌ [CREATE PAYMENT ERROR]:', error.response?.data || error.message);
         res.status(502).json({ error: 'Payment creation failed' });
     }

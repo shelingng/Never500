@@ -72,6 +72,7 @@ class OrderSession {
   final String startTime; // database time, KL wall clock
   final String endTime;
   final num price;
+  final String status;
 
   const OrderSession({
     required this.facilityName,
@@ -79,7 +80,24 @@ class OrderSession {
     required this.startTime,
     required this.endTime,
     required this.price,
+    this.status = 'confirmed',
   });
+
+  bool get isCancelled =>
+      status.toLowerCase().contains('cancel') ||
+      status.toLowerCase().contains('refund') ||
+      status.toLowerCase().contains('closed') ||
+      status.toLowerCase() == 'expired' ||
+      status.toLowerCase() == 'failed';
+  String get sessionStatusLabel => status.toLowerCase() == 'pending_payment'
+      ? 'Awaiting payment'
+      : status.toLowerCase() == 'expired'
+      ? 'Expired - not paid'
+      : isCancelled
+      ? (status.toLowerCase().contains('refund')
+            ? 'Refunded session'
+            : 'Cancelled by management')
+      : 'Confirmed session';
 
   DateTime get startsAt => _klToUtc(date, startTime);
 
@@ -162,6 +180,7 @@ class BookingOrder {
           startTime: slot['start_time'].toString(),
           endTime: (slot['end_time'] ?? slot['start_time']).toString(),
           price: _parseNum(item['price']),
+          status: (item['status'] ?? row['status'] ?? 'confirmed').toString(),
         ),
       );
     }
@@ -235,7 +254,7 @@ class BookingOrder {
     if (_status == 'confirmed') {
       final stillToPlay =
           sessions.isEmpty ||
-          sessions.any((s) => s.endsAt.isAfter(now.toUtc()));
+          sessions.any((s) => !s.isCancelled && s.endsAt.isAfter(now.toUtc()));
       return stillToPlay ? OrderGroup.upcoming : OrderGroup.past;
     }
     return OrderGroup.cancelled;
@@ -248,12 +267,16 @@ class BookingOrder {
       return holdActiveAt(now) ? 'Awaiting payment' : 'Expired - not paid';
     }
     if (s == 'confirmed') {
+      if (sessions.any((session) => session.isCancelled)) {
+        return 'Partially cancelled - check sessions';
+      }
       if (isDemo) return 'Confirmed (demo)';
       return groupAt(now) == OrderGroup.past ? 'Completed' : 'Paid & confirmed';
     }
     if (s == 'expired') return 'Expired - not paid';
     if (s == 'refunded') return 'Refunded';
     if (s == 'cancelled') return 'Cancelled';
+    if (s == 'cancelled_by_management') return 'Cancelled by management';
     if (s.startsWith('closed')) {
       final reason = RegExp(r'\((.+)\)').firstMatch(status)?.group(1);
       return reason == null ? 'Closed by KRP' : 'Closed by KRP ($reason)';

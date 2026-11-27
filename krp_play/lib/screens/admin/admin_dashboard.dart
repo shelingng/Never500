@@ -50,13 +50,57 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
     super.initState();
 
     _pages = [
-      AdminOverviewTab(onViewAllBookings: () => _selectPage(2)),
+      AdminOverviewTab(
+        onViewAllBookings: () => _selectPage(2),
+        onViewReports: () => _selectPage(3),
+        onViewRefunds: (_) => _selectPage(4),
+      ),
       AdminSlotsTab(onNavigateToRefunds: () => _selectPage(4)),
       const AdminBookingsTab(),
       const AdminReportsTab(),
       const AdminRefundsTab(),
       const AdminProfileTab(),
     ];
+  }
+
+  void _showAdminShortcuts() {
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: Text(
+                'Admin shortcuts',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.info_outline),
+              title: const Text('User reports'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () {
+                Navigator.pop(ctx);
+                _selectPage(3);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.payments_outlined),
+              title: const Text('Refund requests'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () {
+                Navigator.pop(ctx);
+                _selectPage(4);
+              },
+            ),
+            const SizedBox(height: 12),
+          ],
+        ),
+      ),
+    );
   }
 
   void _selectPage(int index) {
@@ -232,9 +276,9 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
         ),
         actions: [
           IconButton(
-            tooltip: 'Notifications',
+            tooltip: 'Admin shortcuts',
             icon: const Icon(Icons.notifications_none, color: Colors.black87),
-            onPressed: () {},
+            onPressed: _showAdminShortcuts,
           ),
           IconButton(
             tooltip: 'Admin profile',
@@ -244,7 +288,10 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
           const SizedBox(width: 8),
         ],
       ),
-      body: IndexedStack(index: _currentIndex, children: _pages),
+      body: IndexedStack(
+        index: _currentIndex,
+        children: List<Widget>.of(_pages),
+      ),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _currentIndex,
         type: BottomNavigationBarType.fixed,
