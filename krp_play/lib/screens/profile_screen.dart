@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'package:file_picker/file_picker.dart';
@@ -44,10 +45,7 @@ class ProfileScreen extends StatefulWidget {
 class _ProfileScreenState extends _ProfileSectionsState {
   late int _tab = widget.initialTab;
   bool _editing = false, _verified = false;
-  bool _loadingBookings = true;
-  @override
-  bool get _isLoadingBookings => _loadingBookings;
-  
+
   String _category = StudentCategory.notSetLabel;
   final _name = TextEditingController();
   final _contact = TextEditingController();
@@ -56,6 +54,7 @@ class _ProfileScreenState extends _ProfileSectionsState {
   final _confirm = TextEditingController();
 
   List<Booking> _cachedBookings = [];
+  Timer? _studentRefundTimer;
 
   @override
   void initState() {
@@ -68,6 +67,11 @@ class _ProfileScreenState extends _ProfileSectionsState {
 
     _loadLiveBookings();
     _loadLiveReports();
+    _studentRefundTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+      if (mounted && _tab == 2) {
+        setState(() {});
+      }
+    });
   }
 
   _loadLiveBookings() async {
@@ -79,7 +83,6 @@ class _ProfileScreenState extends _ProfileSectionsState {
           final date = a.date.compareTo(b.date);
           return date == 0 ? _start(a).compareTo(_start(b)) : date;
         });
-        _loadingBookings = false;
       });
     }
   }
@@ -91,51 +94,61 @@ class _ProfileScreenState extends _ProfileSectionsState {
         setState(() {
           _reports.clear();
 
-          _reports.addAll(results.map((row) {
-            String facilityName = 'General inquiry';
-            if (row['related_booking_id'] != null) {
-              try {
-                facilityName = _bookings
-                    .firstWhere((b) => b.id == row['related_booking_id'])
-                    .facilityName;
-              } catch (_) {
-                facilityName = 'Linked Booking';
-              }
-            }
+          _reports.addAll(
+            results
+                .map((row) {
+                  String facilityName = 'General inquiry';
+                  if (row['related_booking_id'] != null) {
+                    try {
+                      facilityName = _bookings
+                          .firstWhere((b) => b.id == row['related_booking_id'])
+                          .facilityName;
+                    } catch (_) {
+                      facilityName = 'Linked Booking';
+                    }
+                  }
 
-            String uiCategory = 'Other';
-            if (row['category'] == 'booking_issue') uiCategory = 'Booking Issue';
-            if (row['category'] == 'payment_issue') uiCategory = 'Payment Issue';
-            if (row['category'] == 'facility_problem') {
-              uiCategory = 'Facility Problem';
-            }
-            if (row['category'] == 'account_issue') uiCategory = 'Account Issue';
+                  String uiCategory = 'Other';
+                  if (row['category'] == 'booking_issue')
+                    uiCategory = 'Booking Issue';
+                  if (row['category'] == 'payment_issue')
+                    uiCategory = 'Payment Issue';
+                  if (row['category'] == 'facility_problem') {
+                    uiCategory = 'Facility Problem';
+                  }
+                  if (row['category'] == 'account_issue')
+                    uiCategory = 'Account Issue';
 
-            final createdAt = row['created_at'] != null
-                ? DateTime.parse(row['created_at'].toString()).toLocal()
-                : DateTime.now();
+                  final createdAt = row['created_at'] != null
+                      ? DateTime.parse(row['created_at'].toString()).toLocal()
+                      : DateTime.now();
 
-            final desc = (row['description'] ?? '').toString();
-            final subj = (row['subject'] ?? '').toString().trim();
+                  final desc = (row['description'] ?? '').toString();
+                  final subj = (row['subject'] ?? '').toString().trim();
 
-            return _LocalReport(
-              id: row['report_reference'] ??
-                  row['id'].toString().substring(0, 8),
-              category: uiCategory,
-              title: subj.isNotEmpty ? subj : 'Facility report',
-              facility: facilityName,
-              dateTime: '${_shortDate(createdAt)} · ${_clockTime(createdAt)}',
-              description: desc,
-              photos: prototypePhotoCache[desc] ?? const [],
-              status: row['status'] == 'submitted'
-                  ? 'Submitted'
-                  : row['status'] == 'under_review'
-                      ? 'Under Review'
-                      : row['status'] == 'resolved'
-                          ? 'Resolved'
-                          : 'Rejected',
-            );
-          }).toList().cast<_LocalReport>());
+                  return _LocalReport(
+                    id:
+                        row['report_reference'] ??
+                        row['id'].toString().substring(0, 8),
+                    category: uiCategory,
+                    title: subj.isNotEmpty ? subj : 'Facility report',
+                    facility: facilityName,
+                    dateTime:
+                        '${_shortDate(createdAt)} · ${_clockTime(createdAt)}',
+                    description: desc,
+                    photos: prototypePhotoCache[desc] ?? const [],
+                    status: row['status'] == 'submitted'
+                        ? 'Submitted'
+                        : row['status'] == 'under_review'
+                        ? 'Under Review'
+                        : row['status'] == 'resolved'
+                        ? 'Resolved'
+                        : 'Rejected',
+                  );
+                })
+                .toList()
+                .cast<_LocalReport>(),
+          );
 
           _isLoadingReports = false;
         });
@@ -152,6 +165,7 @@ class _ProfileScreenState extends _ProfileSectionsState {
 
   @override
   void dispose() {
+    _studentRefundTimer?.cancel();
     _name.dispose();
     _contact.dispose();
     _matric.dispose();
@@ -224,213 +238,212 @@ class _ProfileScreenState extends _ProfileSectionsState {
   }
 
   Widget _header() => Container(
-        padding: const EdgeInsets.all(18),
-        decoration: BoxDecoration(
-          color: const Color(0xFF23433A),
-          borderRadius: BorderRadius.circular(16),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+    padding: const EdgeInsets.all(18),
+    decoration: BoxDecoration(
+      color: const Color(0xFF23433A),
+      borderRadius: BorderRadius.circular(16),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
           children: [
-            Row(
-              children: [
-                Container(
-                  width: 64,
-                  height: 64,
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    color: _lime,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Text(
-                    _name.text
-                        .trim()
-                        .split(RegExp(r'\s+'))
-                        .where((part) => part.isNotEmpty)
-                        .take(2)
-                        .map((part) => part[0].toUpperCase())
-                        .join(),
-                    style: const TextStyle(
-                      color: _green,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 20,
-                    ),
-                  ),
+            Container(
+              width: 64,
+              height: 64,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: _lime,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Text(
+                _name.text
+                    .trim()
+                    .split(RegExp(r'\s+'))
+                    .where((part) => part.isNotEmpty)
+                    .take(2)
+                    .map((part) => part[0].toUpperCase())
+                    .join(),
+                style: const TextStyle(
+                  color: _green,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 20,
                 ),
-                const Spacer(),
-                OutlinedButton(
-                  onPressed: () => setState(() {
-                    _tab = 0;
-                    _editing = true;
-                  }),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: Colors.white,
-                    side: const BorderSide(color: Colors.white70),
-                  ),
-                  child: const Text('Edit profile'),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            const Text(
-              'STUDENT ACCOUNT',
-              style: TextStyle(
-                color: Colors.white70,
-                fontSize: 11,
-                letterSpacing: 1.1,
               ),
             ),
-            const SizedBox(height: 5),
-            Text(
-              _name.text,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 22,
-                fontWeight: FontWeight.bold,
+            const Spacer(),
+            OutlinedButton(
+              onPressed: () => setState(() {
+                _tab = 0;
+                _editing = true;
+              }),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: Colors.white,
+                side: const BorderSide(color: Colors.white70),
               ),
+              child: const Text('Edit profile'),
             ),
-            const SizedBox(height: 4),
-            Text(_category, style: const TextStyle(color: Colors.white70)),
           ],
         ),
-      );
-
-  Widget _tabButton(String title, int index, [String? badge]) => InkWell(
-        onTap: () {
-          setState(() {
-            _tab = index;
-            _editing = false;
-            if (index == 1) {
-              _loadingBookings = true;
-              _loadLiveBookings();
-            }
-            if (index == 3) {
-              _isLoadingReports = true;
-              _loadLiveReports();
-            }
-          });
-        },
-        child: Container(
-          margin: const EdgeInsets.only(right: 20),
-          decoration: BoxDecoration(
-            color: _tab == index ? _lime : Colors.transparent,
-            borderRadius: BorderRadius.circular(10),
-          ),
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                title,
-                style: TextStyle(
-                  color: _tab == index ? _green : _muted,
-                  fontWeight: _tab == index ? FontWeight.bold : FontWeight.normal,
-                ),
-              ),
-              if (badge != null) ...[
-                const SizedBox(width: 5),
-                CircleAvatar(
-                  radius: 9,
-                  backgroundColor: const Color(0xFFE8F1EB),
-                  child: Text(
-                    badge,
-                    style: const TextStyle(fontSize: 10, color: _green),
-                  ),
-                ),
-              ],
-            ],
+        const SizedBox(height: 16),
+        const Text(
+          'STUDENT ACCOUNT',
+          style: TextStyle(
+            color: Colors.white70,
+            fontSize: 11,
+            letterSpacing: 1.1,
           ),
         ),
-      );
+        const SizedBox(height: 5),
+        Text(
+          _name.text,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 22,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(_category, style: const TextStyle(color: Colors.white70)),
+      ],
+    ),
+  );
+
+  Widget _tabButton(String title, int index, [String? badge]) => InkWell(
+    onTap: () {
+      setState(() {
+        _tab = index;
+        _editing = false;
+        if (index == 1) {
+          _loadLiveBookings();
+        }
+        if (index == 3) {
+          _isLoadingReports = true;
+          _loadLiveReports();
+        }
+      });
+    },
+    child: Container(
+      margin: const EdgeInsets.only(right: 20),
+      decoration: BoxDecoration(
+        color: _tab == index ? _lime : Colors.transparent,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            title,
+            style: TextStyle(
+              color: _tab == index ? _green : _muted,
+              fontWeight: _tab == index ? FontWeight.bold : FontWeight.normal,
+            ),
+          ),
+          if (badge != null) ...[
+            const SizedBox(width: 5),
+            CircleAvatar(
+              radius: 9,
+              backgroundColor: const Color(0xFFE8F1EB),
+              child: Text(
+                badge,
+                style: const TextStyle(fontSize: 10, color: _green),
+              ),
+            ),
+          ],
+        ],
+      ),
+    ),
+  );
 
   Widget _personalDetails() => _card(
-        color: _editing ? Colors.white : const Color(0xFF23433A),
-        child: _editing
-            ? Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  const Text(
-                    'Personal details',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 16),
-                  _input(_name, 'Full name', Icons.person_outline),
-                  _input(
-                    _contact,
-                    'Contact number',
-                    Icons.phone_outlined,
-                    keyboard: TextInputType.phone,
-                  ),
-                  _input(_matric, 'Matric number', Icons.badge_outlined),
-                  TextFormField(
-                    initialValue: _category,
-                    readOnly: true,
-                    enabled: false,
-                    decoration: const InputDecoration(
-                      labelText: 'Student category (Managed by Admin)',
-                      prefixIcon: Icon(Icons.school_outlined),
-                      border: OutlineInputBorder(),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  const SizedBox(height: 12),
-                  TextFormField(
-                    initialValue: widget.email,
-                    readOnly: true,
-                    decoration: const InputDecoration(
-                      labelText: 'Email address',
-                      prefixIcon: Icon(Icons.email_outlined),
-                      border: OutlineInputBorder(),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  _input(_password, 'Password', Icons.lock_outline, obscure: true),
-                  _input(
-                    _confirm,
-                    'Confirm password',
-                    Icons.lock_outline,
-                    obscure: true,
-                  ),
-                  CheckboxListTile(
-                    contentPadding: EdgeInsets.zero,
-                    value: _verified,
-                    onChanged: (value) =>
-                        setState(() => _verified = value ?? false),
-                    controlAffinity: ListTileControlAffinity.leading,
-                    title: const Text(
-                      'I confirm that the information provided is accurate.',
-                      style: TextStyle(fontSize: 13),
-                    ),
-                  ),
-                  FilledButton(
-                    onPressed: _saveProfile,
-                    style: FilledButton.styleFrom(
-                      backgroundColor: _lime,
-                      foregroundColor: _green,
-                      minimumSize: const Size.fromHeight(50),
-                    ),
-                    child: const Text('Save profile'),
-                  ),
-                ],
-              )
-            : Column(
-                children: [
-                  _info(Icons.person_outline, 'Full Name', _name.text),
-                  _info(
-                    Icons.phone_outlined,
-                    'Contact',
-                    _contact.text.isEmpty ? 'Not provided' : _contact.text,
-                  ),
-                  _info(
-                    Icons.badge_outlined,
-                    'Matric',
-                    _matric.text.isEmpty ? 'Not provided' : _matric.text,
-                  ),
-                  _info(Icons.school_outlined, 'Category', _category),
-                  _info(Icons.email_outlined, 'Email', widget.email),
-                ],
+    color: _editing ? Colors.white : const Color(0xFF23433A),
+    child: _editing
+        ? Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Text(
+                'Personal details',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
               ),
-      );
+              const SizedBox(height: 16),
+              _input(_name, 'Full name', Icons.person_outline),
+              _input(
+                _contact,
+                'Contact number',
+                Icons.phone_outlined,
+                keyboard: TextInputType.phone,
+              ),
+              _input(_matric, 'Matric number', Icons.badge_outlined),
+              TextFormField(
+                initialValue: _category,
+                readOnly: true,
+                enabled: false,
+                decoration: const InputDecoration(
+                  labelText: 'Student category (Managed by Admin)',
+                  prefixIcon: Icon(Icons.school_outlined),
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 12),
+              const SizedBox(height: 12),
+              TextFormField(
+                initialValue: widget.email,
+                readOnly: true,
+                decoration: const InputDecoration(
+                  labelText: 'Email address',
+                  prefixIcon: Icon(Icons.email_outlined),
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 12),
+              _input(_password, 'Password', Icons.lock_outline, obscure: true),
+              _input(
+                _confirm,
+                'Confirm password',
+                Icons.lock_outline,
+                obscure: true,
+              ),
+              CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
+                value: _verified,
+                onChanged: (value) =>
+                    setState(() => _verified = value ?? false),
+                controlAffinity: ListTileControlAffinity.leading,
+                title: const Text(
+                  'I confirm that the information provided is accurate.',
+                  style: TextStyle(fontSize: 13),
+                ),
+              ),
+              FilledButton(
+                onPressed: _saveProfile,
+                style: FilledButton.styleFrom(
+                  backgroundColor: _lime,
+                  foregroundColor: _green,
+                  minimumSize: const Size.fromHeight(50),
+                ),
+                child: const Text('Save profile'),
+              ),
+            ],
+          )
+        : Column(
+            children: [
+              _info(Icons.person_outline, 'Full Name', _name.text),
+              _info(
+                Icons.phone_outlined,
+                'Contact',
+                _contact.text.isEmpty ? 'Not provided' : _contact.text,
+              ),
+              _info(
+                Icons.badge_outlined,
+                'Matric',
+                _matric.text.isEmpty ? 'Not provided' : _matric.text,
+              ),
+              _info(Icons.school_outlined, 'Category', _category),
+              _info(Icons.email_outlined, 'Email', widget.email),
+            ],
+          ),
+  );
 
   void _saveProfile() async {
     if (!_verified) {
@@ -450,11 +463,14 @@ class _ProfileScreenState extends _ProfileSectionsState {
         return;
       }
 
-      await supabase.from('profiles').update({
-        'full_name': _name.text.trim(),
-        'phone_number': _contact.text.trim(),
-        'matric_number': _matric.text.trim(),
-      }).eq('id', user.id);
+      await supabase
+          .from('profiles')
+          .update({
+            'full_name': _name.text.trim(),
+            'phone_number': _contact.text.trim(),
+            'matric_number': _matric.text.trim(),
+          })
+          .eq('id', user.id);
 
       setState(() => _editing = false);
       _message('Profile updated successfully in database!');
@@ -469,32 +485,31 @@ class _ProfileScreenState extends _ProfileSectionsState {
     IconData icon, {
     bool obscure = false,
     TextInputType? keyboard,
-  }) =>
-      Padding(
-        padding: const EdgeInsets.only(bottom: 12),
-        child: TextFormField(
-          controller: controller,
-          obscureText: obscure,
-          keyboardType: keyboard,
-          decoration: InputDecoration(
-            labelText: label,
-            labelStyle: const TextStyle(color: _muted),
-            prefixIconColor: _lime,
-            enabledBorder: const OutlineInputBorder(
-              borderSide: BorderSide(color: _divider),
-            ),
-            focusedBorder: const OutlineInputBorder(
-              borderSide: BorderSide(color: _lime, width: 2),
-            ),
-            hintStyle: const TextStyle(color: _muted),
-            prefixIcon: Icon(icon),
-            border: const OutlineInputBorder(
-              borderSide: BorderSide(color: _divider),
-            ),
-          ),
-          style: const TextStyle(color: _green),
+  }) => Padding(
+    padding: const EdgeInsets.only(bottom: 12),
+    child: TextFormField(
+      controller: controller,
+      obscureText: obscure,
+      keyboardType: keyboard,
+      decoration: InputDecoration(
+        labelText: label,
+        labelStyle: const TextStyle(color: _muted),
+        prefixIconColor: _lime,
+        enabledBorder: const OutlineInputBorder(
+          borderSide: BorderSide(color: _divider),
         ),
-      );
+        focusedBorder: const OutlineInputBorder(
+          borderSide: BorderSide(color: _lime, width: 2),
+        ),
+        hintStyle: const TextStyle(color: _muted),
+        prefixIcon: Icon(icon),
+        border: const OutlineInputBorder(
+          borderSide: BorderSide(color: _divider),
+        ),
+      ),
+      style: const TextStyle(color: _green),
+    ),
+  );
 
   // SCRUM-48: saved orders with every session and payment, grouped into
   // upcoming / pending / past / cancelled (lib/widgets/booking_history.dart).
