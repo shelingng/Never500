@@ -160,6 +160,50 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
   String selectedStartTime = '9:00 PM';
   int selectedDurationHours = 1;
   final List<Booking> cartItems = [];
+  String? _editingCartItemId;
+
+  bool get _canEditCart =>
+      !reservationCreated &&
+      !_isReserving &&
+      _pendingBookingId == null &&
+      !_recoveringCheckout &&
+      _recoveryError == null;
+
+  void _beginCartEdit(Booking booking) {
+    if (!_canEditCart ||
+        _loadingPrices ||
+        _priceLoadFailed ||
+        _loadingHours ||
+        _hoursLoadFailed)
+      return;
+    final name = booking.facilityName.toString();
+    final sports = ['Badminton', 'Ping Pong', 'Snooker', 'Dart'];
+    final matches = sports.where((sport) => name.startsWith('$sport '));
+    if (matches.length != 1 || booking.timeSlots.isEmpty) {
+      _showMessage(
+        'This item cannot be edited. Remove it and select a new session.',
+      );
+      return;
+    }
+    setState(() {
+      _editingCartItemId = booking.id.toString();
+      selectedSport = matches.single;
+      selectedCourt = name.substring(selectedSport.length + 1);
+      selectedDate = booking.date;
+      selectedStartTime = booking.timeSlots.first.toString();
+      selectedDurationHours = booking.timeSlots.length;
+      _dayBookings = [];
+      currentStep = 2;
+    });
+    _fetchAvailability();
+  }
+
+  void _cancelCartEdit() {
+    setState(() {
+      _editingCartItemId = null;
+      currentStep = 3;
+    });
+  }
 
   bool reservationCreated = false;
   bool _isReserving = false;
@@ -333,6 +377,7 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
 
     if (cartItems.any(
       (item) =>
+          item.id.toString() != _editingCartItemId &&
           _sameFacility(item.facilityName, facilityName) &&
           DateUtils.isSameDay(item.date, selectedDate) &&
           item.timeSlots.any((slot) => requestedSlots.contains(slot)),
@@ -508,7 +553,9 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
           ),
         ),
       ),
-      bottomNavigationBar: currentStep == 3
+      bottomNavigationBar: _editingCartItemId != null
+          ? null
+          : currentStep == 3
           ? _buildCheckoutBar()
           : cartItems.isNotEmpty && currentStep < 3
           ? _buildCartBar()
@@ -726,7 +773,11 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _buildPanelHeader('02 Choose your court'),
+          _buildPanelHeader(
+            _editingCartItemId == null
+                ? '02 Choose your court'
+                : 'Edit your booking',
+          ),
           Padding(
             padding: const EdgeInsets.all(20),
             child: Column(
@@ -881,50 +932,178 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
                   ),
 
                 const SizedBox(height: 16),
-                Text(
-                  'Selected: $selectedCourt',
-                  style: const TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: Color(0xFF1B2420),
+                if (_editingCartItemId != null)
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF1F7F3),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: const Color(0xFFD8E7DD)),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.edit_calendar_outlined,
+                          color: primaryGreen,
+                          size: 22,
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Selected: $selectedCourt',
+                                style: TextStyle(
+                                  color: primaryGreen,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              const SizedBox(height: 3),
+                              Text(
+                                '$formattedDate · $timeRangeString',
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  color: Color(0xFF65756C),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          'RM${totalAmount.toStringAsFixed(2)}',
+                          style: TextStyle(
+                            color: primaryGreen,
+                            fontWeight: FontWeight.w700,
+                            fontSize: 17,
+                          ),
+                        ),
+                      ],
+                    ),
+                  )
+                else
+                  Text(
+                    'Selected: $selectedCourt',
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF1B2420),
+                    ),
                   ),
-                ),
                 const SizedBox(height: 20),
-                SizedBox(
-                  width: double.infinity,
-                  height: 48,
-                  child: ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: primaryGreen,
-                      foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10),
+                if (_editingCartItemId != null)
+                  _buildCartEditActions(requestedTimeSlots)
+                else
+                  SizedBox(
+                    width: double.infinity,
+                    height: 48,
+                    child: ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: primaryGreen,
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
                       ),
-                    ),
-                    onPressed:
-                        _isLoadingAvailability ||
-                            _availabilityError != null ||
-                            _getCourtStatus(
-                                  _selectedFacilityName,
-                                  requestedTimeSlots,
-                                ) !=
-                                'Available'
-                        ? null
-                        : _addSelectedToCart,
-                    child: const Text(
-                      'Add to cart',
-                      style: TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.bold,
+                      onPressed:
+                          _isLoadingAvailability ||
+                              _availabilityError != null ||
+                              _getCourtStatus(
+                                    _selectedFacilityName,
+                                    requestedTimeSlots,
+                                  ) !=
+                                  'Available'
+                          ? null
+                          : _addSelectedToCart,
+                      child: Text(
+                        _editingCartItemId == null
+                            ? 'Add to cart'
+                            : 'Save changes',
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                     ),
                   ),
-                ),
               ],
             ),
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildCartEditActions(List<String> requestedTimeSlots) {
+    final canSave =
+        _canEditCart &&
+        !_loadingPrices &&
+        !_priceLoadFailed &&
+        !_isLoadingAvailability &&
+        _availabilityError == null &&
+        _getCourtStatus(_selectedFacilityName, requestedTimeSlots) ==
+            'Available';
+    final cancel = OutlinedButton(
+      onPressed: _cancelCartEdit,
+      style: OutlinedButton.styleFrom(
+        foregroundColor: primaryGreen,
+        side: const BorderSide(color: Color(0xFFCBD8D0)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      ),
+      child: const Text('Cancel edit'),
+    );
+    final save = ElevatedButton(
+      onPressed: canSave ? _addSelectedToCart : null,
+      child: const FittedBox(
+        fit: BoxFit.scaleDown,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.check_rounded, size: 20),
+            SizedBox(width: 8),
+            Text('Save changes', style: TextStyle(fontWeight: FontWeight.w700)),
+          ],
+        ),
+      ),
+      style: ElevatedButton.styleFrom(
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        backgroundColor: primaryGreen,
+        foregroundColor: Colors.white,
+        elevation: 0,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      ),
+    );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Your order changes only when you save.',
+          style: TextStyle(fontSize: 12, color: Color(0xFF65756C)),
+        ),
+        const SizedBox(height: 14),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            if (constraints.maxWidth < 340) {
+              return Column(
+                children: [
+                  SizedBox(width: double.infinity, height: 48, child: save),
+                  const SizedBox(height: 10),
+                  SizedBox(width: double.infinity, height: 48, child: cancel),
+                ],
+              );
+            }
+            return Row(
+              children: [
+                Expanded(child: SizedBox(height: 48, child: cancel)),
+                const SizedBox(width: 12),
+                Expanded(child: SizedBox(height: 48, child: save)),
+              ],
+            );
+          },
+        ),
+      ],
     );
   }
 
@@ -1177,10 +1356,31 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
                   fontWeight: FontWeight.bold,
                 ),
               ),
-              IconButton(
-                icon: const Icon(Icons.delete_outline, size: 19),
-                color: Colors.grey.shade500,
-                onPressed: () => _removeCartItem(booking),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  IconButton(
+                    tooltip: 'Edit booking',
+                    icon: const Icon(Icons.edit_outlined, size: 19),
+                    color: primaryGreen,
+                    onPressed:
+                        _canEditCart &&
+                            !_loadingPrices &&
+                            !_priceLoadFailed &&
+                            !_loadingHours &&
+                            !_hoursLoadFailed
+                        ? () => _beginCartEdit(booking)
+                        : null,
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.delete_outline, size: 19),
+                    color: Colors.grey.shade500,
+                    tooltip: 'Remove booking',
+                    onPressed: _canEditCart
+                        ? () => _removeCartItem(booking)
+                        : null,
+                  ),
+                ],
               ),
             ],
           ),
@@ -1241,7 +1441,9 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
               ),
             ),
             ElevatedButton(
-              onPressed: () => setState(() => currentStep = 3),
+              onPressed: _editingCartItemId != null
+                  ? _cancelCartEdit
+                  : () => setState(() => currentStep = 3),
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.white,
                 foregroundColor: primaryGreen,
@@ -1249,8 +1451,8 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
                   borderRadius: BorderRadius.circular(9),
                 ),
               ),
-              child: const Text(
-                'View order',
+              child: Text(
+                _editingCartItemId == null ? 'View order' : 'Cancel edit',
                 style: TextStyle(fontWeight: FontWeight.bold),
               ),
             ),
@@ -1288,7 +1490,22 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
     );
   }
 
-  void _addSelectedToCart() {
+  Future<void> _addSelectedToCart() async {
+    if (!_canEditCart ||
+        _loadingPrices ||
+        _priceLoadFailed ||
+        _isLoadingAvailability ||
+        _availabilityError != null)
+      return;
+    final editingId = _editingCartItemId;
+    final originalIndex = editingId == null
+        ? -1
+        : cartItems.indexWhere((item) => item.id.toString() == editingId);
+    if (editingId != null && originalIndex < 0) {
+      _showMessage('This item is no longer in your cart.');
+      _cancelCartEdit();
+      return;
+    }
     final ruleError = _selectionRuleError;
     if (ruleError != null) {
       _showMessage(ruleError);
@@ -1317,7 +1534,8 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
     // (DUPLICATE_CART_SLOT), so stop it here with a clear message.
     final overlapsCart = cartItems.any(
       (item) =>
-          item.facilityName == facilityName &&
+          item.id.toString() != _editingCartItemId &&
+          _sameFacility(item.facilityName, facilityName) &&
           DateUtils.isSameDay(item.date, date) &&
           List<String>.from(item.timeSlots as List).any(timeSlots.contains),
     );
@@ -1328,8 +1546,36 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
       return;
     }
 
+    if (editingId != null &&
+        _recoveredExpiredOrderId != null &&
+        _bookingService.checkoutUserId != null) {
+      final owner = _bookingService.checkoutUserId;
+      final snapshot =
+          '$selectedSport|$selectedCourt|$selectedDate|$selectedStartTime|$selectedDurationHours';
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        final saved = await prefs.setBool(
+          'dismissed-expired-order:$owner:$_recoveredExpiredOrderId',
+          true,
+        );
+        if (!saved) throw StateError('Could not save edit');
+      } catch (_) {
+        if (mounted)
+          _showMessage('Could not save your edit. Please try again.');
+        return;
+      }
+      if (!mounted ||
+          _bookingService.checkoutUserId != owner ||
+          editingId != _editingCartItemId ||
+          !_canEditCart ||
+          snapshot !=
+              '$selectedSport|$selectedCourt|$selectedDate|$selectedStartTime|$selectedDurationHours' ||
+          _isLoadingAvailability ||
+          _getCourtStatus(facilityName, timeSlots) != 'Available')
+        return;
+    }
     final booking = Booking(
-      id: 'CART-${DateTime.now().microsecondsSinceEpoch}',
+      id: editingId ?? 'CART-${DateTime.now().microsecondsSinceEpoch}',
       userId: widget.email,
       facilityName: facilityName,
       date: date,
@@ -1341,10 +1587,22 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
 
     setState(() {
       _checkoutRequestId = null;
-      cartItems.add(booking);
-      currentStep = 1;
+      if (editingId == null) {
+        cartItems.add(booking);
+        currentStep = 1;
+      } else {
+        final index = cartItems.indexWhere(
+          (item) => item.id.toString() == editingId,
+        );
+        if (index < 0) return;
+        cartItems[index] = booking;
+        _editingCartItemId = null;
+        currentStep = 3;
+      }
     });
-    _showMessage('Added to your order.');
+    _showMessage(
+      editingId == null ? 'Added to your order.' : 'Order item updated.',
+    );
   }
 
   Future<void> _removeCartItem(Booking booking) async {

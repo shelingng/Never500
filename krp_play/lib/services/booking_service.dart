@@ -266,9 +266,9 @@ class BookingService {
           (b) => {
             'facility_name': b.facilityName.toString(),
             'date': _date(b.date),
-            'start_times': List<String>.from(
-              b.timeSlots as List,
-            ).map(_databaseTime).toList(),
+            'start_times': List<String>.from(b.timeSlots as List)
+                .map(_databaseTime)
+                .toList(),
           },
         )
         .toList();
@@ -468,7 +468,9 @@ class BookingService {
     try {
       final bookingRows = await _supabase
           .from('bookings')
-          .select('id, facility_name, booking_date, start_time, status')
+          .select(
+            'id, facility_name, booking_date, start_time, status, booking_items(id)',
+          )
           .eq('booking_date', dateStr);
       for (final r in (bookingRows as List)) {
         final row = JsonMap.from(r as Map);
@@ -488,9 +490,8 @@ class BookingService {
       '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
 
   static String _databaseTime(String value) {
-    final match = RegExp(
-      r'^(\d{1,2}):(\d{2}) (AM|PM)$',
-    ).firstMatch(value.trim());
+    final match = RegExp(r'^(\d{1,2}):(\d{2}) (AM|PM)$')
+        .firstMatch(value.trim());
     if (match == null) throw FormatException('Invalid start time', value);
     final hour = int.parse(match[1]!) % 12 + (match[3] == 'PM' ? 12 : 0);
     return '${hour.toString().padLeft(2, '0')}:${match[2]}:00';
