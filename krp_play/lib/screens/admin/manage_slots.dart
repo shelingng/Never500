@@ -3,15 +3,23 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'reservations.dart';
+
 enum _SlotStatus { open, reserved, closed }
 
 class _DemoBooking {
+  final String bookingId;
   final String id;
   final int amount;
   final bool paid;
   bool cancelled = false;
 
-  _DemoBooking({required this.id, required this.amount, required this.paid});
+  _DemoBooking({
+    required this.id,
+    required this.amount,
+    required this.paid,
+    this.bookingId = '',
+  });
 }
 
 class _Slot {
@@ -255,7 +263,9 @@ class _AdminSlotsTabState extends State<AdminSlotsTab> {
     }
 
     final rawPayload = b['checkout_payload'];
-    if (rawPayload is List) {
+    if (rawPayload is List && rawPayload.isNotEmpty) {
+      // Payload sessions replace legacy top-level booking fields.
+      found.clear();
       for (final item in rawPayload) {
         if (item is Map) {
           final f = (item['facility_name'] ?? topFacility).toString().trim();
@@ -291,7 +301,9 @@ class _AdminSlotsTabState extends State<AdminSlotsTab> {
     }
 
     final bookingItems = b['booking_items'];
-    if (bookingItems is List) {
+    if (bookingItems is List && bookingItems.isNotEmpty) {
+      // Linked items are authoritative for multi-session orders.
+      found.clear();
       for (final rawItem in bookingItems) {
         if (rawItem is Map) {
           final itemStatus = (rawItem['status'] ?? status).toString();
@@ -322,7 +334,7 @@ class _AdminSlotsTabState extends State<AdminSlotsTab> {
                     ? (isClosed ? status : itemStatus)
                     : itemStatus,
                 'amount': itemCents,
-                'paid': true,
+                'paid': isPaid,
               });
             }
           }
@@ -330,7 +342,16 @@ class _AdminSlotsTabState extends State<AdminSlotsTab> {
       }
     }
 
-    return found;
+    // Do not repeat the same booking within this facility/date/hour.
+    final unique = <String, Map>{};
+    for (final raw in found) {
+      final row = Map.from(raw as Map);
+      final time = (row['time'] ?? '').toString();
+      final hour = _parseHour(time);
+      final key = '${row['id']}|${hour ?? time}';
+      unique[key] = row;
+    }
+    return unique.values.toList();
   }
 
   Future<void> _syncTimeSlotsAvailability(
@@ -360,7 +381,9 @@ class _AdminSlotsTabState extends State<AdminSlotsTab> {
     }
 
     if (updatedCount == 0) {
-      final facilitiesRows = await supabase.from('facilities').select('id, name');
+      final facilitiesRows = await supabase
+          .from('facilities')
+          .select('id, name');
       String? facilityId;
       for (final f in (facilitiesRows as List)) {
         final fMap = f as Map;
@@ -505,7 +528,9 @@ class _AdminSlotsTabState extends State<AdminSlotsTab> {
             );
           } else {
             final activeOnly = hourMatches
-                .where((m) => !_isInactiveStatus((m['status'] ?? '').toString()))
+                .where(
+                  (m) => !_isInactiveStatus((m['status'] ?? '').toString()),
+                )
                 .toList();
 
             if (activeOnly.isEmpty) {
@@ -529,6 +554,7 @@ class _AdminSlotsTabState extends State<AdminSlotsTab> {
                     : rawId.toUpperCase();
                 return _DemoBooking(
                   id: safeId,
+                  bookingId: rawId,
                   amount: (m['amount'] as int?) ?? 0,
                   paid: (m['paid'] as bool?) ?? true,
                 );
@@ -671,8 +697,10 @@ class _AdminSlotsTabState extends State<AdminSlotsTab> {
           final stat = (record['status']?.toString() ?? '').toLowerCase();
           final items = _extractItemsFromBookingMap(record, dateStr);
           return items.any(
-                (it) =>
-                    _matchesHour((it['time'] ?? '').toString(), slot.start.hour),
+                (it) => _matchesHour(
+                  (it['time'] ?? '').toString(),
+                  slot.start.hour,
+                ),
               ) &&
               !_isClosedStatus(stat) &&
               !_isInactiveStatus(stat);
@@ -765,7 +793,11 @@ class _AdminSlotsTabState extends State<AdminSlotsTab> {
           'booking_reference': uniqueRef,
         });
 
-        await _syncTimeSlotsAvailability(dateStr, slot.start.hour, available: false);
+        await _syncTimeSlotsAvailability(
+          dateStr,
+          slot.start.hour,
+          available: false,
+        );
       }
 
       if (createdRefundCount > 0) {
@@ -842,7 +874,11 @@ class _AdminSlotsTabState extends State<AdminSlotsTab> {
         }
       }
 
-      await _syncTimeSlotsAvailability(dateStr, slot.start.hour, available: true);
+      await _syncTimeSlotsAvailability(
+        dateStr,
+        slot.start.hour,
+        available: true,
+      );
 
       _message('Session reopened in live database.');
     } catch (e) {
@@ -883,43 +919,175 @@ class _AdminSlotsTabState extends State<AdminSlotsTab> {
   void _message(String text) =>
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
 
-  void _viewDetails(_Slot slot) {
-    showDialog<void>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Session details'),
-        content: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(_facility),
-            Text(_dateLabel(slot.start)),
-            Text(_timeRange(slot)),
-            const SizedBox(height: 12),
-            Text('Status: ${_statusLabel(slot)}'),
-            if (slot.closureReason != null)
-              Text('Closure reason: ${slot.closureReason}'),
-            const Divider(height: 24),
-            if (slot.bookings.isEmpty)
-              const Text('No bookings for this session.'),
-            ...slot.bookings.map(
-              (booking) => Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: Text(
-                  '${booking.id}\n${booking.cancelled ? 'Cancelled by management' : 'Active reservation'}\n${booking.paid ? 'Paid' : 'Unpaid'} · ${_money(booking.amount)}',
-                ),
-              ),
+  bool _loadingSessionDetails = false;
+
+  Future<void> _viewDetails(_Slot slot) async {
+    if (_loadingSessionDetails) return;
+    _loadingSessionDetails = true;
+    final owner = supabase.auth.currentUser?.id;
+    final facility = _facility;
+    final date = _dateLabel(slot.start);
+    final time = _timeRange(slot);
+    final slotStatus = _statusLabel(slot);
+    final reason = slot.closureReason;
+    final ids = slot.bookings
+        .map((booking) => booking.bookingId)
+        .where((id) => id.isNotEmpty)
+        .toSet()
+        .toList();
+
+    try {
+      if (owner == null || await supabase.rpc('is_admin') != true) {
+        throw StateError('Admin access required');
+      }
+      final List<Map<String, dynamic>> rows = [];
+      if (ids.isNotEmpty) {
+        final response = await supabase
+            .from('bookings')
+            .select(
+              'id, booking_reference, status, total_amount, is_demo, '
+              'customer_name, customer_matric_number, '
+              'profiles!booking_user_id_fkey(full_name, matric_number), '
+              'payments(status, created_at)',
+            )
+            .inFilter('id', ids);
+        rows.addAll(response.map((row) => Map<String, dynamic>.from(row)));
+      }
+      if (!mounted || supabase.auth.currentUser?.id != owner) return;
+      final byId = {for (final row in rows) row['id'].toString(): row};
+
+      String value(dynamic raw) {
+        final text = raw?.toString().trim() ?? '';
+        return text.isEmpty ? 'Not recorded' : text;
+      }
+
+      Widget line(String label, dynamic raw) => Padding(
+        padding: const EdgeInsets.only(bottom: 6),
+        child: SelectableText('$label: ${value(raw)}'),
+      );
+
+      await showDialog<void>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Session details'),
+          scrollable: true,
+          content: SizedBox(
+            width: 520,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                line('Facility', facility),
+                line('Date', date),
+                line('Time', time),
+                line('Slot status', slotStatus),
+                if (reason != null) line('Closure reason', reason),
+                if (slot.bookings.isEmpty)
+                  const Text('No bookings for this session.'),
+                for (final booking in slot.bookings)
+                  Builder(
+                    builder: (_) {
+                      final row = byId[booking.bookingId];
+                      if (row == null) {
+                        return const Padding(
+                          padding: EdgeInsets.only(top: 12),
+                          child: Text(
+                            'Booking details unavailable. Close and retry.',
+                          ),
+                        );
+                      }
+                      final profile = row['profiles'] as Map?;
+                      final payments =
+                          [
+                            for (final payment
+                                in (row['payments'] as List? ?? []))
+                              Map<String, dynamic>.from(payment as Map),
+                          ]..sort(
+                            (a, b) => (b['created_at'] ?? '')
+                                .toString()
+                                .compareTo((a['created_at'] ?? '').toString()),
+                          );
+                      final paid = payments.any(
+                        (payment) =>
+                            payment['status']?.toString().toLowerCase() ==
+                            'paid',
+                      );
+                      final paymentStatus = row['is_demo'] == true
+                          ? 'Demo payment'
+                          : paid
+                          ? 'Paid'
+                          : payments.isEmpty
+                          ? 'No payment record'
+                          : value(payments.first['status']);
+                      final reference = value(row['booking_reference']);
+
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Divider(height: 24),
+                          line('Booking reference', reference),
+                          line(
+                            'Student name',
+                            profile?['full_name'] ?? row['customer_name'],
+                          ),
+                          line(
+                            'Matric number',
+                            profile?['matric_number'] ??
+                                row['customer_matric_number'],
+                          ),
+                          line('Booking status', row['status']),
+                          line('Payment status', paymentStatus),
+                          line('This session price', _money(booking.amount)),
+                          line(
+                            'Whole order total',
+                            row['total_amount'] == null
+                                ? null
+                                : 'RM${num.parse(row['total_amount'].toString()).toStringAsFixed(2)}',
+                          ),
+                          TextButton.icon(
+                            icon: const Icon(Icons.receipt_long_outlined),
+                            label: const Text('View full booking'),
+                            onPressed: () {
+                              Navigator.pop(dialogContext);
+                              Navigator.of(context).push(
+                                MaterialPageRoute<void>(
+                                  builder: (_) => Scaffold(
+                                    appBar: AppBar(
+                                      title: const Text('Booking history'),
+                                    ),
+                                    body: AdminBookingsTab(
+                                      initialSearch:
+                                          row['booking_reference']
+                                              ?.toString() ??
+                                          booking.bookingId,
+                                    ),
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                        ],
+                      );
+                    },
+                  ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Close'),
             ),
           ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Close'),
-          ),
-        ],
-      ),
-    );
+      );
+    } catch (error) {
+      if (mounted && supabase.auth.currentUser?.id == owner) {
+        _message('Could not load booking details. Please try again.');
+      }
+    } finally {
+      _loadingSessionDetails = false;
+    }
   }
 
   Future<void> _selectDate(BuildContext context) async {
@@ -1014,10 +1182,10 @@ class _AdminSlotsTabState extends State<AdminSlotsTab> {
                 past
                     ? 'Session ended'
                     : closed
-                        ? 'Reason: ${slot.closureReason}'
-                        : reserved
-                            ? 'Booked · ${slot.activeBookings.first.paid ? 'Paid' : 'Unpaid'}'
-                            : 'Available for booking',
+                    ? 'Reason: ${slot.closureReason}'
+                    : reserved
+                    ? 'Booked · ${slot.activeBookings.first.paid ? 'Paid' : 'Unpaid'}'
+                    : 'Available for booking',
                 style: const TextStyle(color: Colors.grey, fontSize: 12),
               ),
               const SizedBox(height: 12),
@@ -1034,8 +1202,8 @@ class _AdminSlotsTabState extends State<AdminSlotsTab> {
                         closed
                             ? 'Reopen'
                             : reserved
-                                ? 'Review closure'
-                                : 'Close session',
+                            ? 'Review closure'
+                            : 'Close session',
                       ),
                     ),
                   TextButton(
@@ -1209,8 +1377,8 @@ class _AdminSlotsTabState extends State<AdminSlotsTab> {
                     final columns = constraints.maxWidth >= 1000
                         ? 3
                         : constraints.maxWidth >= 650
-                            ? 2
-                            : 1;
+                        ? 2
+                        : 1;
                     final width =
                         (constraints.maxWidth - (columns - 1) * 12) / columns;
                     return Wrap(
