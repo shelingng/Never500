@@ -233,6 +233,16 @@ class BookingOrder {
 
   String get _status => status.toLowerCase();
 
+  /// Reference short enough to read: `KRP-<uuid>` becomes `KRP-3F9A2C1B`.
+  /// Other formats are kept as they are. Copy [reference] for the full value.
+  String get shortReference {
+    final match = RegExp(
+      r'^([A-Za-z]+-)?([0-9a-fA-F]{8})-[0-9a-fA-F]{4}-',
+    ).firstMatch(reference);
+    if (match == null) return reference;
+    return '${match.group(1) ?? ''}${match.group(2)!.toUpperCase()}';
+  }
+
   /// The payment that settled this order, if any (paid or demo).
   OrderPayment? get settledPayment {
     for (final p in payments) {
