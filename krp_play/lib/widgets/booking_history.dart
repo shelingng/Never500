@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../models/booking_order.dart';
+import 'package:url_launcher/url_launcher.dart';
+
 import '../services/booking_service.dart';
 
 // SCRUM-48: the student's saved booking history, loaded from Supabase so it is
@@ -22,7 +24,15 @@ class BookingHistoryView extends StatefulWidget {
   /// Overridable for tests; real use is the current time.
   final DateTime Function()? clock;
 
-  const BookingHistoryView({super.key, this.service, this.clock});
+  /// Opens the Billplz page. Overridable for tests; real use opens a new tab.
+  final Future<bool> Function(Uri url)? openUrl;
+
+  const BookingHistoryView({
+    super.key,
+    this.service,
+    this.clock,
+    this.openUrl,
+  });
 
   @override
   State<BookingHistoryView> createState() => _BookingHistoryViewState();
@@ -34,6 +44,53 @@ class _BookingHistoryViewState extends State<BookingHistoryView> {
   String? _error;
   bool _loading = true;
   OrderGroup? _selected;
+
+  /// Booking ids whose payment link is being fetched.
+  final Set<String> _opening = {};
+
+  Future<bool> _open(Uri url) =>
+      (widget.openUrl ??
+              (u) => launchUrl(
+                u,
+                mode: LaunchMode.externalApplication,
+                webOnlyWindowName: '_blank',
+              ))
+          .call(url);
+
+  // SCRUM-48 (S14): reopen the Billplz page for a booking that is still held.
+  // The backend returns the existing bill if there is one, so paying again
+  // never creates a second charge.
+  Future<void> _payNow(BookingOrder order) async {
+    if (_opening.contains(order.id)) return;
+    setState(() => _opening.add(order.id));
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final url = await _service.createBillplzPayment(order.id);
+      final opened = await _open(Uri.parse(url));
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            opened
+                ? 'Payment page opened. After paying, tap "I\'ve paid, check status".'
+                : 'Could not open the payment page. Allow pop-ups and try again.',
+          ),
+        ),
+      );
+    } on PaymentException catch (error) {
+      messenger.showSnackBar(SnackBar(content: Text(error.message)));
+      // The hold may have ended or the booking may already be paid.
+      await _load();
+    } catch (error) {
+      debugPrint('Pay now failed: $error');
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text('Could not start the payment. Please try again.'),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _opening.remove(order.id));
+    }
+  }
 
   DateTime get _now => (widget.clock ?? DateTime.now)();
 
@@ -584,28 +641,126 @@ class _BookingHistoryViewState extends State<BookingHistoryView> {
     );
   }
 
-  Widget _holdNotice(BookingOrder order) => Container(
-    margin: const EdgeInsets.only(top: 4),
-    padding: const EdgeInsets.all(10),
-    decoration: BoxDecoration(
-      color: const Color(0xFFFFF8E6),
-      borderRadius: BorderRadius.circular(10),
-      border: Border.all(color: const Color(0xFFF3DFA8)),
-    ),
-    child: Row(
-      children: [
-        const Icon(Icons.timer_outlined, size: 18, color: Color(0xFF8A6100)),
-        const SizedBox(width: 8),
-        Expanded(
-          child: Text(
-            'Not paid yet. Slots are held until '
-            '${formatKlInstant(order.paymentDeadline!)}.',
-            style: const TextStyle(color: Color(0xFF8A6100), fontSize: 12),
+  Widget _holdNotice(BookingOrder order) {
+    const amber = Color(0xFF8A6100);
+    final opening = _opening.contains(order.id);
+    final deadline = formatKlInstant(order.paymentDeadline!);
+    // "24 Nov 2026, 3:05 PM" -> "3:05 PM" for the heading.
+    final deadlineTime = deadline.split(', ').last;
+
+    return Container(
+      margin: const EdgeInsets.only(top: 4),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFF8E6),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFF3DFA8)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: const BoxDecoration(
+                  color: Color(0xFFFFE9B3),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.timer_outlined, size: 18, color: amber),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Pay before $deadlineTime',
+                      style: const TextStyle(
+                        color: amber,
+                        fontSize: 15,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Not paid yet. Slots are held until $deadline.',
+                      style: const TextStyle(color: amber, fontSize: 12),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
-        ),
-      ],
-    ),
-  );
+          const SizedBox(height: 14),
+          if (_service.usesRealPayment) ...[
+            SizedBox(
+              height: 48,
+              child: FilledButton.icon(
+                key: ValueKey('pay-${order.id}'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: _green,
+                  foregroundColor: _lime,
+                  disabledBackgroundColor: _green.withValues(alpha: 0.6),
+                  disabledForegroundColor: Colors.white70,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  textStyle: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                onPressed: opening ? null : () => _payNow(order),
+                icon: opening
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white70,
+                        ),
+                      )
+                    : const Icon(Icons.lock_outline, size: 18),
+                label: Text(
+                  opening
+                      ? 'Opening...'
+                      : 'Pay ${formatRinggit(order.total)} now',
+                ),
+              ),
+            ),
+            const SizedBox(height: 4),
+            Center(
+              child: TextButton.icon(
+                key: ValueKey('check-${order.id}'),
+                style: TextButton.styleFrom(foregroundColor: _green),
+                onPressed: opening ? null : _load,
+                icon: const Icon(Icons.refresh, size: 16),
+                label: const Text(
+                  "I've paid, check status",
+                  style: TextStyle(
+                    fontWeight: FontWeight.w600,
+                    decoration: TextDecoration.underline,
+                  ),
+                ),
+              ),
+            ),
+            const Text(
+              'Secure payment by Billplz (FPX). Opens in a new tab.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: _muted, fontSize: 11),
+            ),
+          ] else
+            const Text(
+              'Online payment is not set up in this app run. '
+              'Start the app with the payment backend to pay.',
+              style: TextStyle(color: amber, fontSize: 11),
+            ),
+        ],
+      ),
+    );
+  }
 
   Widget _footer(BookingOrder order, DateTime now) {
     return Wrap(
