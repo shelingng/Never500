@@ -192,7 +192,7 @@ void main() {
       await showCheckout(tester, fake);
       fake.saved = savedOrder(status: 'confirmed');
       await tapText(tester, 'Resume payment');
-      expect(find.text('Payment received - booking confirmed'), findsOneWidget);
+      expect(find.text('Payment received. See you on court!'), findsOneWidget);
       expect(fake.resumedIds, isEmpty);
       expect(fake.keys, isEmpty);
     },

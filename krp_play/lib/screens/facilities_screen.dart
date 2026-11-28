@@ -1,15 +1,18 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import '../models/student_category.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../models/booking.dart';
+import '../models/booking_order.dart' show shortBookingReference;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/checkout_recovery.dart';
 import '../models/session_selection.dart';
 import '../services/booking_service.dart';
+import 'booking_records_screen.dart';
 
 typedef JsonMap = Map<String, dynamic>;
 typedef BookingList = List<Booking>;
@@ -1882,80 +1885,233 @@ class _FacilitiesScreenState extends State<FacilitiesScreen> {
                     _buildCancelPendingButton(),
                   ],
                 ],
-                if (reservationCreated) ...[
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFEBF5E9),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: const Color(0xFFC7E5C3)),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Row(
-                          children: [
-                            Icon(
-                              Icons.check_circle_outline,
-                              size: 20,
-                              color: Color(0xFF2E7D32),
-                            ),
-                            SizedBox(width: 8),
-                            Text(
-                              'Payment successful',
-                              style: TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold,
-                                color: Color(0xFF2E7D32),
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 10),
-                        Text(
-                          _paidViaBillplz
-                              ? 'Payment received - booking confirmed'
-                              : 'Demo payment successful - booking confirmed',
-                        ),
-                        Text(
-                          '$generatedBookingRef · ${cartItems.length} items',
-                          style: const TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 14,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          'RM${(_reservedTotal ?? cartTotal).toStringAsFixed(2)}',
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: Colors.grey.shade700,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          _paidViaBillplz
-                              ? 'Paid via Billplz.'
-                              : 'Demo only. No money was charged.',
-                        ),
-                        const SizedBox(height: 12),
-                        InkWell(
-                          onTap: () => Navigator.of(context).pop(),
-                          child: Text(
-                            'View booking details →',
+                if (reservationCreated) _buildPaymentSuccessCard(),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // SCRUM-48 (S22): payment result. Short reference, a clear receipt and a
+  // button that opens Booking Records (it used to pop back to Home).
+  void _openMyBookings() {
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(
+        builder: (_) => BookingRecordsScreen(email: widget.email),
+      ),
+    );
+  }
+
+  IconData _successFacilityIcon(String name) {
+    final n = name.toLowerCase();
+    if (n.contains('badminton')) return Icons.sports_tennis;
+    if (n.contains('ping pong')) return Icons.sports_handball;
+    if (n.contains('snooker')) return Icons.sports_bar;
+    if (n.contains('dart')) return Icons.adjust;
+    if (n.contains('gym')) return Icons.fitness_center;
+    return Icons.sports;
+  }
+
+  Widget _buildPaymentSuccessCard() {
+    const okGreen = Color(0xFF2E7D32);
+    const muted = Color(0xFF65756C);
+    const lime = Color(0xFFC5F84B);
+    const weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    final shortRef = shortBookingReference(generatedBookingRef);
+    final amount = (_reservedTotal ?? cartTotal).toStringAsFixed(2);
+
+    Widget receiptRow(String label, Widget value) => Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        children: [
+          Text(label, style: const TextStyle(color: muted, fontSize: 13)),
+          const Spacer(),
+          value,
+        ],
+      ),
+    );
+
+    return Container(
+      key: const ValueKey('payment-success-card'),
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(20, 24, 20, 20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: subtleBorder),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x0F000000),
+            blurRadius: 12,
+            offset: Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          // Big tick and headline.
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: const BoxDecoration(
+              color: Color(0xFFE8F5E9),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(Icons.check_rounded, size: 36, color: okGreen),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            'Booking confirmed!',
+            style: TextStyle(
+              color: primaryGreen,
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            _paidViaBillplz
+                ? 'Payment received. See you on court!'
+                : 'Demo payment only. No money was charged.',
+            textAlign: TextAlign.center,
+            style: const TextStyle(color: muted, fontSize: 13),
+          ),
+          const SizedBox(height: 18),
+
+          // Receipt.
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF5F8F6),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Column(
+              children: [
+                receiptRow(
+                  'Reference',
+                  Tooltip(
+                    message: 'Tap to copy the full reference',
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(6),
+                      onTap: () {
+                        Clipboard.setData(
+                          ClipboardData(text: generatedBookingRef),
+                        );
+                        _showMessage('Booking reference copied');
+                      },
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            shortRef,
                             style: TextStyle(
+                              color: primaryGreen,
                               fontSize: 13,
                               fontWeight: FontWeight.bold,
-                              color: primaryGreen,
+                              letterSpacing: 0.5,
                             ),
+                          ),
+                          const SizedBox(width: 6),
+                          const Icon(Icons.copy, size: 14, color: muted),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                receiptRow(
+                  'Amount paid',
+                  Text(
+                    'RM$amount',
+                    style: TextStyle(
+                      color: primaryGreen,
+                      fontSize: 15,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+                receiptRow(
+                  'Paid via',
+                  Text(
+                    _paidViaBillplz ? 'Billplz (FPX)' : 'Demo',
+                    style: TextStyle(
+                      color: primaryGreen,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                const Divider(height: 18, color: Color(0xFFE2E9E4)),
+                for (final item in cartItems)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 5),
+                    child: Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(7),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(9),
+                          ),
+                          child: Icon(
+                            _successFacilityIcon(item.facilityName.toString()),
+                            size: 16,
+                            color: primaryGreen,
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                item.facilityName.toString(),
+                                style: TextStyle(
+                                  color: primaryGreen,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              Text(
+                                '${weekdays[item.date.weekday - 1]}, '
+                                '${item.date.day} ${monthNames[item.date.month - 1]} · '
+                                '${item.timeSlots.first} - ${_formatTime(_minutesFor(item.timeSlots.first.toString()) + (item.timeSlots.length as int) * 60)}',
+                                style: const TextStyle(
+                                  color: muted,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                       ],
                     ),
                   ),
-                ],
               ],
+            ),
+          ),
+          const SizedBox(height: 18),
+
+          // Go to Booking Records, not Home.
+          SizedBox(
+            width: double.infinity,
+            height: 48,
+            child: FilledButton.icon(
+              key: const ValueKey('view-my-bookings'),
+              style: FilledButton.styleFrom(
+                backgroundColor: primaryGreen,
+                foregroundColor: lime,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                textStyle: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              onPressed: _openMyBookings,
+              icon: const Icon(Icons.receipt_long_outlined, size: 18),
+              label: const Text('View my bookings'),
             ),
           ),
         ],

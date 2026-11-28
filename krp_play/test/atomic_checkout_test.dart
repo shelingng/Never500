@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'package:krp_play/screens/booking_records_screen.dart';
 import 'package:krp_play/screens/facilities_screen.dart';
 
 import 'support/checkout_fake.dart';
@@ -44,13 +45,30 @@ void main() {
     await openPayment(tester, fake);
     await tapText(tester, 'Pay Now');
     expect(fake.keys, hasLength(1));
+    expect(find.text('Booking confirmed!'), findsOneWidget);
     expect(
-      find.text('Demo payment successful - booking confirmed'),
+      find.text('Demo payment only. No money was charged.'),
       findsOneWidget,
     );
-    expect(find.text('Demo only. No money was charged.'), findsOneWidget);
-    expect(find.text('Booking confirmed'), findsNothing);
+    expect(find.text('Demo'), findsOneWidget);
     expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  checkoutTestWidgets('View my bookings opens Booking Records, not Home', (
+    tester,
+  ) async {
+    final fake = CheckoutFake();
+    await openPayment(tester, fake);
+    await tapText(tester, 'Pay Now');
+
+    final button = find.byKey(const ValueKey('view-my-bookings'));
+    await tester.ensureVisible(button);
+    await tester.tap(button);
+    await tester.pumpAndSettle();
+
+    expect(find.byType(BookingRecordsScreen), findsOneWidget);
+    expect(find.byType(FacilitiesScreen), findsNothing);
     await tester.pumpWidget(const SizedBox());
   });
 
@@ -86,7 +104,7 @@ void main() {
     expect(fake.keys, hasLength(2));
     expect(fake.keys[0], fake.keys[1]);
     expect(
-      find.text('Demo payment successful - booking confirmed'),
+      find.text('Booking confirmed!'),
       findsOneWidget,
     );
     await tester.pumpWidget(const SizedBox());
@@ -113,7 +131,7 @@ void main() {
       expect(find.text('In Cart'), findsNothing);
       expect(find.text('View order'), findsNothing);
       expect(
-        find.text('Demo payment successful - booking confirmed'),
+        find.text('Booking confirmed!'),
         findsNothing,
       );
       expect(tester.takeException(), isNull);
@@ -134,7 +152,7 @@ void main() {
       expect(find.text('Selected slot is no longer available'), findsOneWidget);
       expect(find.textContaining('Badminton Court 01'), findsWidgets);
       expect(
-        find.text('Demo payment successful - booking confirmed'),
+        find.text('Booking confirmed!'),
         findsNothing,
       );
       await tapText(tester, 'Choose another slot');
