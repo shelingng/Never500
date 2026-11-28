@@ -56,6 +56,22 @@ class HistoryFake extends BookingService {
   }
 }
 
+/// History fake with the payment backend switched on (S14 Pay now).
+class PayFake extends HistoryFake {
+  PayFake(super.result, this.payment);
+  Future<String> Function(String bookingId) payment;
+  final List<String> paidIds = [];
+
+  @override
+  bool get usesRealPayment => true;
+
+  @override
+  Future<String> createBillplzPayment(String bookingId) {
+    paidIds.add(bookingId);
+    return payment(bookingId);
+  }
+}
+
 void main() {
   group('grouping keeps each status type separate', () {
     test('paid session still to come is upcoming', () {
@@ -270,6 +286,101 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('tab-past')));
       await tester.pumpAndSettle();
       expect(find.text('No past bookings'), findsOneWidget);
+    });
+  });
+
+  group('pay now on pending bookings (S14)', () {
+    final pending = row(
+      status: 'pending_payment',
+      deadline: '2026-11-24T07:05:00Z',
+    );
+    const payKey = ValueKey('pay-b-pending_payment-2026-11-25');
+
+    Future<List<Uri>> pumpPay(WidgetTester tester, HistoryFake fake) async {
+      final opened = <Uri>[];
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SingleChildScrollView(
+              child: BookingHistoryView(
+                service: fake,
+                clock: () => now,
+                openUrl: (url) async {
+                  opened.add(url);
+                  return true;
+                },
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      return opened;
+    }
+
+    testWidgets('opens the Billplz page for the held booking', (tester) async {
+      final fake = PayFake(
+        () => [order(pending)],
+        (_) async => 'https://www.billplz-sandbox.com/bills/abc',
+      );
+      final opened = await pumpPay(tester, fake);
+
+      expect(find.text('Pay RM6.00 now'), findsOneWidget);
+      await tester.tap(find.byKey(payKey));
+      await tester.pumpAndSettle();
+
+      expect(fake.paidIds, ['b-pending_payment-2026-11-25']);
+      expect(opened, [Uri.parse('https://www.billplz-sandbox.com/bills/abc')]);
+      expect(find.textContaining('Payment page opened'), findsOneWidget);
+    });
+
+    testWidgets('shows the server message and reloads when it fails', (
+      tester,
+    ) async {
+      final fake = PayFake(
+        () => [order(pending)],
+        (_) async => throw const PaymentException(
+          'Payment window has expired. Please check out again.',
+        ),
+      );
+      final opened = await pumpPay(tester, fake);
+
+      await tester.tap(find.byKey(payKey));
+      await tester.pumpAndSettle();
+
+      expect(opened, isEmpty);
+      expect(
+        find.text('Payment window has expired. Please check out again.'),
+        findsOneWidget,
+      );
+      expect(fake.calls, 2);
+    });
+
+    testWidgets('check status reloads the bookings', (tester) async {
+      final fake = PayFake(() => [order(pending)], (_) async => 'x');
+      await pumpPay(tester, fake);
+
+      await tester.tap(
+        find.byKey(const ValueKey('check-b-pending_payment-2026-11-25')),
+      );
+      await tester.pumpAndSettle();
+      expect(fake.calls, 2);
+    });
+
+    testWidgets('no pay button without the payment backend', (tester) async {
+      final fake = HistoryFake(() => [order(pending)]);
+      await pumpPay(tester, fake);
+      expect(find.byKey(payKey), findsNothing);
+      expect(
+        find.textContaining('Online payment is not set up'),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('paid bookings have no pay button', (tester) async {
+      final fake = PayFake(() => [order(row())], (_) async => 'x');
+      await pumpPay(tester, fake);
+      expect(find.textContaining('Pay RM'), findsNothing);
     });
   });
 }
