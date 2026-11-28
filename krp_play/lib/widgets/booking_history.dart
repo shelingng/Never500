@@ -8,9 +8,13 @@ import '../services/booking_service.dart';
 // the same on every device. Used by Profile > My bookings and Booking Records.
 
 const _green = Color(0xFF1A332C);
+const _darkGreen = Color(0xFF103B2B);
 const _lime = Color(0xFFC5F84B);
 const _muted = Color(0xFF66756D);
 const _divider = Color(0xFFE2E9E4);
+const _softBg = Color(0xFFF5F8F6);
+
+const _weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
 class BookingHistoryView extends StatefulWidget {
   final BookingService? service;
@@ -107,47 +111,13 @@ class _BookingHistoryViewState extends State<BookingHistoryView> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(
-              // Wraps on narrow screens so every tab stays visible.
-              child: Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  for (final group in OrderGroup.values)
-                    ChoiceChip(
-                      label: Text(
-                        '${_groupTitle(group)} '
-                        '(${orders.where((o) => o.groupAt(now) == group).length})',
-                      ),
-                      selected: selected == group,
-                      selectedColor: _lime,
-                      backgroundColor: Colors.white,
-                      side: const BorderSide(color: _divider),
-                      labelStyle: TextStyle(
-                        color: _green,
-                        fontWeight: selected == group
-                            ? FontWeight.bold
-                            : FontWeight.normal,
-                      ),
-                      onSelected: (_) => setState(() => _selected = group),
-                    ),
-                ],
-              ),
-            ),
-            IconButton(
-              tooltip: 'Refresh',
-              onPressed: _load,
-              icon: const Icon(Icons.refresh, color: _green),
-            ),
-          ],
-        ),
-        const SizedBox(height: 12),
+        _header(orders, now),
+        const SizedBox(height: 14),
+        _groupTiles(orders, now, selected),
+        const SizedBox(height: 16),
         if (shown.isEmpty)
           _message(
-            Icons.calendar_month_outlined,
+            _groupIcon(selected),
             _emptyTitle(selected),
             _emptySubtitle(selected),
           )
@@ -157,9 +127,204 @@ class _BookingHistoryViewState extends State<BookingHistoryView> {
     );
   }
 
+  // ---------- Header ----------
+
+  Widget _header(List<BookingOrder> orders, DateTime now) {
+    final next = _nextSession(orders, now);
+    return Container(
+      padding: const EdgeInsets.fromLTRB(18, 16, 8, 18),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [_darkGreen, Color(0xFF1F5A41)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'NEXT SESSION',
+                  style: TextStyle(
+                    color: _lime,
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 1.2,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                if (next == null) ...[
+                  const Text(
+                    'Nothing booked yet',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  const Text(
+                    'Your next paid session will show here.',
+                    style: TextStyle(color: Colors.white70, fontSize: 13),
+                  ),
+                ] else ...[
+                  Row(
+                    children: [
+                      Icon(
+                        _facilityIcon(next.facilityName),
+                        color: Colors.white,
+                        size: 20,
+                      ),
+                      const SizedBox(width: 8),
+                      Flexible(
+                        child: Text(
+                          next.facilityName,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    '${_dayLabel(next.date)} · ${next.interval}',
+                    style: const TextStyle(color: Colors.white70, fontSize: 13),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          IconButton(
+            tooltip: 'Refresh',
+            onPressed: _load,
+            icon: const Icon(Icons.refresh, color: Colors.white),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Earliest paid session that has not ended yet.
+  OrderSession? _nextSession(List<BookingOrder> orders, DateTime now) {
+    OrderSession? next;
+    for (final order in orders) {
+      if (order.groupAt(now) != OrderGroup.upcoming) continue;
+      for (final s in order.sessions) {
+        if (s.isCancelled || !s.endsAt.isAfter(now.toUtc())) continue;
+        if (next == null || s.startsAt.isBefore(next.startsAt)) next = s;
+      }
+    }
+    return next;
+  }
+
+  // ---------- Filter tiles ----------
+
+  Widget _groupTiles(
+    List<BookingOrder> orders,
+    DateTime now,
+    OrderGroup selected,
+  ) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        const gap = 10.0;
+        final perRow = constraints.maxWidth >= 560 ? 4 : 2;
+        final width = (constraints.maxWidth - gap * (perRow - 1)) / perRow;
+        return Wrap(
+          spacing: gap,
+          runSpacing: gap,
+          children: [
+            for (final group in OrderGroup.values)
+              SizedBox(
+                width: width,
+                child: _groupTile(
+                  group,
+                  orders.where((o) => o.groupAt(now) == group).length,
+                  selected == group,
+                ),
+              ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _groupTile(OrderGroup group, int count, bool isSelected) {
+    final (tint, accent) = _badgeColors(group);
+    return Material(
+      key: ValueKey('tab-${group.name}'),
+      color: isSelected ? _green : Colors.white,
+      borderRadius: BorderRadius.circular(14),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: () => setState(() => _selected = group),
+        child: Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: isSelected ? _green : _divider),
+          ),
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: isSelected ? _lime : tint,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(
+                  _groupIcon(group),
+                  size: 18,
+                  color: isSelected ? _green : accent,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '$count',
+                      style: TextStyle(
+                        color: isSelected ? Colors.white : _green,
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    Text(
+                      _groupTitle(group),
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: isSelected ? Colors.white70 : _muted,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ---------- Labels ----------
+
   DateTime _firstStart(BookingOrder order) => order.sessions.isEmpty
       ? (order.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0))
       : order.sessions.first.startsAt;
+
+  String _dayLabel(DateTime date) =>
+      '${_weekdays[date.weekday - 1]}, ${formatKlDate(date)}';
 
   String _groupTitle(OrderGroup group) => switch (group) {
     OrderGroup.upcoming => 'Upcoming',
@@ -167,6 +332,25 @@ class _BookingHistoryViewState extends State<BookingHistoryView> {
     OrderGroup.past => 'Past',
     OrderGroup.cancelled => 'Cancelled',
   };
+
+  IconData _groupIcon(OrderGroup group) => switch (group) {
+    OrderGroup.upcoming => Icons.event_available,
+    OrderGroup.pending => Icons.hourglass_top,
+    OrderGroup.past => Icons.history,
+    OrderGroup.cancelled => Icons.event_busy,
+  };
+
+  IconData _facilityIcon(String name) {
+    final n = name.toLowerCase();
+    if (n.contains('badminton')) return Icons.sports_tennis;
+    if (n.contains('ping pong') || n.contains('table tennis')) {
+      return Icons.sports_handball;
+    }
+    if (n.contains('snooker')) return Icons.sports_bar;
+    if (n.contains('dart')) return Icons.adjust;
+    if (n.contains('gym')) return Icons.fitness_center;
+    return Icons.sports;
+  }
 
   String _emptyTitle(OrderGroup group) => switch (group) {
     OrderGroup.upcoming => 'No upcoming bookings',
@@ -191,141 +375,319 @@ class _BookingHistoryViewState extends State<BookingHistoryView> {
     OrderGroup.cancelled => (const Color(0xFFFDECEC), const Color(0xFFC62828)),
   };
 
+  // ---------- Booking card ----------
+
   Widget _orderCard(BookingOrder order, DateTime now) {
     final group = order.groupAt(now);
     final (badgeBg, badgeFg) = _badgeColors(group);
-    final payment = order.settledPayment;
+    final facilities = {for (final s in order.sessions) s.facilityName};
+    final title = facilities.isEmpty
+        ? 'Booking'
+        : facilities.length == 1
+        ? facilities.first
+        : '${facilities.length} facilities';
+    final firstDate = order.sessions.isEmpty ? null : order.sessions.first.date;
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(16),
+      margin: const EdgeInsets.only(bottom: 14),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(16),
         border: Border.all(color: _divider),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x0F000000),
+            blurRadius: 10,
+            offset: Offset(0, 3),
+          ),
+        ],
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      clipBehavior: Clip.antiAlias,
+      child: IntrinsicHeight(
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Container(width: 5, color: badgeFg),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Title row: icon, facility, date, amount and status.
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: badgeBg,
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Icon(
+                            facilities.length == 1
+                                ? _facilityIcon(facilities.first)
+                                : Icons.sports,
+                            color: badgeFg,
+                            size: 22,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                title,
+                                style: const TextStyle(
+                                  color: _green,
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              const SizedBox(height: 3),
+                              Wrap(
+                                spacing: 6,
+                                children: [
+                                  if (firstDate != null)
+                                    Text(
+                                      _dayLabel(firstDate),
+                                      style: const TextStyle(
+                                        color: _muted,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  if (firstDate != null)
+                                    const Text(
+                                      '·',
+                                      style: TextStyle(color: _muted),
+                                    ),
+                                  Text(
+                                    order.sessions.length == 1
+                                        ? '1 session'
+                                        : '${order.sessions.length} sessions',
+                                    style: const TextStyle(
+                                      color: _muted,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            Text(
+                              formatRinggit(order.total),
+                              style: const TextStyle(
+                                color: _green,
+                                fontSize: 17,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 4,
+                              ),
+                              decoration: BoxDecoration(
+                                color: badgeBg,
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                              child: Text(
+                                order.statusLabelAt(now),
+                                style: TextStyle(
+                                  color: badgeFg,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+                    // Sessions.
+                    for (final session in order.sessions)
+                      _sessionRow(session, showFacility: facilities.length > 1),
+                    if (order.holdActiveAt(now)) _holdNotice(order),
+                    const SizedBox(height: 6),
+                    const Divider(height: 18, color: _divider),
+                    _footer(order, now),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _sessionRow(OrderSession session, {required bool showFacility}) {
+    final cancelled = session.isCancelled;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+      decoration: BoxDecoration(
+        color: _softBg,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Row(
         children: [
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 4,
-                ),
-                decoration: BoxDecoration(
-                  color: badgeBg,
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Text(
-                  order.statusLabelAt(now),
+          Icon(
+            Icons.schedule,
+            size: 16,
+            color: cancelled ? const Color(0xFFC62828) : _green,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  showFacility
+                      ? '${session.facilityName} · ${session.interval}'
+                      : session.interval,
                   style: TextStyle(
-                    color: badgeFg,
-                    fontSize: 12,
-                    fontWeight: FontWeight.bold,
+                    color: _green,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    decoration: cancelled ? TextDecoration.lineThrough : null,
                   ),
                 ),
-              ),
-              const Spacer(),
-              Text(
-                formatRinggit(order.total),
-                style: const TextStyle(
-                  color: _green,
-                  fontSize: 17,
-                  fontWeight: FontWeight.bold,
+                Text(
+                  '${_dayLabel(session.date)} · ${session.sessionStatusLabel}',
+                  style: TextStyle(
+                    color: cancelled ? const Color(0xFFC62828) : _muted,
+                    fontSize: 11,
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
-          const SizedBox(height: 10),
-          InkWell(
+          Text(
+            formatRinggit(session.price),
+            style: const TextStyle(
+              color: _green,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _holdNotice(BookingOrder order) => Container(
+    margin: const EdgeInsets.only(top: 4),
+    padding: const EdgeInsets.all(10),
+    decoration: BoxDecoration(
+      color: const Color(0xFFFFF8E6),
+      borderRadius: BorderRadius.circular(10),
+      border: Border.all(color: const Color(0xFFF3DFA8)),
+    ),
+    child: Row(
+      children: [
+        const Icon(Icons.timer_outlined, size: 18, color: Color(0xFF8A6100)),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            'Not paid yet. Slots are held until '
+            '${formatKlInstant(order.paymentDeadline!)}.',
+            style: const TextStyle(color: Color(0xFF8A6100), fontSize: 12),
+          ),
+        ),
+      ],
+    ),
+  );
+
+  Widget _footer(BookingOrder order, DateTime now) {
+    return Wrap(
+      spacing: 12,
+      runSpacing: 8,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      alignment: WrapAlignment.spaceBetween,
+      children: [
+        Tooltip(
+          message: 'Tap to copy the full reference',
+          child: InkWell(
+            borderRadius: BorderRadius.circular(8),
             onTap: () {
               Clipboard.setData(ClipboardData(text: order.reference));
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(content: Text('Booking reference copied')),
               );
             },
-            child: Text(
-              order.reference,
-              style: const TextStyle(
-                color: _muted,
-                fontSize: 11,
-                decoration: TextDecoration.underline,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: _softBg,
+                borderRadius: BorderRadius.circular(8),
               ),
-            ),
-          ),
-          const SizedBox(height: 10),
-          Text(
-            order.sessions.length == 1
-                ? '1 session'
-                : '${order.sessions.length} sessions',
-            style: const TextStyle(color: _muted, fontSize: 12),
-          ),
-          const SizedBox(height: 4),
-          for (final session in order.sessions)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 3),
               child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Icon(Icons.schedule, size: 15, color: _green),
+                  const Icon(Icons.confirmation_number_outlined,
+                      size: 14, color: _muted),
                   const SizedBox(width: 6),
-                  Expanded(
-                    child: Text(
-                      '${session.facilityName} · ${formatKlDate(session.date)} · ${session.interval} · ${session.sessionStatusLabel}',
-                      style: const TextStyle(
-                        color: _green,
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                      ),
+                  Text(
+                    order.shortReference,
+                    style: const TextStyle(
+                      color: _green,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 0.5,
                     ),
                   ),
-                  Text(
-                    formatRinggit(session.price),
-                    style: const TextStyle(color: _muted, fontSize: 12),
-                  ),
+                  const SizedBox(width: 6),
+                  const Icon(Icons.copy, size: 13, color: _muted),
                 ],
               ),
             ),
-          const Divider(height: 22, color: _divider),
-          ..._paymentLines(order, payment, now),
-        ],
-      ),
+          ),
+        ),
+        _paymentSummary(order, now),
+      ],
     );
   }
 
-  List<Widget> _paymentLines(
-    BookingOrder order,
-    OrderPayment? payment,
-    DateTime now,
-  ) {
-    Widget line(String text) => Padding(
-      padding: const EdgeInsets.only(bottom: 2),
-      child: Text(text, style: const TextStyle(color: _muted, fontSize: 12)),
-    );
-
+  Widget _paymentSummary(BookingOrder order, DateTime now) {
+    final payment = order.settledPayment;
+    String text;
+    IconData icon;
     if (payment != null && payment.isDemo) {
-      return [line('Demo payment. No money was charged.')];
+      text = 'Demo payment. No money was charged.';
+      icon = Icons.science_outlined;
+    } else if (payment != null) {
+      text = 'Paid ${formatRinggit(payment.amount)} by ${payment.methodLabel}'
+          '${payment.paidAt != null ? ' · ${formatKlInstant(payment.paidAt!)}' : ''}';
+      icon = Icons.verified_outlined;
+    } else if (order.holdActiveAt(now)) {
+      text = 'Payment pending';
+      icon = Icons.payments_outlined;
+    } else {
+      text = 'No payment received.';
+      icon = Icons.money_off_outlined;
     }
-    if (payment != null) {
-      return [
-        line('Paid ${formatRinggit(payment.amount)} by ${payment.methodLabel}'),
-        if (payment.reference != null)
-          line('Payment ref: ${payment.reference}'),
-        if (payment.paidAt != null)
-          line('Paid at: ${formatKlInstant(payment.paidAt!)}'),
-      ];
-    }
-    if (order.holdActiveAt(now)) {
-      return [
-        line(
-          'Not paid yet. Slots are held until '
-          '${formatKlInstant(order.paymentDeadline!)}.',
+    final row = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 14, color: _muted),
+        const SizedBox(width: 6),
+        Flexible(
+          child: Text(text, style: const TextStyle(color: _muted, fontSize: 12)),
         ),
-      ];
-    }
-    return [line('No payment received.')];
+      ],
+    );
+    final ref = payment?.reference;
+    if (ref == null || payment!.isDemo) return row;
+    return Tooltip(message: 'Payment ref: $ref', child: row);
   }
 
   Widget _message(
@@ -334,16 +696,23 @@ class _BookingHistoryViewState extends State<BookingHistoryView> {
     String subtitle, {
     Widget? action,
   }) => Container(
-    padding: const EdgeInsets.symmetric(vertical: 28, horizontal: 16),
+    padding: const EdgeInsets.symmetric(vertical: 32, horizontal: 16),
     decoration: BoxDecoration(
       color: Colors.white,
-      borderRadius: BorderRadius.circular(14),
+      borderRadius: BorderRadius.circular(16),
       border: Border.all(color: _divider),
     ),
     child: Column(
       children: [
-        Icon(icon, size: 44, color: _muted),
-        const SizedBox(height: 10),
+        Container(
+          padding: const EdgeInsets.all(14),
+          decoration: const BoxDecoration(
+            color: _softBg,
+            shape: BoxShape.circle,
+          ),
+          child: Icon(icon, size: 34, color: _muted),
+        ),
+        const SizedBox(height: 12),
         Text(
           title,
           textAlign: TextAlign.center,

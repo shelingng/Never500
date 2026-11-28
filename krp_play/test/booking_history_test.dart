@@ -115,6 +115,22 @@ void main() {
     });
   });
 
+  group('short booking reference', () {
+    BookingOrder withRef(String ref) =>
+        order({...row(), 'booking_reference': ref});
+
+    test('KRP-<uuid> is shortened to the first 8 characters', () {
+      final o = withRef('KRP-3f9a2c1b-7d4e-4a8b-9c2d-1e5f6a7b8c9d');
+      expect(o.shortReference, 'KRP-3F9A2C1B');
+      expect(o.reference, 'KRP-3f9a2c1b-7d4e-4a8b-9c2d-1e5f6a7b8c9d');
+    });
+
+    test('other formats are kept as they are', () {
+      expect(withRef('KRP-123456').shortReference, 'KRP-123456');
+      expect(withRef('ADMIN-42').shortReference, 'ADMIN-42');
+    });
+  });
+
   group('details match saved sessions and payment', () {
     test('every session of a combined order is kept, in time order', () {
       final o = order(row(starts: ['22:00:00', '21:00:00']));
@@ -155,6 +171,12 @@ void main() {
   });
 
   group('screen states', () {
+    // The count shown on a filter tile, e.g. "1" on Upcoming.
+    Finder tabCount(OrderGroup group, [int count = 1]) => find.descendant(
+      of: find.byKey(ValueKey('tab-${group.name}')),
+      matching: find.text('$count'),
+    );
+
     Future<void> pump(WidgetTester tester, HistoryFake fake) =>
         tester.pumpWidget(
           MaterialApp(
@@ -178,11 +200,34 @@ void main() {
         order(row(starts: ['21:00:00', '22:00:00'])),
       ]);
       await tester.pumpAndSettle();
-      expect(find.text('Upcoming (1)'), findsOneWidget);
+      expect(tabCount(OrderGroup.upcoming), findsOneWidget);
       expect(find.text('Paid & confirmed'), findsOneWidget);
       expect(find.text('2 sessions'), findsOneWidget);
-      expect(find.textContaining('9:00 PM - 10:00 PM'), findsOneWidget);
-      expect(find.textContaining('10:00 PM - 11:00 PM'), findsOneWidget);
+      expect(find.text('9:00 PM - 10:00 PM'), findsOneWidget);
+      expect(find.text('10:00 PM - 11:00 PM'), findsOneWidget);
+      // Header shows the earliest session still to come.
+      expect(find.text('NEXT SESSION'), findsOneWidget);
+      expect(find.text('Wed, 25 Nov 2026 · 9:00 PM - 10:00 PM'), findsOneWidget);
+      // Card shows the short reference, not the full one.
+      expect(find.text('KRP-confirmed-2026-11-25'), findsOneWidget);
+    });
+
+    testWidgets('long reference is shortened on the card', (tester) async {
+      final fake = HistoryFake(
+        () => [
+          order({
+            ...row(),
+            'booking_reference': 'KRP-3f9a2c1b-7d4e-4a8b-9c2d-1e5f6a7b8c9d',
+          }),
+        ],
+      );
+      await pump(tester, fake);
+      await tester.pumpAndSettle();
+      expect(find.text('KRP-3F9A2C1B'), findsOneWidget);
+      expect(
+        find.text('KRP-3f9a2c1b-7d4e-4a8b-9c2d-1e5f6a7b8c9d'),
+        findsNothing,
+      );
     });
 
     testWidgets('shows an error with a working retry', (tester) async {
@@ -217,12 +262,12 @@ void main() {
       expect(find.text('Awaiting payment'), findsOneWidget);
       expect(find.textContaining('Slots are held until'), findsOneWidget);
 
-      await tester.tap(find.text('Cancelled (1)'));
+      await tester.tap(find.byKey(const ValueKey('tab-cancelled')));
       await tester.pumpAndSettle();
       expect(find.text('Expired - not paid'), findsOneWidget);
       expect(find.text('Awaiting payment'), findsNothing);
 
-      await tester.tap(find.text('Past (0)'));
+      await tester.tap(find.byKey(const ValueKey('tab-past')));
       await tester.pumpAndSettle();
       expect(find.text('No past bookings'), findsOneWidget);
     });
